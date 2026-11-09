@@ -620,6 +620,21 @@ def build_fluid_missing_mesh_frame(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+def build_fluid_mislabeled_mesh(outdir):
+    """Adversarial (R10): delete the last mesh frame, then drop a wrongly-named
+    data file into mesh/. The component-specific matcher must ignore it, so the
+    mesh sub-cache is still missing a frame -> #18 FAIL."""
+    blend = _make_fluid_blend(outdir, use_mesh=True)
+    mesh = os.path.join(outdir, "fluidcache", "mesh")
+    data = os.path.join(outdir, "fluidcache", "data")
+    mesh_files = sorted(os.listdir(mesh))
+    os.remove(os.path.join(mesh, mesh_files[-1]))          # remove a real mesh frame
+    data_files = sorted(f for f in os.listdir(data) if f.endswith(".vdb"))
+    shutil.copy(os.path.join(data, data_files[-1]),
+                os.path.join(mesh, data_files[-1]))         # misplace a data file
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
 def build_22_fail(outdir):
     reset()
     sc = bpy.context.scene

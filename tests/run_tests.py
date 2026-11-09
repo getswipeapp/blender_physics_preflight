@@ -96,6 +96,7 @@ CASES = [
     ("HS fluid baked (pass)", 18, fixtures.build_fluid_pass, True, {Status.PASS}),
     ("HS fluid missing data frame (fail)", 18, fixtures.build_fluid_missing_data_frame, True, {Status.FAIL}),
     ("HS fluid missing mesh frame (fail)", 18, fixtures.build_fluid_missing_mesh_frame, True, {Status.FAIL}),
+    ("HS fluid mislabeled data-in-mesh (fail)", 18, fixtures.build_fluid_mislabeled_mesh, True, {Status.FAIL}),
 ]
 
 
@@ -225,7 +226,40 @@ def gn_unit_tests():
     got = ci.cache_status(e).state
     out.append(("gn blobs missing -> INCOMPLETE", got == ci.V_INCOMPLETE,
                 got, ci.V_INCOMPLETE))
+
+    # R09: a GN disk bake whose files are all present is still UNVERIFIABLE
+    # (UNKNOWN), never a confident COMPLETE — we can't prove blob integrity.
+    e2 = ci.CacheEntry("Obj", "Geometry Nodes", "gn")
+    e2.baked_determinable = True
+    e2.file_check_applicable = True
+    e2.cache_dir = "/tmp/physpf_gn"
+    e2.frames_expected = [1, 2, 3]
+    e2.frames_present = {1, 2, 3}
+    e2.baked_flag = True
+    e2.certifiable = False
+    got2 = ci.cache_status(e2).state
+    out.append(("gn disk present -> UNVERIFIABLE (can't certify)",
+                got2 == ci.V_UNVERIFIABLE, got2, ci.V_UNVERIFIABLE))
     return out
+
+
+def fluid_matcher_unit_tests():
+    """R10: each fluid sub-cache matcher accepts only ITS component's files, so
+    a file from one component can't be counted inside another's folder."""
+    from physics_preflight import cache_inspect as ci
+    rx = ci._FLUID_COMPONENT_RE
+    checks = [
+        ("data accepts fluid_data", bool(rx["data"].match("fluid_data_0001.vdb")), True),
+        ("mesh accepts fluid_mesh", bool(rx["mesh"].match("fluid_mesh_0001.bobj.gz")), True),
+        ("noise accepts fluid_noise", bool(rx["noise"].match("fluid_noise_0001.vdb")), True),
+        ("particles accepts fluid_particles", bool(rx["particles"].match("fluid_particles_0001.vdb")), True),
+        ("mesh rejects a data file", bool(rx["mesh"].match("fluid_data_0001.vdb")), False),
+        ("data rejects a mesh file", bool(rx["data"].match("fluid_mesh_0001.bobj.gz")), False),
+        ("data rejects unrelated file", bool(rx["data"].match("unrelated_0001.vdb")), False),
+        ("noise rejects a data file", bool(rx["noise"].match("fluid_data_0001.vdb")), False),
+    ]
+    return [("fluid matcher: %s" % label, got == expect, got, expect)
+            for label, got, expect in checks]
 
 
 def readonly_tests():
@@ -329,7 +363,7 @@ def main():
 
     # ---- verdict + GN + read-only unit tests (fast) ------------------------
     for label, ok, got, expect in (verdict_unit_tests() + gn_unit_tests()
-                                   + readonly_tests()):
+                                   + fluid_matcher_unit_tests() + readonly_tests()):
         if ok:
             passed += 1
             print("  PASS  unit: %s  -> %s" % (label, got))
@@ -340,7 +374,8 @@ def main():
             fails.append(msg)
 
     total = (len(CASES) + len(CACHE_REGRESSION) + len(verdict_unit_tests())
-             + len(gn_unit_tests()) + len(readonly_tests()))
+             + len(gn_unit_tests()) + len(fluid_matcher_unit_tests())
+             + len(readonly_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

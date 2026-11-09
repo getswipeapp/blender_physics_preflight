@@ -139,6 +139,8 @@ class CacheEntry:
         self.time_scale = None            # rbw time scale, for #23
         self.components_missing = []      # fluid sub-caches not found (mesh/noise)
         self.memory = False               # cache lives inside the .blend
+        self.certifiable = True           # False: files visible but integrity
+        #                                   can't be proven (GN disk blob data)
 
 
 # The single authoritative verdict every cache check reads from.
@@ -202,6 +204,13 @@ def cache_status(e):
     if unreadable:
         return CacheVerdict(V_UNREADABLE, [], [], sorted(unreadable),
                             present, required, "")
+    if not getattr(e, "certifiable", True):
+        # Files cover the range, but we can't prove the referenced internal data
+        # is intact (GN disk bakes reference blob files we can't validate from
+        # Python). Honest answer: UNKNOWN, never a confident COMPLETE. (R09)
+        return CacheVerdict(V_UNVERIFIABLE, [], [], [], present, required,
+                            "bake files are present but their internal data "
+                            "can't be fully verified")
     return CacheVerdict(V_COMPLETE, [], [], [], present, required, "")
 
 
@@ -324,23 +333,28 @@ def inspect_rigidbody_world(scene):
 
 # ------------------------------------------------------------- fluid --------
 
-# A real Mantaflow sub-cache file is fluid_<component>_NNNN.<ext> (verified on
-# 5.2.3: fluid_data_0001.vdb, fluid_mesh_0001.bobj.gz, etc). Requiring the
-# "fluid_" prefix stops an unrelated file like "export_0001.vdb" dropped in the
-# folder from being counted as cache data.
-_FLUID_RE = re.compile(
-    r"^fluid_[a-z0-9_]*_(\d{4})\.(uni|vdb|bobj\.gz|bobj|b3d|raw)$",
-    re.IGNORECASE)
+# Each Mantaflow sub-cache has a COMPONENT-SPECIFIC filename, verified against
+# real 5.2.3 bakes: fluid_data_NNNN.vdb, fluid_mesh_NNNN.bobj.gz,
+# fluid_noise_NNNN.vdb, fluid_particles_NNNN.vdb. Matching per component stops a
+# file from one component (e.g. a data file sitting in mesh/) from being counted
+# as another component's frame (R10).
+_FLUID_COMPONENT_RE = {
+    "data": re.compile(r"^fluid_data_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
+    "mesh": re.compile(r"^fluid_mesh_(\d{4})\.(bobj\.gz|bobj|vdb)$", re.IGNORECASE),
+    "noise": re.compile(r"^fluid_noise_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
+    "particles": re.compile(r"^fluid_particles_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
+}
 
 
-def _scan_fluid_dir(data_dir):
-    """Scan one Mantaflow sub-cache directory. Returns (present, empty,
-    unreadable) restricted to recognised cache files."""
+def _scan_fluid_dir(data_dir, component):
+    """Scan one Mantaflow sub-cache directory for THAT component's files only.
+    Returns (present, empty, unreadable)."""
     present, empty, unreadable = set(), set(), set()
-    if not data_dir or not os.path.isdir(data_dir):
+    rx = _FLUID_COMPONENT_RE.get(component)
+    if rx is None or not data_dir or not os.path.isdir(data_dir):
         return present, empty, unreadable
     for fn in os.listdir(data_dir):
-        m = _FLUID_RE.search(fn)
+        m = rx.match(fn)
         if not m:
             continue
         fr = int(m.group(1))
@@ -379,7 +393,7 @@ def inspect_fluid_domain(obj, mod, scene):
 
     if e.cache_dir and e.file_check_applicable and not e.replay:
         data_present, data_empty, data_unread = _scan_fluid_dir(
-            os.path.join(e.cache_dir, "data"))
+            os.path.join(e.cache_dir, "data"), "data")
         e.frames_present = data_present
         e.frames_empty = data_empty
         e.frames_unreadable = data_unread
@@ -394,7 +408,8 @@ def inspect_fluid_domain(obj, mod, scene):
                                    ("particles", use_particles)):
             if not enabled:
                 continue
-            cp, ce_empty, cu = _scan_fluid_dir(os.path.join(e.cache_dir, comp_name))
+            cp, ce_empty, cu = _scan_fluid_dir(
+                os.path.join(e.cache_dir, comp_name), comp_name)
             gap = required - cp
             if gap:
                 e.components_missing.append(
@@ -456,6 +471,9 @@ def inspect_gn_bakes(obj, mod, scene):
         use_custom = bool(getattr(b, "use_custom_path", False))
         raw = (getattr(b, "directory", "") or mod_raw) if use_custom else mod_raw
         e.uses_disk = True
+        # We can see the meta frames and that blobs/ exists, but not prove the
+        # referenced blob data is intact -> never certify COMPLETE (R09).
+        e.certifiable = False
         e.raw_path = raw
         base_dir = _abspath(raw) if raw else None
         bake_id = getattr(b, "bake_id", None)

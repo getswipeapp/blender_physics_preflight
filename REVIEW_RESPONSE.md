@@ -120,3 +120,21 @@ run_all_versions). Two findings were genuinely still present and are fixed here:
 | Fluid particle sub-cache | not checked | **Added.** Liquid spray/foam/bubble/tracer particle caches are now verified per-frame like mesh/noise. |
 
 Test suite: **81/81 on Blender 5.2.3.**
+
+---
+
+# Re-review v4 responses (commit eb6b442 → this commit)
+
+Round 4 confirmed the prior fixes on the correct commit and found two more.
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| **R09** | GN blob check only required `blobs/` to be non-empty — not real verification | **Fixed.** A GN *disk* bake is now never certified COMPLETE: we can't prove blob-data integrity from Python, so a bake whose files are all present reports **UNKNOWN** (`certifiable=False` → UNVERIFIABLE), while clearly-broken cases (missing meta frames, absent `blobs/`) still FAIL. Unit-tested. |
+| **R10** | Fluid matcher wasn't component-specific (a data file could count in `mesh/`) | **Fixed.** Each sub-cache has its own matcher (`fluid_data_`, `fluid_mesh_`, `fluid_noise_`, `fluid_particles_`), verified against real 5.2.3 bakes. Unit tests plus an **adversarial integration fixture**: a `fluid_data` file copied into `mesh/` after deleting a real mesh frame does NOT fill the gap → #18 FAIL. |
+
+Test suite: **91/91 on Blender 5.2.3** (added the mislabeled-file fixture, 8 fluid-matcher unit tests, and the GN-disk UNVERIFIABLE test).
+
+## Still outstanding (runtime/other-version, not code defects)
+- Headless runs on Blender 4.2/4.5/5.0; a live GN disk-bake integration test
+  (its logic is unit-tested; GN disk now reports UNKNOWN regardless);
+  per-fixture exact-status assertions; GUI acceptance; Windows paths.

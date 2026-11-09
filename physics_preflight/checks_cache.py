@@ -83,15 +83,24 @@ def c17_baked(ctx, mk):
                               object_name=name,
                               hint="Open the bake panel to confirm, or bake to "
                                    "disk."))
-            elif e.baked_flag:
-                out.append(mk(Status.UNKNOWN,
-                              "%s reports baked, but files can't be verified "
-                              "(save the file, then re-scan)." % e.system,
-                              object_name=name))
+            elif not e.file_check_applicable:
+                if e.baked_flag:
+                    out.append(mk(Status.UNKNOWN,
+                                  "%s reports baked, but files can't be verified "
+                                  "(save the file, then re-scan)." % e.system,
+                                  object_name=name))
+                else:
+                    out.append(mk(Status.WARNING,
+                                  "%s is not baked." % e.system, object_name=name,
+                                  hint="Bake the simulation before rendering."))
             else:
-                out.append(mk(Status.WARNING,
-                              "%s is not baked." % e.system, object_name=name,
-                              hint="Bake the simulation before rendering."))
+                # files are visible but integrity can't be proven (GN disk bake)
+                out.append(mk(Status.UNKNOWN,
+                              "%s: %s." % (e.system,
+                                           v.note or "the bake can't be fully "
+                                           "verified from Python"),
+                              object_name=name,
+                              hint="Open the bake panel to confirm it's current."))
         elif s == ci.V_COMPLETE:
             if e.baked_flag:
                 out.append(mk(Status.PASS,
@@ -167,10 +176,17 @@ def c18_files_present(ctx, mk):
                 out.append(mk(Status.UNKNOWN,
                               "Packed Geometry Nodes bake — no files to verify.",
                               object_name=name))
-            else:
+            elif not e.file_check_applicable or e.cache_dir is None:
                 out.append(mk(Status.UNKNOWN,
                               "%s cache location could not be resolved." % e.system,
                               object_name=name))
+            else:
+                out.append(mk(Status.UNKNOWN,
+                              "%s on-disk bake is present, but %s." %
+                              (e.system, v.note or "its data can't be fully "
+                               "verified from Python"),
+                              object_name=name,
+                              hint="Open the bake panel to confirm it's current."))
         elif s == ci.V_COMPLETE:
             out.append(mk(Status.PASS,
                           "All %d expected %s cache files exist and are non-empty."
