@@ -480,6 +480,146 @@ def build_F01_missing_multi_tail(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+# ---- heavy-sim integration fixtures (real bakes) ---------------------------
+
+def _delete_point_frame(cachedir, which="last"):
+    """Delete the first/last .bphys frame file in a blendcache dir, whatever the
+    prefix. Returns the frame deleted, or None."""
+    if not os.path.isdir(cachedir):
+        return None
+    files = [f for f in os.listdir(cachedir) if f.endswith(".bphys")]
+    if not files:
+        return None
+
+    def frame_of(f):
+        try:
+            return int(f.rsplit("_", 2)[1])
+        except Exception:
+            return -1
+    files.sort(key=frame_of)
+    target = files[0] if which == "first" else files[-1]
+    os.remove(os.path.join(cachedir, target))
+    return frame_of(target)
+
+
+def _make_softbody_blend(outdir, frame_end=8):
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_ico_sphere_add(location=(0, 0, 3))
+    o = bpy.context.active_object
+    o.name = "Soft"
+    m = o.modifiers.new("Softbody", "SOFT_BODY")
+    pc = m.point_cache
+    pc.frame_start, pc.frame_end = 1, frame_end
+    blend = os.path.join(outdir, "soft.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    pc.use_disk_cache = True
+    _bake_point_cache(pc, o)
+    bpy.ops.wm.save_mainfile()
+    return blend
+
+
+def build_softbody_pass(outdir):
+    _make_softbody_blend(outdir)
+
+
+def build_softbody_missing_tail(outdir):
+    blend = _make_softbody_blend(outdir)
+    _delete_point_frame(os.path.join(outdir, "blendcache_soft"), "last")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def _make_particle_blend(outdir, frame_end=8):
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_plane_add(size=4)
+    o = bpy.context.active_object
+    o.name = "Emitter"
+    with bpy.context.temp_override(active_object=o, object=o, selected_objects=[o]):
+        bpy.ops.object.particle_system_add()
+    psys = o.particle_systems[0]
+    pset = psys.settings
+    pset.count = 50
+    pset.frame_start, pset.frame_end = 1, max(2, frame_end // 2)
+    pset.lifetime = frame_end
+    pc = psys.point_cache
+    pc.frame_start, pc.frame_end = 1, frame_end
+    blend = os.path.join(outdir, "parts.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    pc.use_disk_cache = True
+    with bpy.context.temp_override(point_cache=pc, scene=sc, active_object=o, object=o):
+        bpy.ops.ptcache.bake(bake=True)
+    bpy.ops.wm.save_mainfile()
+    return blend
+
+
+def build_particle_pass(outdir):
+    _make_particle_blend(outdir)
+
+
+def build_particle_missing_tail(outdir):
+    blend = _make_particle_blend(outdir)
+    _delete_point_frame(os.path.join(outdir, "blendcache_parts"), "last")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def _make_fluid_blend(outdir, frame_end=4, use_mesh=True):
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_cube_add(size=4, location=(0, 0, 0))
+    dom = bpy.context.active_object
+    dom.name = "Domain"
+    m = dom.modifiers.new("Fluid", "FLUID")
+    m.fluid_type = "DOMAIN"
+    ds = m.domain_settings
+    ds.domain_type = "LIQUID"
+    ds.resolution_max = 16
+    ds.use_mesh = use_mesh
+    ds.cache_type = "ALL"
+    ds.cache_frame_start, ds.cache_frame_end = 1, frame_end
+    ds.cache_directory = "//fluidcache"
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, location=(0, 0, 1.2))
+    fl = bpy.context.active_object
+    fl.name = "Inflow"
+    f = fl.modifiers.new("Fluid", "FLUID")
+    f.fluid_type = "FLOW"
+    f.flow_settings.flow_type = "LIQUID"
+    f.flow_settings.flow_behavior = "GEOMETRY"
+    blend = os.path.join(outdir, "fluid.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    with bpy.context.temp_override(scene=sc, active_object=dom, object=dom,
+                                   selected_objects=[dom]):
+        bpy.ops.fluid.bake_all()
+    bpy.ops.wm.save_mainfile()
+    return blend
+
+
+def build_fluid_pass(outdir):
+    blend = _make_fluid_blend(outdir)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_fluid_missing_data_frame(outdir):
+    blend = _make_fluid_blend(outdir)
+    data = os.path.join(outdir, "fluidcache", "data")
+    files = sorted(f for f in os.listdir(data) if f.endswith(".vdb"))
+    assert files, "expected baked fluid data files"
+    os.remove(os.path.join(data, files[-1]))  # delete last data frame
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_fluid_missing_mesh_frame(outdir):
+    blend = _make_fluid_blend(outdir, use_mesh=True)
+    mesh = os.path.join(outdir, "fluidcache", "mesh")
+    files = sorted(f for f in os.listdir(mesh))
+    assert files, "expected baked fluid mesh files"
+    os.remove(os.path.join(mesh, files[-1]))  # delete a required mesh frame
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
 def build_22_fail(outdir):
     reset()
     sc = bpy.context.scene

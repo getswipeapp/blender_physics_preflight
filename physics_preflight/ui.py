@@ -103,7 +103,10 @@ class PHYSPF_PT_panel(Panel):
                     h.separator(factor=2.0)
                     h.label(text=it.hint, icon="BLANK1")
         if not drew_any:
-            box.label(text="No issues.", icon="CHECKMARK")
+            # Neutral wording: "nothing to flag" is not the same as "verified
+            # correct" — some checks may simply be N/A or passed-but-hidden.
+            box.label(text="No problems reported (toggle the eye for details).",
+                      icon="INFO")
 
 
 classes = (PHYSPF_PT_panel,)

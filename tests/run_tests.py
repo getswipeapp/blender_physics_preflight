@@ -87,6 +87,15 @@ CASES = [
     ("21 shared cache dir (warn)", 21, fixtures.build_21_fail, True, {Status.WARNING}),
     ("22 absolute cache path (warn)", 22, fixtures.build_22_fail, True, {Status.WARNING}),
     ("23 fps changed after bake (unknown)", 23, fixtures.build_23_fail, True, {Status.UNKNOWN, Status.WARNING}),
+    # heavy-sim integration (real bakes): prove the scanners populate correctly,
+    # not just the decision logic.
+    ("HS soft-body baked (pass)", 18, fixtures.build_softbody_pass, True, {Status.PASS}),
+    ("HS soft-body missing last frame (fail)", 18, fixtures.build_softbody_missing_tail, True, {Status.FAIL}),
+    ("HS particle baked (pass)", 18, fixtures.build_particle_pass, True, {Status.PASS}),
+    ("HS particle missing last frame (fail)", 18, fixtures.build_particle_missing_tail, True, {Status.FAIL}),
+    ("HS fluid baked (pass)", 18, fixtures.build_fluid_pass, True, {Status.PASS}),
+    ("HS fluid missing data frame (fail)", 18, fixtures.build_fluid_missing_data_frame, True, {Status.FAIL}),
+    ("HS fluid missing mesh frame (fail)", 18, fixtures.build_fluid_missing_mesh_frame, True, {Status.FAIL}),
 ]
 
 
@@ -96,12 +105,14 @@ CASES = [
 # (shallow assertions hiding a wrong PASS).
 # (label, builder, {cid: expected_worst_set}, forbid_pass_cids)
 CACHE_REGRESSION = [
-    ("F01 missing LAST frame -> #17/#18/#20 FAIL", fixtures.build_F01_missing_tail,
-     {17: {Status.FAIL}, 18: {Status.FAIL}, 20: {Status.FAIL}}, (17, 18, 20)),
-    ("F01 missing FIRST frame -> #17/#18/#20 FAIL", fixtures.build_F01_missing_head,
-     {17: {Status.FAIL}, 18: {Status.FAIL}, 20: {Status.FAIL}}, (17, 18, 20)),
-    ("F01 missing LAST 3 frames -> #18/#20 FAIL", fixtures.build_F01_missing_multi_tail,
-     {18: {Status.FAIL}, 20: {Status.FAIL}}, (17, 18, 20)),
+    # forbid_pass now includes #19 (R02): an incomplete bake must not get a
+    # green "range covers" tick while #18/#20 are failing.
+    ("F01 missing LAST frame -> no cache PASS", fixtures.build_F01_missing_tail,
+     {17: {Status.FAIL}, 18: {Status.FAIL}, 20: {Status.FAIL}}, (17, 18, 19, 20)),
+    ("F01 missing FIRST frame -> no cache PASS", fixtures.build_F01_missing_head,
+     {17: {Status.FAIL}, 18: {Status.FAIL}, 20: {Status.FAIL}}, (17, 18, 19, 20)),
+    ("F01 missing LAST 3 frames -> no cache PASS", fixtures.build_F01_missing_multi_tail,
+     {18: {Status.FAIL}, 20: {Status.FAIL}}, (17, 18, 19, 20)),
 ]
 
 
@@ -155,6 +166,81 @@ def verdict_unit_tests():
         got = ci.cache_status(e).state
         out.append((label, got == expect, got, expect))
     return out
+
+
+def gn_unit_tests():
+    """Geometry Nodes bake-target resolution (F03/R03). A live GN disk bake is
+    too fragile to script headlessly, so these cover the INHERIT resolution and
+    the blob-missing verdict directly."""
+    from physics_preflight import cache_inspect as ci
+
+    class Fake:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    out = []
+    target_cases = [
+        ("INHERIT falls back to modifier PACKED",
+         Fake(bake_target="INHERIT"), Fake(bake_target="PACKED"), "PACKED"),
+        ("explicit DISK overrides a PACKED modifier",
+         Fake(bake_target="DISK"), Fake(bake_target="PACKED"), "DISK"),
+        ("missing bake target uses modifier DISK",
+         Fake(bake_target=None), Fake(bake_target="DISK"), "DISK"),
+        ("empty bake target uses modifier PACKED",
+         Fake(bake_target=""), Fake(bake_target="PACKED"), "PACKED"),
+    ]
+    for label, bake, mod, expect in target_cases:
+        got = ci._resolve_gn_target(bake, mod)
+        out.append(("gn target: " + label, got == expect, got, expect))
+
+    # Metadata present but blobs/ missing -> not COMPLETE (R03).
+    e = ci.CacheEntry("Obj", "Geometry Nodes", "gn")
+    e.baked_determinable = True
+    e.file_check_applicable = True
+    e.cache_dir = "/tmp/physpf_gn"
+    e.frames_expected = [1, 2, 3]
+    e.frames_present = {1, 2, 3}
+    e.baked_flag = True
+    e.components_missing = ["blob data"]
+    got = ci.cache_status(e).state
+    out.append(("gn blobs missing -> INCOMPLETE", got == ci.V_INCOMPLETE,
+                got, ci.V_INCOMPLETE))
+    return out
+
+
+def readonly_tests():
+    """Scan must not change the scene: selection, active object, current frame
+    or the object set. (Covers the Scan path; Export is a separate explicit
+    action.)"""
+    fixtures.build_03_fail()  # two rigid bodies
+    sc = bpy.context.scene
+    for o in list(bpy.context.selected_objects):
+        o.select_set(False)
+    objs = list(sc.objects)
+    if objs:
+        objs[0].select_set(True)
+        bpy.context.view_layer.objects.active = objs[0]
+
+    def snap():
+        return {
+            "sel": sorted(o.name for o in bpy.context.selected_objects),
+            "active": getattr(bpy.context.view_layer.objects.active, "name", None),
+            "frame": sc.frame_current,
+            "names": sorted(o.name for o in sc.objects),
+        }
+    before = snap()
+    engine.run_all(bpy.context)
+    after = snap()
+    return [
+        ("read-only: selection unchanged", before["sel"] == after["sel"],
+         after["sel"], before["sel"]),
+        ("read-only: active object unchanged", before["active"] == after["active"],
+         after["active"], before["active"]),
+        ("read-only: current frame unchanged", before["frame"] == after["frame"],
+         after["frame"], before["frame"]),
+        ("read-only: object set unchanged", before["names"] == after["names"],
+         len(after["names"]), len(before["names"])),
+    ]
 
 
 def main():
@@ -221,18 +307,20 @@ def main():
             print(msg)
             fails.append(msg)
 
-    # ---- verdict unit tests (fast, no bake) --------------------------------
-    for label, ok, got, expect in verdict_unit_tests():
+    # ---- verdict + GN + read-only unit tests (fast) ------------------------
+    for label, ok, got, expect in (verdict_unit_tests() + gn_unit_tests()
+                                   + readonly_tests()):
         if ok:
             passed += 1
-            print("  PASS  verdict: %s  -> %s" % (label, got))
+            print("  PASS  unit: %s  -> %s" % (label, got))
         else:
             failed += 1
-            msg = "  FAIL  verdict: %s  -> got %s, want %s" % (label, got, expect)
+            msg = "  FAIL  unit: %s  -> got %s, want %s" % (label, got, expect)
             print(msg)
             fails.append(msg)
 
-    total = len(CASES) + len(CACHE_REGRESSION) + len(verdict_unit_tests())
+    total = (len(CASES) + len(CACHE_REGRESSION) + len(verdict_unit_tests())
+             + len(gn_unit_tests()) + len(readonly_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

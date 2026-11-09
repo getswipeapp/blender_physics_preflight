@@ -221,6 +221,23 @@ def _point_cache_dir_and_prefix(obj, pc, external):
     return os.path.join(bdir, "blendcache_" + base), prefix, raw
 
 
+def _file_state(path):
+    """Classify an existing file: 'ok' | 'empty' | 'unreadable'. Actually opens
+    the file for a byte, so a non-zero size that Blender can't read still counts
+    as unreadable rather than a silent pass."""
+    try:
+        if os.path.getsize(path) == 0:
+            return "empty"
+    except OSError:
+        return "unreadable"
+    try:
+        with open(path, "rb") as fh:
+            fh.read(1)
+    except OSError:
+        return "unreadable"
+    return "ok"
+
+
 def _scan_point_cache_files(cache_dir, prefix, index, frames):
     present, empty, unreadable = set(), set(), set()
     if not cache_dir or not os.path.isdir(cache_dir):
@@ -230,10 +247,10 @@ def _scan_point_cache_files(cache_dir, prefix, index, frames):
         p = os.path.join(cache_dir, fn)
         if os.path.isfile(p):
             present.add(fr)
-            try:
-                if os.path.getsize(p) == 0:
-                    empty.add(fr)
-            except OSError:
+            st = _file_state(p)
+            if st == "empty":
+                empty.add(fr)
+            elif st == "unreadable":
                 unreadable.add(fr)
     return present, empty, unreadable
 
@@ -307,11 +324,16 @@ def inspect_rigidbody_world(scene):
 
 # ------------------------------------------------------------- fluid --------
 
-# A real Mantaflow cache file is <name>_NNNN.<ext> with a known extension.
-_FLUID_RE = re.compile(r"_(\d{4})\.(uni|vdb|bobj\.gz|bobj|b3d|raw)$", re.IGNORECASE)
+# A real Mantaflow sub-cache file is fluid_<component>_NNNN.<ext> (verified on
+# 5.2.3: fluid_data_0001.vdb, fluid_mesh_0001.bobj.gz, etc). Requiring the
+# "fluid_" prefix stops an unrelated file like "export_0001.vdb" dropped in the
+# folder from being counted as cache data.
+_FLUID_RE = re.compile(
+    r"^fluid_[a-z0-9_]*_(\d{4})\.(uni|vdb|bobj\.gz|bobj|b3d|raw)$",
+    re.IGNORECASE)
 
 
-def _scan_fluid_dir(data_dir, required_frames):
+def _scan_fluid_dir(data_dir):
     """Scan one Mantaflow sub-cache directory. Returns (present, empty,
     unreadable) restricted to recognised cache files."""
     present, empty, unreadable = set(), set(), set()
@@ -323,10 +345,10 @@ def _scan_fluid_dir(data_dir, required_frames):
             continue
         fr = int(m.group(1))
         present.add(fr)
-        try:
-            if os.path.getsize(os.path.join(data_dir, fn)) == 0:
-                empty.add(fr)
-        except OSError:
+        st = _file_state(os.path.join(data_dir, fn))
+        if st == "empty":
+            empty.add(fr)
+        elif st == "unreadable":
             unreadable.add(fr)
     return present, empty, unreadable
 
@@ -356,20 +378,27 @@ def inspect_fluid_domain(obj, mod, scene):
     required = set(e.frames_expected)
 
     if e.cache_dir and e.file_check_applicable and not e.replay:
-        data_dir = os.path.join(e.cache_dir, "data")
-        present, empty, unreadable = _scan_fluid_dir(data_dir, required)
-        e.frames_present, e.frames_empty, e.frames_unreadable = present, empty, unreadable
-        # Required sub-caches depend on enabled features. A liquid mesh or
-        # noise that is switched on but has no files means an incomplete bake.
-        if present:
-            if bool(getattr(ds, "use_mesh", False)):
-                mp, _, _ = _scan_fluid_dir(os.path.join(e.cache_dir, "mesh"), required)
-                if not mp:
-                    e.components_missing.append("mesh")
-            if bool(getattr(ds, "use_noise", False)):
-                npz, _, _ = _scan_fluid_dir(os.path.join(e.cache_dir, "noise"), required)
-                if not npz:
-                    e.components_missing.append("noise")
+        data_present, data_empty, data_unread = _scan_fluid_dir(
+            os.path.join(e.cache_dir, "data"))
+        e.frames_present = data_present
+        e.frames_empty = data_empty
+        e.frames_unreadable = data_unread
+        # Each enabled sub-cache (liquid mesh, noise) must cover the SAME frames,
+        # not merely "have at least one file". A sub-cache that is missing frames
+        # relative to the required range makes the whole bake incomplete (R01).
+        for comp_name, enabled in (("mesh", bool(getattr(ds, "use_mesh", False))),
+                                   ("noise", bool(getattr(ds, "use_noise", False)))):
+            if not enabled:
+                continue
+            cp, ce_empty, cu = _scan_fluid_dir(os.path.join(e.cache_dir, comp_name))
+            gap = required - cp
+            if gap:
+                e.components_missing.append(
+                    "%s (missing %d frame%s)"
+                    % (comp_name, len(gap), "" if len(gap) == 1 else "s"))
+            # a 0-byte/unreadable sub-cache frame is also a defect
+            e.frames_empty |= (ce_empty & data_present)
+            e.frames_unreadable |= (cu & data_present)
     return e
 
 
@@ -443,11 +472,23 @@ def inspect_gn_bakes(obj, mod, scene):
                     if m:
                         fr = int(m.group(1))
                         present.add(fr)
-                        try:
-                            if os.path.getsize(os.path.join(meta, fn)) == 0:
-                                empty.add(fr)
-                        except OSError:
+                        st = _file_state(os.path.join(meta, fn))
+                        if st == "empty":
+                            empty.add(fr)
+                        elif st == "unreadable":
                             unreadable.add(fr)
+            # The meta JSON is only an index; the real data lives in blobs/.
+            # Metadata without blob data is a broken bake (R03).
+            if present:
+                blobs = os.path.join(bdir, "blobs")
+                has_blobs = False
+                if os.path.isdir(blobs):
+                    try:
+                        has_blobs = any(os.scandir(blobs))
+                    except OSError:
+                        has_blobs = False
+                if not has_blobs:
+                    e.components_missing.append("blob data")
         e.frames_present, e.frames_empty, e.frames_unreadable = present, empty, unreadable
         e.baked_flag = bool(present) if e.file_check_applicable else None
         out.append(e)

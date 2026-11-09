@@ -93,9 +93,21 @@ def c17_baked(ctx, mk):
                               "%s is not baked." % e.system, object_name=name,
                               hint="Bake the simulation before rendering."))
         elif s == ci.V_COMPLETE:
-            out.append(mk(Status.PASS,
-                          "%s is baked and all its cache files are on disk."
-                          % e.system, object_name=name))
+            if e.baked_flag:
+                out.append(mk(Status.PASS,
+                              "%s is baked and all its cache files are on disk."
+                              % e.system, object_name=name))
+            else:
+                # Files for the full range exist, but Blender's baked flag is
+                # off — they could be a stale cache from an earlier bake. Don't
+                # assert "baked" on file presence alone.
+                out.append(mk(Status.WARNING,
+                              "%s has a full set of cache files on disk, but "
+                              "Blender's 'baked' flag is off — the cache may be "
+                              "stale or from older settings." % e.system,
+                              object_name=name,
+                              hint="Re-bake to be sure the cache matches the "
+                                   "current simulation."))
         elif s == ci.V_EMPTY:
             out.append(mk(Status.FAIL,
                           "%s is marked baked, but no cache files exist on disk "
@@ -213,8 +225,6 @@ def c19_range_covers(ctx, mk):
         cs, ce = e.cache_range
         ss, se = e.scene_range
         name = e.obj_name
-        # Only meaningful if something is (meant to be) baked.
-        baked_intent = e.baked_flag or e.frames_present
         if cs > ss or ce < se:
             out.append(mk(Status.WARNING,
                           "Bake covers frames %d–%d but the scene renders %d–%d. "
@@ -223,10 +233,23 @@ def c19_range_covers(ctx, mk):
                           object_name=name,
                           hint="Set the cache start/end to match the scene, then "
                                "re-bake."))
-        elif baked_intent:
+            continue
+        # The configured range covers the render range. Only call it PASS when
+        # the cache is actually there in full — otherwise the missing files are
+        # the real story (reported by #18/#20) and #19 must not reassure.
+        v = ci.cache_status(e)
+        if v.state == ci.V_MEMORY:
+            if e.baked_flag:
+                out.append(mk(Status.PASS,
+                              "Bake range %d–%d covers the render range %d–%d."
+                              % (cs, ce, ss, se), object_name=name))
+        elif v.state == ci.V_COMPLETE and e.baked_flag:
             out.append(mk(Status.PASS,
-                          "Bake range %d–%d covers the render range %d–%d."
-                          % (cs, ce, ss, se), object_name=name))
+                          "Bake range %d–%d covers the render range %d–%d and "
+                          "every frame is on disk." % (cs, ce, ss, se),
+                          object_name=name))
+        # INCOMPLETE / EMPTY / stale / UNKNOWN: stay silent here; #18 and #20
+        # carry the failure so #19 never shows a green tick over missing files.
     return out
 
 
@@ -280,11 +303,12 @@ def c21_shared_cache(ctx, mk):
     entries = _caches(ctx)
     buckets = {}
     resolved_any = False
+    unresolved = False
     for e in entries:
-        if e.identity is None:
-            continue
-        # ignore unresolved (None-path) identities
-        if any(p is None for p in e.identity[1:2]):
+        if e.kind not in ("point", "fluid", "gn") or e.memory:
+            continue  # only disk-backed caches can clash on a location
+        if e.identity is None or any(p is None for p in e.identity[1:2]):
+            unresolved = True
             continue
         resolved_any = True
         buckets.setdefault(e.identity, []).append(e)
@@ -297,9 +321,16 @@ def c21_shared_cache(ctx, mk):
                           "silently overwrite the other." % names,
                           hint="Give each simulation its own cache name or "
                                "folder."))
-    if not out and resolved_any:
+    if out:
+        return out
+    if unresolved:
+        return [mk(Status.UNKNOWN,
+                   "Some cache locations couldn't be resolved, so a shared-"
+                   "location clash can't be ruled out (save the file / check "
+                   "external paths).")]
+    if resolved_any:
         return [mk(Status.PASS, "Each simulation uses its own cache location.")]
-    return out
+    return []
 
 
 # -------------------------------------------------------------------- 22 ----
@@ -309,10 +340,12 @@ def c22_portable(ctx, mk):
     entries = _caches(ctx)
     out = []
     checked = False
+    unresolved = False
     for e in entries:
         if e.kind == "rbw" or e.memory:
             continue
         if e.portable is None:
+            unresolved = True
             continue
         checked = True
         name = e.obj_name
@@ -325,10 +358,16 @@ def c22_portable(ctx, mk):
                           object_name=name,
                           hint="Point the cache folder inside the project using "
                                "a relative (//) path."))
-    if not out and checked:
+    if out:
+        return out
+    if unresolved:
+        return [mk(Status.UNKNOWN,
+                   "Some cache paths couldn't be resolved (unsaved file or an "
+                   "external path), so portability can't be confirmed.")]
+    if checked:
         return [mk(Status.PASS, "All cache paths are relative and inside the "
                                 "project folder.")]
-    return out
+    return []
 
 
 # -------------------------------------------------------------------- 23 ----

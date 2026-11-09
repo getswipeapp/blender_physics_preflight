@@ -245,32 +245,41 @@ _TRANSFORM_PATHS = ("location", "rotation_euler", "rotation_quaternion",
 def _iter_action_fcurves(ad):
     """Yield an action's F-Curves across Blender versions.
 
-    Blender 4.2 and earlier expose ``action.fcurves``. Blender 4.4+ moved to
-    slotted actions where the F-Curves live in layer > strip > channelbag.
+    Blender 4.2/4.3 expose ``action.fcurves``. Blender 4.4+ moved to slotted
+    actions where F-Curves live in layer > strip > channelbag, and the legacy
+    ``action.fcurves`` may show only the first slot. So when the slotted
+    representation is present we read it (covering every slot/channelbag) and
+    only fall back to legacy ``fcurves`` when there are no layers or the slotted
+    path yielded nothing. (F13)
     """
     act = ad.action
     if act is None:
         return
+    layers = list(getattr(act, "layers", []) or [])
+    if layers:
+        slot = getattr(ad, "action_slot", None)
+        yielded = False
+        for layer in layers:
+            for strip in getattr(layer, "strips", []):
+                cb = None
+                if slot is not None:
+                    try:
+                        cb = strip.channelbag(slot)
+                    except Exception:
+                        cb = None
+                bags = [cb] if cb is not None else list(getattr(strip, "channelbags", []))
+                for bag in bags:
+                    if bag is None:
+                        continue
+                    for fc in getattr(bag, "fcurves", []):
+                        yielded = True
+                        yield fc
+        if yielded:
+            return
     legacy = getattr(act, "fcurves", None)
     if legacy is not None:
         for fc in legacy:
             yield fc
-        return
-    slot = getattr(ad, "action_slot", None)
-    for layer in getattr(act, "layers", []):
-        for strip in getattr(layer, "strips", []):
-            cb = None
-            if slot is not None:
-                try:
-                    cb = strip.channelbag(slot)
-                except Exception:
-                    cb = None
-            bags = [cb] if cb is not None else list(getattr(strip, "channelbags", []))
-            for bag in bags:
-                if bag is None:
-                    continue
-                for fc in getattr(bag, "fcurves", []):
-                    yield fc
 
 
 def has_transform_animation(obj):

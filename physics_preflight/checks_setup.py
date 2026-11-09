@@ -587,7 +587,8 @@ def c16_fluid_layout(ctx, mk):
     scene = ctx.scene
     out = []
     domains = []
-    flows = []        # genuine FLOW sources (inflow/outflow/geometry)
+    flows = []        # genuine FLOW sources (inflow / geometry) — add fluid
+    outflows = []     # OUTFLOW objects remove fluid; NOT a source
     effectors = []    # EFFECTOR objects (colliders/guides) — NOT a source
     for o in scene.objects:
         for m in o.modifiers:
@@ -596,7 +597,12 @@ def c16_fluid_layout(ctx, mk):
                 if ft == "DOMAIN":
                     domains.append(o)
                 elif ft == "FLOW":
-                    flows.append(o)
+                    behavior = getattr(getattr(m, "flow_settings", None),
+                                       "flow_behavior", "INFLOW")
+                    if behavior == "OUTFLOW":
+                        outflows.append(o)
+                    else:   # INFLOW / GEOMETRY actually add fluid
+                        flows.append(o)
                 elif ft == "EFFECTOR":
                     effectors.append(o)
     if not domains:
@@ -616,13 +622,19 @@ def c16_fluid_layout(ctx, mk):
 
     for dom in domains:
         dmn, dmx = world_aabb(dom)
-        # A domain needs a genuine FLOW source. Effectors alone can't fill it.
+        # A domain needs a genuine FLOW source (inflow/geometry). Outflows and
+        # effectors only remove or deflect fluid — they can't fill the domain.
         if not flows:
-            if effectors:
+            if outflows or effectors:
+                extra = []
+                if outflows:
+                    extra.append("outflow")
+                if effectors:
+                    extra.append("effector")
                 out.append(mk(Status.WARNING,
-                              "Fluid domain has effector object(s) but no Flow "
-                              "source, so nothing is emitted; the simulation will "
-                              "be empty.",
+                              "Fluid domain has only %s object(s) and no inflow/"
+                              "flow source, so nothing is emitted; the simulation "
+                              "will be empty." % " and ".join(extra),
                               object_name=dom.name,
                               hint="Add an Inflow/Flow object inside the domain."))
             else:
@@ -642,11 +654,11 @@ def c16_fluid_layout(ctx, mk):
                               "and won't contribute." % fo.name,
                               object_name=fo.name,
                               hint="Move it inside the domain box."))
-        for eo in effectors:
+        for eo in effectors + outflows:
             if not overlaps_domain(dmn, dmx, eo):
                 out.append(mk(Status.WARNING,
-                              "Effector object '%s' is fully outside the fluid "
-                              "domain and has no effect." % eo.name,
+                              "Fluid object '%s' is fully outside the domain and "
+                              "has no effect." % eo.name,
                               object_name=eo.name,
                               hint="Move it inside the domain box."))
         if not any_flow_inside:

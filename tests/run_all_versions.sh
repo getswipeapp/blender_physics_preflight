@@ -16,11 +16,13 @@ BLENDERS=(
 )
 
 overall=0
+tested=0
 for b in "${BLENDERS[@]}"; do
   if [[ ! -x "$b" ]]; then
     echo "SKIP (not found): $b"
     continue
   fi
+  tested=$((tested + 1))
   echo "======================================================================"
   echo "Running tests with: $b"
   "$b" --version | head -1
@@ -34,4 +36,12 @@ for b in "${BLENDERS[@]}"; do
   fi
 done
 
+# A run that tested zero binaries is a FAILURE, not a pass — otherwise an empty
+# matrix looks green. The release gate should require a result per supported
+# version (currently 4.2, 4.5, 5.0, 5.2).
+if [[ $tested -eq 0 ]]; then
+  echo ">> ERROR: no Blender binaries found — nothing was tested."
+  exit 2
+fi
+echo "Tested $tested Blender binary/binaries."
 exit $overall

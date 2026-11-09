@@ -96,29 +96,22 @@ class PHYSPF_OT_export_report(Operator):
                       "and copy it to the clipboard")
     bl_options = {"REGISTER"}
 
-    _HEADER = "Physics Preflight report"
-
     def execute(self, context):
         results = engine.run_all(context)
         _store_results(context.window_manager, results)
         text = report_mod.build_text_report(results)
-        base = "physics_preflight_report.txt"
-        # Only reuse a text block we created (identified by our header); never
-        # clobber an unrelated text the user happens to have named the same.
-        txt = bpy.data.texts.get(base)
-        if txt is not None and not txt.as_string().startswith(self._HEADER):
-            txt = None
-        if txt is None:
-            txt = bpy.data.texts.new(base)  # Blender uniquifies if name is taken
-        txt.clear()
+        # Always create a fresh, uniquely-named text block. Blender appends
+        # .001/.002 if the base name is taken, so we never overwrite anything the
+        # user has — including an earlier report they may have edited.
+        txt = bpy.data.texts.new("physics_preflight_report.txt")
         txt.write(text)
         try:
             context.window_manager.clipboard = text
         except Exception:
             pass
         self.report({"INFO"},
-                    "Report written to Text '%s' (inside the .blend) and copied "
-                    "to the clipboard" % txt.name)
+                    "Report written to new Text '%s' (inside the .blend) and "
+                    "copied to the clipboard" % txt.name)
         return {"FINISHED"}
 
 
