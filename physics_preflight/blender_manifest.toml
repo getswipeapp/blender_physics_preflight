@@ -1,0 +1,21 @@
+schema_version = "1.0.0"
+
+id = "physics_preflight"
+version = "1.0.0"
+name = "Physics Preflight"
+tagline = "Catch physics & simulation problems before you render"
+maintainer = "getswipeapp <nocaholdings@gmail.com>"
+type = "add-on"
+
+website = "https://github.com/getswipeapp/blender_physics_preflight"
+
+tags = ["Physics", "Pipeline"]
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+# Read-only, offline tool. No network access, no file writes, no telemetry.
+[permissions]

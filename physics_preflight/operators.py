@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Operators: run a scan, jump to an affected object, export the report."""
+import bpy
+from bpy.props import StringProperty, CollectionProperty, BoolProperty, IntProperty
+from bpy.types import Operator, PropertyGroup
+
+from . import engine
+from . import report as report_mod
+
+
+class PHYSPF_ResultItem(PropertyGroup):
+    check_id: IntProperty()
+    check_name: StringProperty()
+    group: StringProperty()
+    status: StringProperty()
+    message: StringProperty()
+    object_name: StringProperty()
+    hint: StringProperty()
+
+
+def _store_results(wm, results):
+    coll = wm.physpf_results
+    coll.clear()
+    for r in results:
+        it = coll.add()
+        it.check_id = r.check_id
+        it.check_name = r.check_name
+        it.group = r.group
+        it.status = r.status
+        it.message = r.message
+        it.object_name = r.object_name or ""
+        it.hint = r.hint or ""
+    wm.physpf_has_run = True
+
+
+class PHYSPF_OT_scan(Operator):
+    bl_idname = "physpf.scan"
+    bl_label = "Scan Scene"
+    bl_description = ("Run all Physics Preflight checks on the current scene "
+                      "(read-only)")
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        results = engine.run_all(context)
+        _store_results(context.window_manager, results)
+        counts = engine.summary_counts(results)
+        self.report(
+            {"INFO"},
+            "Physics Preflight: %d fail, %d warning, %d unknown"
+            % (counts[engine.Status.FAIL], counts[engine.Status.WARNING],
+               counts[engine.Status.UNKNOWN]))
+        return {"FINISHED"}
+
+
+class PHYSPF_OT_select_object(Operator):
+    bl_idname = "physpf.select_object"
+    bl_label = "Select Affected Object"
+    bl_description = "Select this object and make it active in the viewport"
+    bl_options = {"REGISTER", "UNDO"}
+
+    object_name: StringProperty()
+
+    def execute(self, context):
+        obj = context.scene.objects.get(self.object_name)
+        if obj is None:
+            self.report({"WARNING"}, "Object '%s' not found" % self.object_name)
+            return {"CANCELLED"}
+        for o in context.selected_objects:
+            o.select_set(False)
+        try:
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+        except Exception:
+            self.report({"WARNING"}, "Could not select '%s'" % self.object_name)
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class PHYSPF_OT_export_report(Operator):
+    bl_idname = "physpf.export_report"
+    bl_label = "Export Text Report"
+    bl_description = ("Write the report to a Text datablock and copy it to the "
+                      "clipboard")
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        results = engine.run_all(context)
+        _store_results(context.window_manager, results)
+        text = report_mod.build_text_report(results)
+        name = "physics_preflight_report.txt"
+        txt = bpy.data.texts.get(name)
+        if txt is None:
+            txt = bpy.data.texts.new(name)
+        txt.clear()
+        txt.write(text)
+        try:
+            context.window_manager.clipboard = text
+        except Exception:
+            pass
+        self.report({"INFO"}, "Report written to Text '%s' and clipboard" % name)
+        return {"FINISHED"}
+
+
+classes = (
+    PHYSPF_ResultItem,
+    PHYSPF_OT_scan,
+    PHYSPF_OT_select_object,
+    PHYSPF_OT_export_report,
+)
+
+
+def register():
+    for c in classes:
+        bpy.utils.register_class(c)
+    bpy.types.WindowManager.physpf_results = CollectionProperty(type=PHYSPF_ResultItem)
+    bpy.types.WindowManager.physpf_has_run = BoolProperty(default=False)
+    bpy.types.WindowManager.physpf_show_passed = BoolProperty(
+        name="Show Passed", default=False,
+        description="Also show checks that passed or do not apply")
+
+
+def unregister():
+    del bpy.types.WindowManager.physpf_show_passed
+    del bpy.types.WindowManager.physpf_has_run
+    del bpy.types.WindowManager.physpf_results
+    for c in reversed(classes):
+        bpy.utils.unregister_class(c)

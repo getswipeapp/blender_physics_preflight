@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build output
+/dist/
+*.zip
+
+# Blender
+*.blend1
+*.blend2
+blendcache_*/
+
+# Test / scratch
+/tmp/
+.DS_Store
