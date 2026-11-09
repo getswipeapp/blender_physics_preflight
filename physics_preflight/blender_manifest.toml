@@ -17,5 +17,9 @@ license = [
   "SPDX:GPL-3.0-or-later",
 ]
 
-# Read-only, offline tool. No network access, no file writes, no telemetry.
+# Offline tool, no network access and no telemetry. It reads simulation cache
+# files to verify them on disk, and copies the report to the clipboard on
+# request. (Blender requires these to be declared for marketplace review.)
 [permissions]
+files = "Read simulation cache files on disk to verify them"
+clipboard = "Copy the report to the clipboard on export"

@@ -65,12 +65,25 @@ class PHYSPF_OT_select_object(Operator):
         if obj is None:
             self.report({"WARNING"}, "Object '%s' not found" % self.object_name)
             return {"CANCELLED"}
-        for o in context.selected_objects:
-            o.select_set(False)
+        # Remember the current selection so a failure doesn't leave the user
+        # with everything deselected.
+        prev_selected = list(context.selected_objects)
+        prev_active = context.view_layer.objects.active
         try:
+            for o in prev_selected:
+                o.select_set(False)
             obj.select_set(True)
             context.view_layer.objects.active = obj
         except Exception:
+            # restore what we changed
+            try:
+                for o in context.selected_objects:
+                    o.select_set(False)
+                for o in prev_selected:
+                    o.select_set(True)
+                context.view_layer.objects.active = prev_active
+            except Exception:
+                pass
             self.report({"WARNING"}, "Could not select '%s'" % self.object_name)
             return {"CANCELLED"}
         return {"FINISHED"}
@@ -79,25 +92,33 @@ class PHYSPF_OT_select_object(Operator):
 class PHYSPF_OT_export_report(Operator):
     bl_idname = "physpf.export_report"
     bl_label = "Export Text Report"
-    bl_description = ("Write the report to a Text datablock and copy it to the "
-                      "clipboard")
+    bl_description = ("Write the report to a Text datablock inside this .blend "
+                      "and copy it to the clipboard")
     bl_options = {"REGISTER"}
+
+    _HEADER = "Physics Preflight report"
 
     def execute(self, context):
         results = engine.run_all(context)
         _store_results(context.window_manager, results)
         text = report_mod.build_text_report(results)
-        name = "physics_preflight_report.txt"
-        txt = bpy.data.texts.get(name)
+        base = "physics_preflight_report.txt"
+        # Only reuse a text block we created (identified by our header); never
+        # clobber an unrelated text the user happens to have named the same.
+        txt = bpy.data.texts.get(base)
+        if txt is not None and not txt.as_string().startswith(self._HEADER):
+            txt = None
         if txt is None:
-            txt = bpy.data.texts.new(name)
+            txt = bpy.data.texts.new(base)  # Blender uniquifies if name is taken
         txt.clear()
         txt.write(text)
         try:
             context.window_manager.clipboard = text
         except Exception:
             pass
-        self.report({"INFO"}, "Report written to Text '%s' and clipboard" % name)
+        self.report({"INFO"},
+                    "Report written to Text '%s' (inside the .blend) and copied "
+                    "to the clipboard" % txt.name)
         return {"FINISHED"}
 
 

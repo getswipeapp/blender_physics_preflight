@@ -54,6 +54,43 @@ def build_01_pass():
     add_rigid_body(o)
 
 
+def build_01_rotation_fail():
+    # A cloth object with unapplied rotation — rotation matters for cloth.
+    reset()
+    bpy.ops.mesh.primitive_plane_add(size=2, location=(0, 0, 3))
+    o = bpy.context.active_object
+    o.name = "Cloth"
+    o.rotation_euler = (0.7, 0.0, 0.0)
+    o.modifiers.new("Cloth", "CLOTH")
+
+
+def build_03_offstart_unknown():
+    # Two separated bodies, but the timeline is NOT on the start frame, so the
+    # start-frame overlap state can't be confirmed -> UNKNOWN (not a false PASS).
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, 50
+    sc.frame_current = 25
+    a = _add_cube("A", location=(0, 0, 0), size=2.0)
+    b = _add_cube("B", location=(5, 0, 0), size=2.0)
+    add_rigid_body(a)
+    add_rigid_body(b)
+
+
+def build_16_effector_only_fail():
+    # A domain whose only fluid object is an EFFECTOR (not a flow source).
+    reset()
+    dom = _add_cube("Domain", size=4.0)
+    m = dom.modifiers.new("Fluid", "FLUID")
+    m.fluid_type = "DOMAIN"
+    m.domain_settings.domain_type = "LIQUID"
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.3, location=(0, 0, 0))
+    eff = bpy.context.active_object
+    eff.name = "Effector"
+    f = eff.modifiers.new("Fluid", "FLUID")
+    f.fluid_type = "EFFECTOR"
+
+
 def build_02_fail():
     reset()
     o = _add_cube("Pebble", size=0.1)
@@ -405,6 +442,41 @@ def build_20_fail(outdir):
     target = os.path.join(cachedir, "%s_%06d_%02d.bphys" % (prefix, 5, 0))
     if os.path.isfile(target):
         os.remove(target)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def _delete_cloth_frame(outdir, frame):
+    cachedir = os.path.join(outdir, "blendcache_cloth")
+    prefix = "".join("%02X" % b for b in "Cloth".encode())
+    target = os.path.join(cachedir, "%s_%06d_%02d.bphys" % (prefix, frame, 0))
+    existed = os.path.isfile(target)
+    if existed:
+        os.remove(target)
+    return existed
+
+
+def build_F01_missing_tail(outdir):
+    """Regression for F01: delete the LAST baked frame, reopen. Blender still
+    reports the sim as baked. #17, #18 and #20 must all FAIL (the old code let
+    all four cache checks PASS because #20 only looked between the first and
+    last file that still existed)."""
+    blend = _make_cloth_blend(outdir, frame_end_cache=10, scene_end=10)
+    assert _delete_cloth_frame(outdir, 10), "expected frame 10 cache file"
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_F01_missing_head(outdir):
+    """Regression for F01: delete the FIRST baked frame, reopen."""
+    blend = _make_cloth_blend(outdir, frame_end_cache=10, scene_end=10)
+    assert _delete_cloth_frame(outdir, 1), "expected frame 1 cache file"
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_F01_missing_multi_tail(outdir):
+    """Delete the last three baked frames, reopen."""
+    blend = _make_cloth_blend(outdir, frame_end_cache=10, scene_end=10)
+    for fr in (8, 9, 10):
+        _delete_cloth_frame(outdir, fr)
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 

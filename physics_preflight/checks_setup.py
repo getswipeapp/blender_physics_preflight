@@ -24,7 +24,8 @@ def _dg(ctx):
 @check(1, "Unapplied scale / rotation on physics objects", GROUP_SETUP)
 def c01_unapplied_transform(ctx, mk):
     out = []
-    for o in util.physics_objects(ctx.scene):
+    objs = util.physics_objects(ctx.scene)
+    for o in objs:
         sx, sy, sz = o.scale
         non_unit = any(abs(s - 1.0) > 1e-4 for s in (sx, sy, sz))
         non_uniform = (abs(sx - sy) > 1e-4 or abs(sy - sz) > 1e-4)
@@ -41,9 +42,20 @@ def c01_unapplied_transform(ctx, mk):
                           "the simulation uses the real size." % (sx, sy, sz),
                           object_name=o.name,
                           hint="Object > Apply > Scale (Ctrl+A)."))
+        # Rotation matters where the sim uses the mesh rest shape or the object
+        # is a mesh collider (cloth / soft body / collision).
+        if util.rotation_matters(o) and util.has_unapplied_rotation(o):
+            out.append(mk(Status.WARNING,
+                          "Unapplied object rotation on a cloth/soft-body/"
+                          "collision object. The rest shape and collider can be "
+                          "offset from what you see.",
+                          object_name=o.name,
+                          hint="Object > Apply > Rotation (Ctrl+A)."))
     if not out:
-        if util.physics_objects(ctx.scene):
-            return [mk(Status.PASS, "All physics objects have scale applied.")]
+        if objs:
+            return [mk(Status.PASS,
+                       "Physics objects have scale applied (and rotation where "
+                       "it matters).")]
         return []
     return out
 
@@ -84,12 +96,23 @@ def c02_mass_sanity(ctx, mk):
 @check(3, "Objects overlapping at the start frame", GROUP_SETUP)
 def c03_initial_intersections(ctx, mk):
     dg = _dg(ctx)
-    bodies = util.active_rigid_bodies(ctx.scene)
-    others = util.all_rigid_bodies(ctx.scene)
+    scene = ctx.scene
+    bodies = util.active_rigid_bodies(scene)
+    others = util.all_rigid_bodies(scene)
     if not bodies:
         return []
     out = []
     bvh_cache = {}
+    uncertain = False  # a BVH failed to build, or we're not on the start frame
+
+    # The sim starts at the first frame; geometry is evaluated at the CURRENT
+    # frame. If they differ we can still report overlaps we see, but we must not
+    # claim a clean PASS for the start state we didn't actually look at.
+    at_start = (scene.frame_current == scene.frame_start)
+    if not at_start:
+        uncertain = True
+    where = ("the start frame" if at_start
+             else "the current frame (%d)" % scene.frame_current)
 
     def bvh(o):
         if o.name not in bvh_cache:
@@ -108,13 +131,15 @@ def c03_initial_intersections(ctx, mk):
                 continue
             ba, bb = bvh(a), bvh(b)
             if ba is None or bb is None:
+                uncertain = True  # couldn't build geometry -> don't claim clean
                 continue
             overlaps = ba.overlap(bb)
             if overlaps:
                 reported.add(key)
                 out.append(mk(Status.WARNING,
-                              "Overlaps '%s' at the start frame. Interpenetrating "
-                              "rigid bodies can explode apart on frame 1." % b.name,
+                              "Overlaps '%s' at %s. Interpenetrating rigid bodies "
+                              "can explode apart on the first frame."
+                              % (b.name, where),
                               object_name=a.name,
                               hint="Move them apart or add a small gap before "
                                    "frame 1."))
@@ -126,13 +151,25 @@ def c03_initial_intersections(ctx, mk):
             if util.point_inside_bvh(bb, ca) or util.point_inside_bvh(ba, cb):
                 reported.add(key)
                 out.append(mk(Status.WARNING,
-                              "'%s' is fully inside '%s' at the start frame; "
-                              "they will burst apart." % (a.name, b.name),
+                              "'%s' is fully inside '%s' at %s; they will burst "
+                              "apart." % (a.name, b.name, where),
                               object_name=a.name,
                               hint="Separate the objects before the first frame."))
-    if not out:
-        return [mk(Status.PASS, "No rigid bodies overlap at the start frame.")]
-    return out
+    if out:
+        return out
+    if uncertain:
+        if not at_start:
+            return [mk(Status.UNKNOWN,
+                       "Overlaps are only checked at the frame you're on (%d), "
+                       "not the start frame (%d). Go to the start frame and "
+                       "re-scan to be sure."
+                       % (scene.frame_current, scene.frame_start),
+                       hint="Set the timeline to the first frame, then Scan "
+                            "again.")]
+        return [mk(Status.UNKNOWN,
+                   "Some rigid bodies have no evaluable mesh, so start-frame "
+                   "overlaps couldn't be fully checked.")]
+    return [mk(Status.PASS, "No rigid bodies overlap at the start frame.")]
 
 
 # --------------------------------------------------------------------- 4 ----
@@ -550,15 +587,18 @@ def c16_fluid_layout(ctx, mk):
     scene = ctx.scene
     out = []
     domains = []
-    flows = []
+    flows = []        # genuine FLOW sources (inflow/outflow/geometry)
+    effectors = []    # EFFECTOR objects (colliders/guides) — NOT a source
     for o in scene.objects:
         for m in o.modifiers:
             if m.type == "FLUID":
                 ft = getattr(m, "fluid_type", "")
                 if ft == "DOMAIN":
                     domains.append(o)
-                elif ft in ("FLOW", "EFFECTOR"):
-                    flows.append((o, ft))
+                elif ft == "FLOW":
+                    flows.append(o)
+                elif ft == "EFFECTOR":
+                    effectors.append(o)
     if not domains:
         return []
 
@@ -568,33 +608,50 @@ def c16_fluid_layout(ctx, mk):
         mx = Vector((max(c.x for c in cs), max(c.y for c in cs), max(c.z for c in cs)))
         return mn, mx
 
+    def overlaps_domain(dmn, dmx, obj):
+        fmn, fmx = world_aabb(obj)
+        return (fmx.x >= dmn.x and fmn.x <= dmx.x and
+                fmx.y >= dmn.y and fmn.y <= dmx.y and
+                fmx.z >= dmn.z and fmn.z <= dmx.z)
+
     for dom in domains:
         dmn, dmx = world_aabb(dom)
-        related = []
-        for fo, ft in flows:
-            fmn, fmx = world_aabb(fo)
-            inside = (fmx.x >= dmn.x and fmn.x <= dmx.x and
-                      fmx.y >= dmn.y and fmn.y <= dmx.y and
-                      fmx.z >= dmn.z and fmn.z <= dmx.z)
-            related.append((fo, ft, inside))
+        # A domain needs a genuine FLOW source. Effectors alone can't fill it.
         if not flows:
-            out.append(mk(Status.WARNING,
-                          "Fluid domain has no Flow objects; the simulation will "
-                          "be empty.",
-                          object_name=dom.name,
-                          hint="Add an Inflow or Flow object inside the domain."))
+            if effectors:
+                out.append(mk(Status.WARNING,
+                              "Fluid domain has effector object(s) but no Flow "
+                              "source, so nothing is emitted; the simulation will "
+                              "be empty.",
+                              object_name=dom.name,
+                              hint="Add an Inflow/Flow object inside the domain."))
+            else:
+                out.append(mk(Status.WARNING,
+                              "Fluid domain has no Flow objects; the simulation "
+                              "will be empty.",
+                              object_name=dom.name,
+                              hint="Add an Inflow or Flow object inside the domain."))
             continue
-        any_inside = any(ins for _, _, ins in related)
-        for fo, ft, inside in related:
+        any_flow_inside = False
+        for fo in flows:
+            inside = overlaps_domain(dmn, dmx, fo)
+            any_flow_inside = any_flow_inside or inside
             if not inside:
                 out.append(mk(Status.WARNING,
-                              "%s object '%s' is fully outside the fluid domain "
-                              "and won't contribute." % (ft.title(), fo.name),
+                              "Flow object '%s' is fully outside the fluid domain "
+                              "and won't contribute." % fo.name,
                               object_name=fo.name,
                               hint="Move it inside the domain box."))
-        if not any_inside:
+        for eo in effectors:
+            if not overlaps_domain(dmn, dmx, eo):
+                out.append(mk(Status.WARNING,
+                              "Effector object '%s' is fully outside the fluid "
+                              "domain and has no effect." % eo.name,
+                              object_name=eo.name,
+                              hint="Move it inside the domain box."))
+        if not any_flow_inside:
             out.append(mk(Status.WARNING,
-                          "No flow object overlaps this domain; the sim will be "
+                          "No Flow source overlaps this domain; the sim will be "
                           "empty.",
                           object_name=dom.name))
     if not out and domains:

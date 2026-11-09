@@ -41,6 +41,9 @@ def build_text_report(results):
                     lines.append("               > %s" % r.hint)
         lines.append("")
     lines.append("=" * 68)
-    lines.append("Read-only tool. 'Baked' flags are verified against files on "
-                 "disk; UNKNOWN means Blender cannot prove the answer.")
+    lines.append("Read-only tool. For disk-backed caches we verify the actual "
+                 "files frame by frame rather than trusting Blender's 'baked' "
+                 "flag. Memory caches, packed Geometry Nodes bakes and unsaved "
+                 "files can't be proven from disk and are reported UNKNOWN / N/A, "
+                 "never a false PASS.")
     return "\n".join(lines)

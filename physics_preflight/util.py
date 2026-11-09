@@ -78,6 +78,21 @@ def collider_objects(scene):
 
 # --------------------------------------------------------------- geometry ---
 
+def has_unapplied_rotation(obj, tol=1e-3):
+    """True if the object carries a non-identity local rotation."""
+    try:
+        _loc, rot, _scale = obj.matrix_basis.decompose()
+        return abs(rot.angle) > tol
+    except Exception:
+        return False
+
+
+def rotation_matters(obj):
+    """Rotation only needs applying where the simulation uses the mesh rest
+    shape or the object acts as a mesh collider — cloth, soft body, collision."""
+    return any(m.type in ("CLOTH", "SOFT_BODY", "COLLISION") for m in obj.modifiers)
+
+
 def world_bbox_corners(obj):
     mw = obj.matrix_world
     return [mw @ Vector(c) for c in obj.bound_box]
