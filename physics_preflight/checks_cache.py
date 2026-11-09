@@ -193,12 +193,20 @@ def c18_files_present(ctx, mk):
                           object_name=name,
                           hint="Delete the cache and re-bake."))
         elif s == ci.V_INCOMPLETE:
-            extra = (" %s." % v.note) if v.note else ""
+            if v.missing:
+                msg = ("%s is missing %d of %d required cache frame(s) on disk: "
+                       "%s." % (e.system, len(v.missing), len(v.required),
+                                _missing_summary(v.missing)))
+                if v.note:
+                    msg += " Also %s." % v.note
+            else:
+                # data frames are all present; a sub-cache (mesh/noise/particles)
+                # or GN blob data is what's incomplete.
+                msg = ("%s cache is incomplete: %s."
+                       % (e.system, v.note or "a required sub-cache is missing "
+                          "frames"))
             out.append(mk(Status.FAIL,
-                          "%s is missing %d of %d required cache frame(s) on "
-                          "disk: %s.%s The render will freeze or re-simulate "
-                          "there." % (e.system, len(v.missing), len(v.required),
-                                      _missing_summary(v.missing), extra),
+                          msg + " The render will freeze or re-simulate there.",
                           object_name=name,
                           hint="Delete the cache and re-bake the full range."))
         elif s == ci.V_UNREADABLE:
@@ -269,7 +277,7 @@ def c20_frame_gaps(ctx, mk):
         name = e.obj_name
         v = ci.cache_status(e)
         s = v.state
-        if s == ci.V_INCOMPLETE:
+        if s == ci.V_INCOMPLETE and v.missing:
             lo, hi = min(v.required), max(v.required)
             out.append(mk(Status.FAIL,
                           "%s is missing %d cached frame(s) across its %d–%d "
@@ -278,6 +286,8 @@ def c20_frame_gaps(ctx, mk):
                              _missing_summary(v.missing)),
                           object_name=name,
                           hint="Delete the cache and re-bake the full range."))
+        # INCOMPLETE with no missing data frames = a sub-cache gap, reported by
+        # #18; #20 stays silent to avoid a "missing 0 frames" line.
         elif s == ci.V_COMPLETE:
             lo, hi = min(v.required), max(v.required)
             if e.sampled:

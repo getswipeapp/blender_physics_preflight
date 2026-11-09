@@ -383,11 +383,15 @@ def inspect_fluid_domain(obj, mod, scene):
         e.frames_present = data_present
         e.frames_empty = data_empty
         e.frames_unreadable = data_unread
-        # Each enabled sub-cache (liquid mesh, noise) must cover the SAME frames,
-        # not merely "have at least one file". A sub-cache that is missing frames
-        # relative to the required range makes the whole bake incomplete (R01).
+        # Each enabled sub-cache (liquid mesh, smoke noise, liquid particles)
+        # must cover the SAME frames, not merely "have at least one file". A
+        # sub-cache missing frames makes the whole bake incomplete (R01).
+        use_particles = any(bool(getattr(ds, a, False)) for a in (
+            "use_spray_particles", "use_foam_particles",
+            "use_bubble_particles", "use_tracer_particles"))
         for comp_name, enabled in (("mesh", bool(getattr(ds, "use_mesh", False))),
-                                   ("noise", bool(getattr(ds, "use_noise", False)))):
+                                   ("noise", bool(getattr(ds, "use_noise", False))),
+                                   ("particles", use_particles)):
             if not enabled:
                 continue
             cp, ce_empty, cu = _scan_fluid_dir(os.path.join(e.cache_dir, comp_name))
@@ -411,6 +415,19 @@ def _resolve_gn_target(bake, mod):
     if not bt or bt == "INHERIT":
         bt = getattr(mod, "bake_target", None)
     return (bt or "").upper()
+
+
+def _gn_bake_range(bake, scene):
+    """Effective frame range for one GN bake. The custom *path* and custom
+    *frame range* are independent toggles — only a custom frame range (or a
+    still-frame bake) changes the range (R07)."""
+    if getattr(bake, "bake_mode", "ANIMATION") == "STILL":
+        f = int(getattr(bake, "frame_start", scene.frame_start))
+        return (f, f)
+    if bool(getattr(bake, "use_custom_simulation_frame_range", False)):
+        return (int(getattr(bake, "frame_start", scene.frame_start)),
+                int(getattr(bake, "frame_end", scene.frame_end)))
+    return (scene.frame_start, scene.frame_end)
 
 
 def inspect_gn_bakes(obj, mod, scene):
@@ -450,16 +467,7 @@ def inspect_gn_bakes(obj, mod, scene):
         if note:
             e.path_note = "Geometry Nodes bake is " + note
 
-        # per-bake frame range (custom range, or still-frame bakes)
-        bmode = getattr(b, "bake_mode", "ANIMATION")
-        if bmode == "STILL":
-            fs = fe = int(getattr(b, "frame_start", scene.frame_start))
-        elif bool(getattr(b, "use_custom_simulation_frame_range", False)) or \
-                bool(getattr(b, "use_custom_path", False)):
-            fs = int(getattr(b, "frame_start", scene.frame_start))
-            fe = int(getattr(b, "frame_end", scene.frame_end))
-        else:
-            fs, fe = scene.frame_start, scene.frame_end
+        fs, fe = _gn_bake_range(b, scene)
         e.cache_range = (fs, fe)
         e.frames_expected = (list(range(fs, fe + 1)) if e.file_check_applicable else None)
 

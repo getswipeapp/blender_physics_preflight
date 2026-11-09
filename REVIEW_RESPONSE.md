@@ -101,3 +101,22 @@ evidence-to-PASS paths. All are addressed below; the test suite grew from 61 to
   is fragile; the INHERIT/blobs logic is unit-tested here).
 - GUI acceptance test; Windows path coverage; a before/after filesystem snapshot
   around Scan on disposable projects.
+
+---
+
+# Re-review v3 note (commit bbbaa72 → this commit)
+
+The v3 review was run against a **stale zip** (an earlier `physics_preflight_
+review_current.zip`, before the v2 fixes were rebuilt into it), so its R01–R06
+findings were already fixed in commit `bbbaa72` (fluid per-component scanning,
+#19 using `cache_status()`, GN blobs, #17 stale-flag, the `fluid_` matcher,
+#21/#22 UNKNOWN, file-read checks, OUTFLOW, slotted actions, UI wording,
+run_all_versions). Two findings were genuinely still present and are fixed here:
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| **R07** | GN custom *path* wrongly triggered custom *frame-range* handling (range came out 0–0) | **Fixed.** Range logic extracted to `_gn_bake_range()`; only a custom frame range or a still-frame bake changes the range. Unit-tested (custom path → scene range). |
+| **#18 text** | "missing 0 of N frames" shown when only a sub-cache was incomplete | **Fixed.** When data frames are all present but a sub-cache (mesh/noise/particles) or GN blob data is missing, #18 says "cache is incomplete: &lt;what&gt;" and #20 stays silent. |
+| Fluid particle sub-cache | not checked | **Added.** Liquid spray/foam/bubble/tracer particle caches are now verified per-frame like mesh/noise. |
+
+Test suite: **81/81 on Blender 5.2.3.**

@@ -193,6 +193,26 @@ def gn_unit_tests():
         got = ci._resolve_gn_target(bake, mod)
         out.append(("gn target: " + label, got == expect, got, expect))
 
+    # R07: a custom PATH must not trigger custom-range handling; only a custom
+    # frame range (or STILL) changes the range.
+    scene = Fake(frame_start=1, frame_end=10)
+    range_cases = [
+        ("custom path only -> scene range",
+         Fake(bake_mode="ANIMATION", use_custom_path=True,
+              use_custom_simulation_frame_range=False, frame_start=0, frame_end=0),
+         (1, 10)),
+        ("custom range -> its own range",
+         Fake(bake_mode="ANIMATION", use_custom_simulation_frame_range=True,
+              frame_start=3, frame_end=7), (3, 7)),
+        ("no customisation -> scene range",
+         Fake(bake_mode="ANIMATION"), (1, 10)),
+        ("still frame -> single frame",
+         Fake(bake_mode="STILL", frame_start=5), (5, 5)),
+    ]
+    for label, bake, expect in range_cases:
+        got = ci._gn_bake_range(bake, scene)
+        out.append(("gn range: " + label, got == expect, got, expect))
+
     # Metadata present but blobs/ missing -> not COMPLETE (R03).
     e = ci.CacheEntry("Obj", "Geometry Nodes", "gn")
     e.baked_determinable = True
