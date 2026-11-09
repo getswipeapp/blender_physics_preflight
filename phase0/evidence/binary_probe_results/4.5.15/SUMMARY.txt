@@ -1,0 +1,11 @@
+  cloth_disk       files deleted=True -> is_baked=True info='10 frames on disk.'
+  softbody_disk    files deleted=True -> is_baked=True info='10 frames on disk.'
+  cloth_memory     is_baked=True info='10 frames in memory (2 KiB).'
+  softbody_memory  is_baked=True info='10 frames in memory (2 KiB).'
+  rigid            baked=True reload is_outdated=True
+  particles        baked=True files=5+
+  fluid_ALL        bake files=8 baked_flag=True | after delete+reopen: files=0 baked_flag=True
+  gn_disk          bake=['FINISHED'] files=11 target=DISK
+  gn_packed        NO python-visible change
+  extra_api_missing "missing": {"RigidBodyConstraint": [], "RigidBodyObject": []
+  setup_probe      ok

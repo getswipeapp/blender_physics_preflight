@@ -1,0 +1,3 @@
+      6 AttributeError: 'LevelsetGrid' object has no attribute 'setConst'
+      1 Fatal Python error: Aborted
+      1 terminate called after throwing an instance of 'Manta::Error'

@@ -1,0 +1,1 @@
+Blender 4.2.23: NodesModifier has no 'bake_target' property -> packed GN bakes do not exist in 4.2 (script raised AttributeError). Disk bakes only.

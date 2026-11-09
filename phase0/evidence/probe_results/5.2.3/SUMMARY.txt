@@ -1,0 +1,12 @@
+# 5.2.3
+cloth_memory | baked: {'is_baked': True, 'is_outdated': False, 'use_disk_cache': False, 'info': '10 frames in memory (2 KiB).'} | files deleted+reload: {'is_baked': True, 'is_outdated': False, 'use_disk_cache': False, 'info': '10 frames in memory (2 KiB).'}
+cloth_disk | baked: {'is_baked': True, 'is_outdated': False, 'use_disk_cache': True, 'info': '10 frames on disk.'} | files deleted+reload: {'is_baked': True, 'is_outdated': False, 'use_disk_cache': True, 'info': '10 frames on disk.'}
+softbody_memory | baked: {'is_baked': True, 'is_outdated': False, 'use_disk_cache': False, 'info': '10 frames in memory (2 KiB).'} | files deleted+reload: {'is_baked': True, 'is_outdated': False, 'use_disk_cache': False, 'info': '10 frames in memory (2 KiB).'}
+softbody_disk | baked: {'is_baked': True, 'is_outdated': False, 'use_disk_cache': True, 'info': '10 frames on disk.'} | files deleted+reload: {'is_baked': True, 'is_outdated': False, 'use_disk_cache': True, 'info': '10 frames on disk.'}
+rigid {'is_baked': True, 'is_outdated': False, 'use_disk_cache': False, 'info': '30 frames in memory (4 KiB).'} reload: {'is_baked': True, 'is_outdated': True, 'use_disk_cache': False, 'info': '30 frames in memory (4 KiB).'}
+particles {'is_baked': True, 'is_outdated': False, 'use_disk_cache': True, 'info': '20 frames on disk.'}
+fluid_bake {'has_cache_baked_data': 'True', 'has_cache_baked_any': 'True', 'cache_type': 'REPLAY'} files: 1 
+fluid_inspect {'has_cache_baked_data': 'True', 'has_cache_baked_any': 'True', 'cache_type': 'REPLAY'} files: True 
+fluid_after_delete {'has_cache_baked_data': 'True', 'has_cache_baked_any': 'True', 'cache_type': 'REPLAY'} files: True 
+GN modprops: ['bake_directory', 'bake_target', 'bakes', 'open_bake_data_blocks_panel', 'open_bake_panel']
+GN bake keys: ['directory', 'frame_start', 'frame_end', 'use_custom_simulation_frame_range', 'use_custom_path', 'bake_target', 'bake_mode', 'bake_id', 'node', 'data_blocks'] target: DISK None n_files: 11 bake: ['FINISHED'] 

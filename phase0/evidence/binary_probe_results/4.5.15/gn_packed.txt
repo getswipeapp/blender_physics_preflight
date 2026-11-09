@@ -1,0 +1,1 @@
+GNJSON {"v": "4.5.15 LTS", "bake": ["FINISHED"], "diff": {}, "sizes": {"gn_packed_baked.blend": 404403, "gn_packed_unbaked.blend": 389698}, "dir": ["bake_id", "bake_mode", "bake_target", "bl_rna", "data_blocks", "directory", "frame_end", "frame_start", "node", "rna_type", "use_custom_path", "use_custom_simulation_frame_range"], "files_on_disk": []}

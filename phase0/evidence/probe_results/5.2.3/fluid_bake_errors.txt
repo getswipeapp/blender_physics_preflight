@@ -1,0 +1,2 @@
+      6 AttributeError: 'LevelsetGrid' object has no attribute 'setConst'
+      1 Fatal Python error: Segmentation fault
