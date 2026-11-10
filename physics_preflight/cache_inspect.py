@@ -143,7 +143,8 @@ class CacheEntry:
         #                                   can't be proven (GN disk blob data)
         self.cache_frame_offset = 0       # fluid playback offset (R12)
         self.cache_outdated = None        # point cache is_outdated (R14)
-        self.frame_skip = None            # point cache is_frame_skip (R14)
+        self.frame_skip = None            # point cache is_frame_skip (R15)
+        self.baking_in_progress = False   # a bake is mid-flight (R16 test #4)
 
 
 # The single authoritative verdict every cache check reads from.
@@ -214,14 +215,24 @@ def cache_status(e):
         return CacheVerdict(V_UNVERIFIABLE, [], [], [], present, required,
                             "bake files are present but their internal data "
                             "can't be fully verified")
-    if getattr(e, "cache_outdated", False):
-        # Every required file is on disk, but Blender itself marks the cache
-        # outdated (the simulation settings changed since it was baked). That is
-        # not a confident PASS — report UNKNOWN, never a green tick. (R14)
-        note = ("Blender has flagged this cache as outdated — the simulation "
-                "settings changed since it was baked")
-        if getattr(e, "frame_skip", False):
-            note += "; frames were also skipped during baking"
+    # Every required file is on disk — but Blender itself may signal the cache
+    # is not a trustworthy finished bake. Each of these is an INDEPENDENT reason
+    # to withhold a confident PASS (R14/R15): a skipped-frame cache is suspect
+    # even when it isn't marked outdated, and vice-versa. Report UNKNOWN, never
+    # a green tick. (Downgrade-only — a True "baked" flag is still distrusted.)
+    baking = getattr(e, "baking_in_progress", False)
+    outdated = getattr(e, "cache_outdated", False)
+    skipped = getattr(e, "frame_skip", False)
+    if baking or outdated or skipped:
+        reasons = []
+        if baking:
+            reasons.append("a bake is still in progress")
+        if outdated:
+            reasons.append("the simulation settings changed since it was baked")
+        if skipped:
+            reasons.append("frames were skipped during baking")
+        note = ("Blender flags this cache as not a reliable finished bake — "
+                + "; ".join(reasons))
         return CacheVerdict(V_UNVERIFIABLE, [], [], [], present, required, note)
     return CacheVerdict(V_COMPLETE, [], [], [], present, required, "")
 
@@ -285,6 +296,7 @@ def inspect_point_cache(obj, system, pc, scene):
     # we distrust. (R14)
     e.cache_outdated = bool(getattr(pc, "is_outdated", False))
     e.frame_skip = bool(getattr(pc, "is_frame_skip", False))
+    e.baking_in_progress = bool(getattr(pc, "is_baking", False))
     e.scene_range = (scene.frame_start, scene.frame_end)
     cs = int(getattr(pc, "frame_start", scene.frame_start))
     ce = int(getattr(pc, "frame_end", scene.frame_end))
@@ -361,6 +373,10 @@ _FLUID_COMPONENT_RE = {
     "mesh": re.compile(r"^fluid_mesh_(\d{4})\.(bobj\.gz|bobj|vdb)$", re.IGNORECASE),
     "noise": re.compile(r"^fluid_noise_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
     "particles": re.compile(r"^fluid_particles_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
+    # Guiding sub-cache: verified against a real 5.2.3 guide bake — directory
+    # "guiding/", files fluid_guiding_NNNN.vdb (same prefix scheme as the rest,
+    # confirmed by probe rather than assumed). (R16)
+    "guiding": re.compile(r"^fluid_guiding_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
     # Mantaflow writes one solver-config file per frame (config/config_NNNN.uni,
     # verified on real 5.2.3 bakes). A complete bake always includes these; if
     # they go missing the cache can't be reloaded for render, so config is a
@@ -374,7 +390,14 @@ _FLUID_STAGE_FLAG = {
     "mesh": "has_cache_baked_mesh",
     "noise": "has_cache_baked_noise",
     "particles": "has_cache_baked_particles",
+    "guiding": "has_cache_baked_guide",
 }
+
+# Fluid "bake in progress" flags. A scan while any of these is True caught a
+# half-written cache, so we never certify it COMPLETE (R16 test #4).
+_FLUID_BAKING_FLAGS = (
+    "is_cache_baking_data", "is_cache_baking_mesh", "is_cache_baking_noise",
+    "is_cache_baking_particles", "is_cache_baking_guide")
 
 
 def _scan_fluid_dir(data_dir, component):
@@ -408,6 +431,9 @@ def inspect_fluid_domain(obj, mod, scene):
     e.cache_range = (cs, ce)
     e.replay = (getattr(ds, "cache_type", "") == "REPLAY")
     e.cache_frame_offset = int(getattr(ds, "cache_frame_offset", 0) or 0)  # R12
+    # If any sub-cache is mid-bake, the files on disk are not a finished bake.
+    e.baking_in_progress = any(bool(getattr(ds, a, False))
+                               for a in _FLUID_BAKING_FLAGS)  # R16 test #4
     raw = getattr(ds, "cache_directory", "") or ""
     e.raw_path = raw
     e.cache_dir = _abspath(raw) if raw else None
@@ -441,6 +467,7 @@ def inspect_fluid_domain(obj, mod, scene):
             ("mesh", bool(getattr(ds, "use_mesh", False))),
             ("noise", bool(getattr(ds, "use_noise", False))),
             ("particles", use_particles),
+            ("guiding", bool(getattr(ds, "use_guide", False))),  # R16
         ]
         for comp_name, enabled in components:
             if not enabled:

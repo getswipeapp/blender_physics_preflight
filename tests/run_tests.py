@@ -103,6 +103,9 @@ CASES = [
     # R12: a non-zero cache frame offset makes #19 UNKNOWN (coverage can't be
     # confirmed from the raw range), never a false PASS.
     ("R12 fluid cache offset (unknown)", 19, fixtures.build_fluid_offset_unknown, True, {Status.UNKNOWN}),
+    # R16: guiding is a required component when enabled; deleting a guiding frame
+    # fails #18 even though data/ and config/ are intact. (real guide bake)
+    ("HS fluid missing guiding frame (fail)", 18, fixtures.build_fluid_missing_guiding, True, {Status.FAIL}),
 ]
 
 
@@ -133,7 +136,7 @@ def verdict_unit_tests():
     def entry(present, expected=(1, 2, 3, 4, 5), baked=True, empty=(),
               unreadable=(), replay=False, memory=False, determinable=True,
               applicable=True, components=(), sampled=False, step=1,
-              outdated=False):
+              outdated=False, skipped=False, baking=False):
         e = ci.CacheEntry("Obj", "Cloth", "point")
         e.baked_flag = baked
         e.baked_determinable = determinable
@@ -149,6 +152,8 @@ def verdict_unit_tests():
         e.frame_step = step
         e.components_missing = list(components)
         e.cache_outdated = outdated
+        e.frame_skip = skipped
+        e.baking_in_progress = baking
         return e
 
     cases = [
@@ -186,6 +191,28 @@ def verdict_unit_tests():
         # EMPTY, not a soft UNKNOWN.
         ("R14 outdated but no files -> EMPTY",
          entry(present=[], baked=True, outdated=True), ci.V_EMPTY),
+        # R15: frame_skip is an INDEPENDENT downgrade — a complete, not-outdated
+        # cache with skipped frames must not pass as COMPLETE.
+        ("R15 complete but frame_skip (not outdated) -> UNVERIFIABLE",
+         entry(present=[1, 2, 3, 4, 5], outdated=False, skipped=True),
+         ci.V_UNVERIFIABLE),
+        ("R15 both outdated and frame_skip -> UNVERIFIABLE",
+         entry(present=[1, 2, 3, 4, 5], outdated=True, skipped=True),
+         ci.V_UNVERIFIABLE),
+        # R15: a hard failure still wins — missing files take precedence over the
+        # soft staleness flags.
+        ("R15 frame_skip but missing files -> INCOMPLETE",
+         entry(present=[1, 2, 3, 4], skipped=True), ci.V_INCOMPLETE),
+        # R16 test #4: a bake in progress is never a confident COMPLETE…
+        ("R16 complete but bake in progress -> UNVERIFIABLE",
+         entry(present=[1, 2, 3, 4, 5], baking=True), ci.V_UNVERIFIABLE),
+        # …but missing files still take precedence over the in-progress flag.
+        ("R16 bake in progress but missing files -> INCOMPLETE",
+         entry(present=[1, 2, 3, 4], baking=True), ci.V_INCOMPLETE),
+        # R16: a missing/unbaked guiding sub-cache makes the bake INCOMPLETE.
+        ("R16 fluid guiding stage-not-baked sub-cache",
+         entry(present=[1, 2, 3, 4, 5], components=["guiding (stage not baked)"]),
+         ci.V_INCOMPLETE),
     ]
     out = []
     for label, e, expect in cases:
@@ -282,6 +309,10 @@ def fluid_matcher_unit_tests():
         ("data rejects a mesh file", bool(rx["data"].match("fluid_mesh_0001.bobj.gz")), False),
         ("data rejects unrelated file", bool(rx["data"].match("unrelated_0001.vdb")), False),
         ("noise rejects a data file", bool(rx["noise"].match("fluid_data_0001.vdb")), False),
+        # R16: guiding matcher accepts only fluid_guiding files.
+        ("guiding accepts fluid_guiding", bool(rx["guiding"].match("fluid_guiding_0001.vdb")), True),
+        ("guiding rejects a data file", bool(rx["guiding"].match("fluid_data_0001.vdb")), False),
+        ("data rejects a guiding file", bool(rx["data"].match("fluid_guiding_0001.vdb")), False),
     ]
     return [("fluid matcher: %s" % label, got == expect, got, expect)
             for label, got, expect in checks]

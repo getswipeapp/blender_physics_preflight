@@ -166,3 +166,32 @@ runtime-matrix item.
 
 Test suite: **97/97 on Blender 5.2.3** (added two real-bake fluid fixtures for R11/R12 and
 four verdict unit tests for R11/R13/R14).
+
+---
+
+# Re-review v6 responses (commit cd9787c → this commit)
+
+Round 6 confirmed R11/R12 at source and found that R14/R15 and the fluid-stage
+list were not quite complete. Both gaps verified against real Blender 5.2.3 and
+fixed downgrade-only.
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| **R15** | `is_frame_skip` was only inspected *inside* the `cache_outdated` branch, so a complete cache with `is_frame_skip=True` and `is_outdated=False` returned COMPLETE | **Fixed.** `cache_status()` now treats `cache_outdated`, `frame_skip` (and a bake-in-progress flag) as **independent** downgrades: any one of them turns a file-complete cache into UNKNOWN, with a note listing every reason that applies. Hard failures (missing files) still take precedence. Three new verdict unit tests (frame_skip-only, both flags, and frame_skip-with-missing-files → still INCOMPLETE). |
+| **R16** | The enabled-stage list omitted fluid **guiding** (`use_guide` / `has_cache_baked_guide`) | **Fixed.** Guiding is now a reconciled stage like mesh/noise/particles. Its on-disk layout was **verified against a real guide bake** (not assumed): directory `guiding/`, files `fluid_guiding_NNNN.vdb` — so it gets a proper component matcher and a full-range file check, plus the stage-flag reconciliation. Covered by a **real guide-bake integration test** (`build_fluid_missing_guiding` → #18 FAIL), a verdict unit test, and three matcher unit tests. |
+
+**Bonus — Round 6 test #4 (bake in progress):** the `is_cache_baking_*` flags are now
+captured on both fluid (`is_cache_baking_data/mesh/noise/particles/guide`) and point caches
+(`is_baking`). A scan while a bake is mid-flight downgrades a file-complete cache to UNKNOWN
+rather than certifying a half-written bake. Two verdict unit tests (in-progress → UNKNOWN;
+in-progress-with-missing-files → still INCOMPLETE).
+
+**Still outstanding (runtime/other-version, not code defects):** the live triggers for
+`is_outdated` (R14) and a stage-flag-off-with-stale-files state (R13) are set by Blender's
+depsgraph during interactive editing and don't reproduce under headless `--factory-startup`;
+their verdict logic is unit-tested and the live confirmation is a GUI runtime-matrix item.
+Also unchanged: independent runs on Blender 4.2/4.5/5.0, a live GN disk-bake test, GUI
+acceptance, Windows paths, and `run_all_versions.sh` enforcing that *all* claimed versions ran.
+
+Test suite: **107/107 on Blender 5.2.3** (added the real guide-bake fixture, 6 R15/R16
+verdict unit tests, and 3 guiding matcher tests).
