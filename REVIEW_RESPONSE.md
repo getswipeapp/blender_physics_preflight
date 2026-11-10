@@ -195,3 +195,23 @@ acceptance, Windows paths, and `run_all_versions.sh` enforcing that *all* claime
 
 Test suite: **107/107 on Blender 5.2.3** (added the real guide-bake fixture, 6 R15/R16
 verdict unit tests, and 3 guiding matcher tests).
+
+---
+
+# Re-review v7 responses (commit a3546f1 → this commit)
+
+Round 7 confirmed R15/R16 and found that the new reliability guards only covered
+disk caches, plus a defensive default. Both fixed; no architectural changes.
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| **R17** | The R14/R15 staleness guards only protected disk caches — `cache_status()` returns MEMORY first, #17 passed a memory cache on `baked_flag` alone, and Rigid Body World bypassed the guards entirely. A stale **memory** bake (baked + outdated) could still PASS. | **Fixed.** The staleness logic is now a shared `reliability_reasons(e)` helper used by both the disk path **and** the memory/RBW paths. #17 downgrades a baked-but-stale memory cache (and RBW) to **UNKNOWN**; #19 withholds the coverage PASS when a memory cache is outdated/skipped/baking; #18 still correctly reports **NA** (no files to verify). RBW now captures `is_outdated`/`is_frame_skip`/`is_baking`. The exact review table case (memory + `is_baked` + `is_outdated`) is a regression test → #17 UNKNOWN, not PASS. |
+| **R18** | `getattr(ds, flag_attr, True)` defaulted a *missing* fluid-stage property to baked (success) | **Fixed.** A new `_stage_flag_state()` returns `baked` / `unbaked` / `unknown`; an **unexposed** property reads `unknown` and routes the whole fluid cache to **UNVERIFIABLE** (UNKNOWN) with a specific note, never a silent PASS. Unit-tested for all three states plus the verdict routing. (These flags do exist on every supported version ≥4.2, so this is a forward-compatibility guard, tested directly rather than via a scene that can't produce the state.) |
+
+**Note on R17 live testing:** `is_outdated` / `is_baking` are set by Blender's depsgraph during
+interactive editing and don't flip under headless `--factory-startup`. The R17 fix is therefore
+tested by driving the real `#17`/`#19` check functions with constructed stale caches (the
+review's exact false-PASS combination), which exercises the production code path deterministically.
+
+Test suite: **119/119 on Blender 5.2.3** (added 7 memory/RBW reliability tests driving the real
+checks, and 5 stage-flag-state / routing tests).

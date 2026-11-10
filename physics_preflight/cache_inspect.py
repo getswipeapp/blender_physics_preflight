@@ -145,6 +145,7 @@ class CacheEntry:
         self.cache_outdated = None        # point cache is_outdated (R14)
         self.frame_skip = None            # point cache is_frame_skip (R15)
         self.baking_in_progress = False   # a bake is mid-flight (R16 test #4)
+        self.uncertain_note = None        # specific reason a cache is UNKNOWN (R18)
 
 
 # The single authoritative verdict every cache check reads from.
@@ -162,6 +163,21 @@ V_NOT_BAKED = "NOT_BAKED"      # not baked and no files
 V_REPLAY = "REPLAY"            # fluid replay (never a real bake)
 V_MEMORY = "MEMORY"           # stored in the .blend, no disk files
 V_NA = "NA"
+
+
+def reliability_reasons(e):
+    """Reasons Blender itself gives to distrust an otherwise-present cache,
+    independent of the files on disk. Disk AND memory caches share these, so the
+    same guard applies to both (R14/R15/R17). Returns a list of plain-English
+    reasons (empty when the cache looks reliable)."""
+    reasons = []
+    if getattr(e, "baking_in_progress", False):
+        reasons.append("a bake is still in progress")
+    if getattr(e, "cache_outdated", False):
+        reasons.append("the simulation settings changed since it was baked")
+    if getattr(e, "frame_skip", False):
+        reasons.append("frames were skipped during baking")
+    return reasons
 
 
 def cache_status(e):
@@ -210,9 +226,11 @@ def cache_status(e):
                             present, required, "")
     if not getattr(e, "certifiable", True):
         # Files cover the range, but we can't prove the referenced internal data
-        # is intact (GN disk bakes reference blob files we can't validate from
-        # Python). Honest answer: UNKNOWN, never a confident COMPLETE. (R09)
+        # is intact — either a GN disk bake whose blob files we can't validate
+        # from Python (R09), or a stage whose baked flag this Blender build does
+        # not expose (R18). Honest answer: UNKNOWN, never a confident COMPLETE.
         return CacheVerdict(V_UNVERIFIABLE, [], [], [], present, required,
+                            getattr(e, "uncertain_note", None) or
                             "bake files are present but their internal data "
                             "can't be fully verified")
     # Every required file is on disk — but Blender itself may signal the cache
@@ -220,17 +238,8 @@ def cache_status(e):
     # to withhold a confident PASS (R14/R15): a skipped-frame cache is suspect
     # even when it isn't marked outdated, and vice-versa. Report UNKNOWN, never
     # a green tick. (Downgrade-only — a True "baked" flag is still distrusted.)
-    baking = getattr(e, "baking_in_progress", False)
-    outdated = getattr(e, "cache_outdated", False)
-    skipped = getattr(e, "frame_skip", False)
-    if baking or outdated or skipped:
-        reasons = []
-        if baking:
-            reasons.append("a bake is still in progress")
-        if outdated:
-            reasons.append("the simulation settings changed since it was baked")
-        if skipped:
-            reasons.append("frames were skipped during baking")
+    reasons = reliability_reasons(e)
+    if reasons:
         note = ("Blender flags this cache as not a reliable finished bake — "
                 + "; ".join(reasons))
         return CacheVerdict(V_UNVERIFIABLE, [], [], [], present, required, note)
@@ -349,6 +358,11 @@ def inspect_rigidbody_world(scene):
     e = CacheEntry("Rigid Body World", "Rigid Body World", "rbw")
     pc = rbw.point_cache
     e.baked_flag = bool(getattr(pc, "is_baked", False))
+    # Memory cache, but the same staleness flags apply — a baked-but-outdated
+    # RBW must not get a clean PASS either (R17).
+    e.cache_outdated = bool(getattr(pc, "is_outdated", False))
+    e.frame_skip = bool(getattr(pc, "is_frame_skip", False))
+    e.baking_in_progress = bool(getattr(pc, "is_baking", False))
     e.scene_range = (scene.frame_start, scene.frame_end)
     e.cache_range = (int(getattr(pc, "frame_start", scene.frame_start)),
                      int(getattr(pc, "frame_end", scene.frame_end)))
@@ -398,6 +412,18 @@ _FLUID_STAGE_FLAG = {
 _FLUID_BAKING_FLAGS = (
     "is_cache_baking_data", "is_cache_baking_mesh", "is_cache_baking_noise",
     "is_cache_baking_particles", "is_cache_baking_guide")
+
+_MISSING = object()  # sentinel: an RNA property not exposed on this Blender build
+
+
+def _stage_flag_state(ds, flag_attr):
+    """Read a fluid stage's baked flag as 'baked' | 'unbaked' | 'unknown'.
+    'unknown' means the property isn't exposed on this Blender build — under the
+    UNKNOWN-over-false-PASS policy we must NOT assume success there (R18)."""
+    val = getattr(ds, flag_attr, _MISSING)
+    if val is _MISSING:
+        return "unknown"
+    return "baked" if val else "unbaked"
 
 
 def _scan_fluid_dir(data_dir, component):
@@ -474,11 +500,22 @@ def inspect_fluid_domain(obj, mod, scene):
                 continue
             # R13: an enabled stage whose own baked flag is OFF is not a valid
             # bake, even if stale files from an earlier bake still sit in its
-            # folder. Flag it rather than counting those files as coverage.
+            # folder. R18: if the flag property isn't exposed on this Blender
+            # build, we can't verify the stage — report UNKNOWN, never assume it
+            # is baked.
             flag_attr = _FLUID_STAGE_FLAG.get(comp_name)
-            if flag_attr is not None and not bool(getattr(ds, flag_attr, True)):
-                e.components_missing.append("%s (stage not baked)" % comp_name)
-                continue
+            if flag_attr is not None:
+                state = _stage_flag_state(ds, flag_attr)
+                if state == "unknown":
+                    e.certifiable = False
+                    e.uncertain_note = (
+                        "the '%s' stage's baked state isn't exposed on this "
+                        "Blender version, so the cache can't be fully verified"
+                        % comp_name)
+                    continue
+                if state == "unbaked":
+                    e.components_missing.append("%s (stage not baked)" % comp_name)
+                    continue
             cp, ce_empty, cu = _scan_fluid_dir(
                 os.path.join(e.cache_dir, comp_name), comp_name)
             gap = required - cp

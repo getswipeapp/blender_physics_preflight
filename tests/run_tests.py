@@ -318,6 +318,109 @@ def fluid_matcher_unit_tests():
             for label, got, expect in checks]
 
 
+def _run_check_entries(cid, entries):
+    """Invoke one real check function against a constructed list of CacheEntry
+    objects (bypasses disk enumeration), returning its worst status."""
+    from physics_preflight import engine, checks_cache  # noqa: F401
+    meta = next(m for m in engine.CHECKS if m.id == cid)
+    mk = engine._mk(meta)
+
+    class Ctx:
+        pass
+    ctx = Ctx()
+    ctx.scene = bpy.context.scene
+    ctx._physpf_caches = entries
+    results = meta.func(ctx, mk)
+    return worst_for_check(results, cid)
+
+
+def memory_reliability_tests():
+    """R17: the staleness guards (outdated / frame_skip / baking) must apply to
+    MEMORY caches and the Rigid Body World too, not just disk caches. is_outdated
+    doesn't flip under headless bake, so we drive the real #17/#19 check logic
+    with constructed entries (the exact false-PASS combination from the review)."""
+    from physics_preflight import cache_inspect as ci
+
+    def mem(kind="point", system="Cloth", baked=True, outdated=False,
+            skipped=False, baking=False, crange=(1, 10), srange=(1, 10)):
+        e = ci.CacheEntry("Obj", system, kind)
+        e.baked_flag = baked
+        e.memory = True
+        e.cache_outdated = outdated
+        e.frame_skip = skipped
+        e.baking_in_progress = baking
+        e.cache_range = crange
+        e.scene_range = srange
+        return e
+
+    out = []
+    # The headline case: memory + is_baked + is_outdated must NOT be PASS on #17.
+    got = _run_check_entries(17, [mem(outdated=True)])
+    out.append(("R17 memory cache outdated -> #17 UNKNOWN (not PASS)",
+                got == Status.UNKNOWN, got, Status.UNKNOWN))
+    # A clean memory cache is still a PASS.
+    got = _run_check_entries(17, [mem()])
+    out.append(("R17 memory cache clean -> #17 PASS",
+                got == Status.PASS, got, Status.PASS))
+    # Rigid Body World (bypasses cache_status) must honour the flags too.
+    got = _run_check_entries(17, [mem(kind="rbw", system="Rigid Body World",
+                                      skipped=True)])
+    out.append(("R17 RBW frame_skip -> #17 UNKNOWN (not PASS)",
+                got == Status.UNKNOWN, got, Status.UNKNOWN))
+    got = _run_check_entries(17, [mem(kind="rbw", system="Rigid Body World")])
+    out.append(("R17 RBW clean -> #17 PASS", got == Status.PASS, got, Status.PASS))
+    # #19 must not green-light coverage for a stale memory cache.
+    got = _run_check_entries(19, [mem(baking=True)])
+    out.append(("R19 memory cache baking -> #19 no PASS",
+                got != Status.PASS, got, "not PASS"))
+    got = _run_check_entries(19, [mem()])
+    out.append(("R19 memory cache clean -> #19 PASS",
+                got == Status.PASS, got, Status.PASS))
+    # reliability_reasons stays empty for a clean cache (no false downgrade).
+    clean = mem()
+    out.append(("R17 clean cache has no reliability reasons",
+                ci.reliability_reasons(clean) == [], ci.reliability_reasons(clean), []))
+    return out
+
+
+def stage_flag_state_tests():
+    """R18: a fluid stage baked-flag that this Blender build does not expose must
+    read as 'unknown' (-> UNKNOWN), never silently default to 'baked'."""
+    from physics_preflight import cache_inspect as ci
+
+    class DS:  # stand-in for domain_settings
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    out = []
+    cases = [
+        ("flag True -> baked", DS(has_cache_baked_mesh=True), "baked"),
+        ("flag False -> unbaked", DS(has_cache_baked_mesh=False), "unbaked"),
+        ("flag absent -> unknown (not baked!)", DS(), "unknown"),
+    ]
+    for label, ds, expect in cases:
+        got = ci._stage_flag_state(ds, "has_cache_baked_mesh")
+        out.append(("R18 stage flag: " + label, got == expect, got, expect))
+
+    # And the verdict routing: an 'unknown' stage makes a file-complete fluid
+    # UNVERIFIABLE (UNKNOWN), carrying its specific note.
+    e = ci.CacheEntry("Obj", "Fluid", "fluid")
+    e.baked_determinable = True
+    e.file_check_applicable = True
+    e.cache_dir = "/tmp/physpf_fluid"
+    e.frames_expected = [1, 2, 3]
+    e.frames_present = {1, 2, 3}
+    e.baked_flag = True
+    e.certifiable = False
+    e.uncertain_note = "the 'mesh' stage's baked state isn't exposed on this Blender version"
+    v = ci.cache_status(e)
+    out.append(("R18 unverifiable stage -> UNVERIFIABLE",
+                v.state == ci.V_UNVERIFIABLE, v.state, ci.V_UNVERIFIABLE))
+    out.append(("R18 unverifiable stage carries its note",
+                "isn't exposed" in (v.note or ""), v.note, "<note with reason>"))
+    return out
+
+
 def readonly_tests():
     """Scan must not change the scene: selection, active object, current frame
     or the object set. (Covers the Scan path; Export is a separate explicit
@@ -419,7 +522,9 @@ def main():
 
     # ---- verdict + GN + read-only unit tests (fast) ------------------------
     for label, ok, got, expect in (verdict_unit_tests() + gn_unit_tests()
-                                   + fluid_matcher_unit_tests() + readonly_tests()):
+                                   + fluid_matcher_unit_tests()
+                                   + memory_reliability_tests()
+                                   + stage_flag_state_tests() + readonly_tests()):
         if ok:
             passed += 1
             print("  PASS  unit: %s  -> %s" % (label, got))
@@ -431,6 +536,7 @@ def main():
 
     total = (len(CASES) + len(CACHE_REGRESSION) + len(verdict_unit_tests())
              + len(gn_unit_tests()) + len(fluid_matcher_unit_tests())
+             + len(memory_reliability_tests()) + len(stage_flag_state_tests())
              + len(readonly_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"

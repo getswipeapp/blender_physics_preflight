@@ -43,18 +43,28 @@ def c17_baked(ctx, mk):
     out = []
     for e in entries:
         name = e.obj_name
-        # Rigid Body World keeps its cache in the .blend; answer from the flag.
+        # Rigid Body World keeps its cache in the .blend; answer from the flag —
+        # but still honour the staleness flags so a baked-but-outdated RBW can't
+        # get a clean PASS (R17).
         if e.kind == "rbw":
-            if e.baked_flag:
-                out.append(mk(Status.PASS,
-                              "Rigid Body World cache is baked (stored in the "
-                              ".blend).", object_name=name))
-            else:
+            reasons = ci.reliability_reasons(e)
+            if not e.baked_flag:
                 out.append(mk(Status.WARNING,
                               "Rigid Body World is not baked. The render farm "
                               "will re-simulate and may differ from the viewport.",
                               object_name=name,
                               hint="Bake it in Scene > Rigid Body World > Cache."))
+            elif reasons:
+                out.append(mk(Status.UNKNOWN,
+                              "Rigid Body World is baked, but %s — it may not "
+                              "match the current simulation."
+                              % "; ".join(reasons), object_name=name,
+                              hint="Re-bake the Rigid Body World cache to be "
+                                   "sure it's current."))
+            else:
+                out.append(mk(Status.PASS,
+                              "Rigid Body World cache is baked (stored in the "
+                              ".blend).", object_name=name))
             continue
         v = ci.cache_status(e)
         s = v.state
@@ -66,15 +76,25 @@ def c17_baked(ctx, mk):
                           hint="Set the cache type to 'All' and bake for a fixed "
                                "result."))
         elif s == ci.V_MEMORY:
-            if e.baked_flag:
-                out.append(mk(Status.PASS,
-                              "%s is baked into the .blend (memory cache)."
-                              % e.system, object_name=name))
-            else:
+            reasons = ci.reliability_reasons(e)
+            if not e.baked_flag:
                 out.append(mk(Status.WARNING,
                               "%s is not baked; the render may differ from the "
                               "viewport." % e.system, object_name=name,
                               hint="Bake the simulation before rendering."))
+            elif reasons:
+                # A memory cache has no files to verify, but Blender's own flags
+                # can still say it's stale — don't green-light it (R17).
+                out.append(mk(Status.UNKNOWN,
+                              "%s is baked into the .blend, but %s — it may not "
+                              "match the current simulation."
+                              % (e.system, "; ".join(reasons)), object_name=name,
+                              hint="Re-bake the simulation to be sure the cache "
+                                   "is current."))
+            else:
+                out.append(mk(Status.PASS,
+                              "%s is baked into the .blend (memory cache)."
+                              % e.system, object_name=name))
         elif s == ci.V_UNVERIFIABLE:
             if not e.baked_determinable:
                 out.append(mk(Status.UNKNOWN,
@@ -277,7 +297,10 @@ def c19_range_covers(ctx, mk):
         # the real story (reported by #18/#20) and #19 must not reassure.
         v = ci.cache_status(e)
         if v.state == ci.V_MEMORY:
-            if e.baked_flag:
+            # Only call range coverage a PASS when the memory cache is both baked
+            # and not flagged stale/outdated/baking — #17 carries the staleness
+            # warning otherwise (R17).
+            if e.baked_flag and not ci.reliability_reasons(e):
                 out.append(mk(Status.PASS,
                               "Bake range %d–%d covers the render range %d–%d."
                               % (cs, ce, ss, se), object_name=name))
