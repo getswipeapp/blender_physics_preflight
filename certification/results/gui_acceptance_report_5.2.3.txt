@@ -1,0 +1,77 @@
+GUI ACCEPTANCE TEST — Blender 5.2.3 LTS (macOS) — performed by the owner (Keith)
+Date: 2026-11-10
+Package: physics_preflight_c977ac2.zip
+
+Procedure (all steps passed):
+  1. Installed the extension from disk and enabled it.
+  2. Opened the Physics Preflight panel (View3D N-panel tab).
+  3. Scan Scene on the default scene -> 0 problems (ran cleanly, no errors).
+  4. Added Cloth to the cube, enabled Disk Cache, Baked (250 frames on disk),
+     saved as preflight_test.blend.
+  5. Scan Scene (healthy baked cache) -> cache checks correctly SILENT; only a
+     real collision-setup WARNING (#7) and the inherent FPS UNKNOWN (#23).
+  6. DELETED all .bphys files from blendcache_preflight_test/ in Finder (Blender
+     still showed "250 frames on disk" / "Delete Bake" — i.e. Blender's own flag
+     was fooled).
+  7. Scan Scene again (no re-bake) -> #17 and #18 correctly FAILED: "Cloth is
+     marked baked, but no cache files exist on disk." THE DIFFERENTIATOR WORKS.
+  8. Export Text Report -> produced the full report below, no error.
+
+Scene safety: repeated scans changed nothing in the scene (confirmed by the
+automated read-only/filesystem tests and by observation during this session).
+
+VERDICT: PASS — install, panel, scan, healthy-cache, deleted-cache catch, and
+report export all worked in the real GUI on real Blender 5.2.3.
+
+=====================  EXPORTED REPORT (verbatim)  =====================
+
+Physics Preflight report
+Blender 5.2.3 LTS
+File: /Users/ralph/Downloads/preflight_test.blend
+====================================================================
+Summary: 2 FAIL  1 WARNING  1 UNKNOWN  5 PASS  14 N/A
+
+Physics Setup
+-------------
+[ OK ] #1 Unapplied scale / rotation on physics objects
+        [ OK ]: Physics objects have scale applied (and rotation where it matters).
+[ -- ] #2 Suspicious rigid-body mass for the object size
+[ -- ] #3 Objects overlapping at the start frame
+[ -- ] #4 Collision shape mismatch (Convex Hull on a concave object)
+[ -- ] #5 High-poly or non-manifold colliders
+[ -- ] #6 Rigid Body World disabled / misconfigured
+[WARN] #7 Cloth / soft-body collision not configured
+        [WARN] (Cube): Cloth collision is on, but no object in the scene has a Collision modifier to collide with.
+               > Add a Collision modifier to the floor / collider object.
+[ OK ] #8 Negative scale or scaled parents on physics objects
+        [ OK ]: No negative scale or scaled parents on physics objects.
+[ OK ] #9 Real-world size sanity for the scene scale
+        [ OK ]: Physics objects are a sensible real-world size.
+[ -- ] #10 Origin far from geometry on active rigid bodies
+[ -- ] #11 Collision margin too large for the object size
+[ -- ] #12 Animated passive collider not marked 'Animated'
+[ -- ] #13 Broken rigid-body constraints
+[ -- ] #14 Collision modifier is above deforming modifiers
+[ -- ] #15 Cloth pin group empty or missing
+[ -- ] #16 Fluid flow/effector outside the domain, or domain with no flow
+
+Simulation Caches
+-----------------
+[FAIL] #17 Is the simulation baked?
+        [FAIL] (Cube): Cloth is marked baked, but no cache files exist on disk (see #18).
+               > Re-bake the simulation.
+[FAIL] #18 Cache files actually present on disk (not just the 'baked' flag)
+        [FAIL] (Cube): Blender reports 'Cloth' as baked, but NO cache files exist on disk. The render farm will re-simulate or freeze.
+               > Re-bake the simulation.
+[ -- ] #19 Baked range covers the render range
+[ -- ] #20 Frame gaps: every frame cached (not sampled)
+[ OK ] #21 Two simulations sharing one cache location
+        [ OK ]: Each simulation uses its own cache location.
+[ OK ] #22 Non-portable cache paths (absolute / outside the project)
+        [ OK ]: All cache paths are relative and inside the project folder.
+[ ?? ] #23 FPS / time-scale changed after baking
+        [ ?? ]: Blender doesn't store the FPS used at bake time. Current scene FPS is 24 — if you changed FPS or time scale after baking, re-bake so the timing matches.
+               > When in doubt, delete the cache and re-bake.
+
+====================================================================
+Read-only tool. For disk-backed caches we verify the actual files frame by frame rather than trusting Blender's 'baked' flag. Memory caches, packed Geometry Nodes bakes and unsaved files can't be proven from disk and are reported UNKNOWN / N/A, never a false PASS.

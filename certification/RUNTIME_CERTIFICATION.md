@@ -16,9 +16,12 @@
   each, including real cloth/soft-body/particle/fluid bakes and damaged-cache
   adversarial cases.
 - **Read-only / filesystem safety: PASS** on all four — a scan changes nothing.
-- **Still open (not claimed as passing):** the GUI acceptance test on 5.2 (needs
-  Keith — checklist ready), a live Geometry-Nodes *disk* bake, and **Windows**
-  (no Windows host here — UNKNOWN, documented in §5).
+- **GUI acceptance on 5.2.3: PASS** (performed by the owner, 2026-11-10) — install,
+  panel, scan, healthy-cache, the deleted-cache catch (the differentiator), and
+  report export all worked in the real Blender window. Evidence:
+  `results/gui_acceptance_report_5.2.3.txt`.
+- **Still open (not claimed as passing):** a live Geometry-Nodes *disk* bake, and
+  **Windows** (no Windows host here — UNKNOWN, documented in §5).
 
 ---
 
@@ -81,7 +84,7 @@ These are **not** claimed as passing; they are the honest remaining gaps.
 
 | Item | Status | Why it can't be headless-certified here |
 |------|--------|------------------------------------------|
-| GUI acceptance on 5.2 (install, panel, scan, deleted-cache "no false pass", export) | ⏳ pending Keith | Needs the real Blender window + a human; checklist prepared (`GUI_ACCEPTANCE_CHECKLIST.md`). |
+| GUI acceptance on 5.2 (install, panel, scan, deleted-cache "no false pass", export) | ✅ **PASS** (owner, 2026-11-10) | Done in the real Blender window: baked a cloth cache, deleted its files in Finder while Blender still showed "250 frames on disk", re-scanned → #17/#18 correctly FAILED. Report export worked. Evidence: `results/gui_acceptance_report_5.2.3.txt`. |
 | Live Geometry Nodes **disk** bake integration | ⏳ UNKNOWN | GN sim-zone disk bakes are too fragile to script headlessly; the add-on already reports UNKNOWN for them by design, and the logic is unit-tested. |
 | `is_outdated` / stage-flag-off live triggers (R13/R14) | ⏳ UNKNOWN | Set by Blender's depsgraph during interactive editing; don't flip under `--factory-startup`. Verdict logic is unit-tested via the real check functions. |
 | Windows cache-path handling | ⏳ UNKNOWN (see §5) | No Windows runtime available on this host. |
