@@ -115,11 +115,31 @@ class PHYSPF_OT_export_report(Operator):
         return {"FINISHED"}
 
 
+class PHYSPF_OT_toggle_detail(Operator):
+    bl_idname = "physpf.toggle_detail"
+    bl_label = "Toggle Finding Detail"
+    bl_description = "Show or hide the full explanation for this check"
+    bl_options = {"INTERNAL"}
+
+    key: StringProperty()
+
+    def execute(self, context):
+        wm = context.window_manager
+        collapsed = set(wm.physpf_collapsed.split()) if wm.physpf_collapsed else set()
+        if self.key in collapsed:
+            collapsed.discard(self.key)
+        else:
+            collapsed.add(self.key)
+        wm.physpf_collapsed = " ".join(sorted(collapsed))
+        return {"FINISHED"}
+
+
 classes = (
     PHYSPF_ResultItem,
     PHYSPF_OT_scan,
     PHYSPF_OT_select_object,
     PHYSPF_OT_export_report,
+    PHYSPF_OT_toggle_detail,
 )
 
 
@@ -131,9 +151,13 @@ def register():
     bpy.types.WindowManager.physpf_show_passed = BoolProperty(
         name="Show Passed", default=False,
         description="Also show checks that passed or do not apply")
+    # space-separated list of check ids whose detail is collapsed. Empty by
+    # default, so every finding starts EXPANDED (nothing hidden from the user).
+    bpy.types.WindowManager.physpf_collapsed = StringProperty(default="")
 
 
 def unregister():
+    del bpy.types.WindowManager.physpf_collapsed
     del bpy.types.WindowManager.physpf_show_passed
     del bpy.types.WindowManager.physpf_has_run
     del bpy.types.WindowManager.physpf_results
