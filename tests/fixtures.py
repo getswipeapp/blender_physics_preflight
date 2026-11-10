@@ -665,9 +665,22 @@ def _make_fluid_guide_blend(outdir, frame_end=4):
     reset()
     sc = bpy.context.scene
     sc.frame_start, sc.frame_end = 1, frame_end
+    # Create ALL geometry first, before touching any fluid/guide settings. On
+    # Blender 4.2 headless, adding an object *after* guiding is enabled on the
+    # domain triggers a ViewLayer.update() crash (a Blender ops/depsgraph quirk,
+    # unrelated to the add-on). Building geometry up front avoids it.
     bpy.ops.mesh.primitive_cube_add(size=4, location=(0, 0, 0))
     dom = bpy.context.active_object
     dom.name = "Domain"
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, location=(0, 0, -1.2))
+    fl = bpy.context.active_object
+    fl.name = "Inflow"
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, location=(0, 0, 1.2))
+    ef = bpy.context.active_object
+    ef.name = "Guide"
+    bpy.context.view_layer.update()
+
+    # Now configure modifiers (no more object creation after this point).
     m = dom.modifiers.new("Fluid", "FLUID")
     m.fluid_type = "DOMAIN"
     ds = m.domain_settings
@@ -676,27 +689,23 @@ def _make_fluid_guide_blend(outdir, frame_end=4):
     ds.cache_type = "ALL"
     ds.cache_frame_start, ds.cache_frame_end = 1, frame_end
     ds.cache_directory = "//fluidcache"
-    ds.use_guide = True
-    try:
-        ds.guide_source = "EFFECTOR"
-    except Exception:
-        pass
-    # smoke inflow
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, location=(0, 0, -1.2))
-    fl = bpy.context.active_object
-    fl.name = "Inflow"
+
     f = fl.modifiers.new("Fluid", "FLUID")
     f.fluid_type = "FLOW"
     f.flow_settings.flow_type = "SMOKE"
     f.flow_settings.flow_behavior = "INFLOW"
-    # guide effector
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, location=(0, 0, 1.2))
-    ef = bpy.context.active_object
-    ef.name = "Guide"
+
     efm = ef.modifiers.new("Fluid", "FLUID")
     efm.fluid_type = "EFFECTOR"
     try:
         efm.effector_settings.effector_type = "GUIDE"
+    except Exception:
+        pass
+
+    # Enable guiding on the domain LAST, once every object already exists.
+    ds.use_guide = True
+    try:
+        ds.guide_source = "EFFECTOR"
     except Exception:
         pass
     blend = os.path.join(outdir, "fluid_guide.blend")

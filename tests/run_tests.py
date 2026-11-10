@@ -439,7 +439,13 @@ def readonly_tests():
             "sel": sorted(o.name for o in bpy.context.selected_objects),
             "active": getattr(bpy.context.view_layer.objects.active, "name", None),
             "frame": sc.frame_current,
+            "frame_range": (sc.frame_start, sc.frame_end),
             "names": sorted(o.name for o in sc.objects),
+            "mode": getattr(bpy.context, "mode", None),
+            # new datablock counts — a scan must not create texts/objects/meshes
+            "n_texts": len(bpy.data.texts),
+            "n_objects": len(bpy.data.objects),
+            "n_meshes": len(bpy.data.meshes),
         }
     before = snap()
     engine.run_all(bpy.context)
@@ -451,9 +457,59 @@ def readonly_tests():
          after["active"], before["active"]),
         ("read-only: current frame unchanged", before["frame"] == after["frame"],
          after["frame"], before["frame"]),
+        ("read-only: frame range unchanged",
+         before["frame_range"] == after["frame_range"],
+         after["frame_range"], before["frame_range"]),
         ("read-only: object set unchanged", before["names"] == after["names"],
          len(after["names"]), len(before["names"])),
+        ("read-only: mode unchanged", before["mode"] == after["mode"],
+         after["mode"], before["mode"]),
+        ("read-only: no new text datablocks created",
+         before["n_texts"] == after["n_texts"], after["n_texts"], before["n_texts"]),
+        ("read-only: no new object datablocks", before["n_objects"] == after["n_objects"],
+         after["n_objects"], before["n_objects"]),
+        ("read-only: no new mesh datablocks", before["n_meshes"] == after["n_meshes"],
+         after["n_meshes"], before["n_meshes"]),
     ]
+
+
+def readonly_filesystem_tests():
+    """A scan must not WRITE to disk — it only reads cache files. Build a real
+    baked soft-body (so there are cache files on disk), snapshot the whole cache
+    tree (path -> size, mtime), run every check, and assert nothing changed and
+    no file was added or removed."""
+    out = []
+    outdir = tempfile.mkdtemp(prefix="physpf_ro_fs_")
+    try:
+        fixtures.build_softbody_pass(outdir)
+    except Exception as ex:
+        return [("read-only fs: build soft-body cache", False, repr(ex), "built")]
+
+    def tree_snap(root):
+        snap = {}
+        for dirpath, _dirs, files in os.walk(root):
+            for fn in files:
+                p = os.path.join(dirpath, fn)
+                try:
+                    st = os.stat(p)
+                    snap[os.path.relpath(p, root)] = (st.st_size, st.st_mtime_ns)
+                except OSError:
+                    snap[os.path.relpath(p, root)] = ("ERR",)
+        return snap
+
+    before = tree_snap(outdir)
+    engine.run_all(bpy.context)
+    after = tree_snap(outdir)
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    changed = sorted(k for k in before if k in after and before[k] != after[k])
+    out.append(("read-only fs: cache had files to guard", len(before) > 0,
+                len(before), ">0"))
+    out.append(("read-only fs: no files added by a scan", added == [], added, []))
+    out.append(("read-only fs: no files removed by a scan", removed == [], removed, []))
+    out.append(("read-only fs: no file contents/mtime changed", changed == [],
+                changed, []))
+    return out
 
 
 def main():
@@ -524,7 +580,8 @@ def main():
     for label, ok, got, expect in (verdict_unit_tests() + gn_unit_tests()
                                    + fluid_matcher_unit_tests()
                                    + memory_reliability_tests()
-                                   + stage_flag_state_tests() + readonly_tests()):
+                                   + stage_flag_state_tests() + readonly_tests()
+                                   + readonly_filesystem_tests()):
         if ok:
             passed += 1
             print("  PASS  unit: %s  -> %s" % (label, got))
@@ -537,7 +594,7 @@ def main():
     total = (len(CASES) + len(CACHE_REGRESSION) + len(verdict_unit_tests())
              + len(gn_unit_tests()) + len(fluid_matcher_unit_tests())
              + len(memory_reliability_tests()) + len(stage_flag_state_tests())
-             + len(readonly_tests()))
+             + len(readonly_tests()) + len(readonly_filesystem_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))
