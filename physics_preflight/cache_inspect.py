@@ -141,6 +141,9 @@ class CacheEntry:
         self.memory = False               # cache lives inside the .blend
         self.certifiable = True           # False: files visible but integrity
         #                                   can't be proven (GN disk blob data)
+        self.cache_frame_offset = 0       # fluid playback offset (R12)
+        self.cache_outdated = None        # point cache is_outdated (R14)
+        self.frame_skip = None            # point cache is_frame_skip (R14)
 
 
 # The single authoritative verdict every cache check reads from.
@@ -211,6 +214,15 @@ def cache_status(e):
         return CacheVerdict(V_UNVERIFIABLE, [], [], [], present, required,
                             "bake files are present but their internal data "
                             "can't be fully verified")
+    if getattr(e, "cache_outdated", False):
+        # Every required file is on disk, but Blender itself marks the cache
+        # outdated (the simulation settings changed since it was baked). That is
+        # not a confident PASS — report UNKNOWN, never a green tick. (R14)
+        note = ("Blender has flagged this cache as outdated — the simulation "
+                "settings changed since it was baked")
+        if getattr(e, "frame_skip", False):
+            note += "; frames were also skipped during baking"
+        return CacheVerdict(V_UNVERIFIABLE, [], [], [], present, required, note)
     return CacheVerdict(V_COMPLETE, [], [], [], present, required, "")
 
 
@@ -267,6 +279,12 @@ def _scan_point_cache_files(cache_dir, prefix, index, frames):
 def inspect_point_cache(obj, system, pc, scene):
     e = CacheEntry(obj.name, system, "point")
     e.baked_flag = bool(getattr(pc, "is_baked", False))
+    # Blender's own staleness bits. is_outdated means the sim settings changed
+    # since the bake; is_frame_skip means frames were skipped. Used only to
+    # DOWNGRADE a verdict (never to upgrade), since a True baked flag is the one
+    # we distrust. (R14)
+    e.cache_outdated = bool(getattr(pc, "is_outdated", False))
+    e.frame_skip = bool(getattr(pc, "is_frame_skip", False))
     e.scene_range = (scene.frame_start, scene.frame_end)
     cs = int(getattr(pc, "frame_start", scene.frame_start))
     ce = int(getattr(pc, "frame_end", scene.frame_end))
@@ -343,6 +361,19 @@ _FLUID_COMPONENT_RE = {
     "mesh": re.compile(r"^fluid_mesh_(\d{4})\.(bobj\.gz|bobj|vdb)$", re.IGNORECASE),
     "noise": re.compile(r"^fluid_noise_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
     "particles": re.compile(r"^fluid_particles_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
+    # Mantaflow writes one solver-config file per frame (config/config_NNNN.uni,
+    # verified on real 5.2.3 bakes). A complete bake always includes these; if
+    # they go missing the cache can't be reloaded for render, so config is a
+    # REQUIRED component, not an optional sub-cache (R11).
+    "config": re.compile(r"^config_(\d{4})\.uni$", re.IGNORECASE),
+}
+
+# Which fluid sub-cache maps to which per-stage "baked" flag. An enabled stage
+# whose flag is OFF is not a valid bake even if stale files remain (R13).
+_FLUID_STAGE_FLAG = {
+    "mesh": "has_cache_baked_mesh",
+    "noise": "has_cache_baked_noise",
+    "particles": "has_cache_baked_particles",
 }
 
 
@@ -376,6 +407,7 @@ def inspect_fluid_domain(obj, mod, scene):
     ce = int(getattr(ds, "cache_frame_end", scene.frame_end))
     e.cache_range = (cs, ce)
     e.replay = (getattr(ds, "cache_type", "") == "REPLAY")
+    e.cache_frame_offset = int(getattr(ds, "cache_frame_offset", 0) or 0)  # R12
     raw = getattr(ds, "cache_directory", "") or ""
     e.raw_path = raw
     e.cache_dir = _abspath(raw) if raw else None
@@ -397,16 +429,28 @@ def inspect_fluid_domain(obj, mod, scene):
         e.frames_present = data_present
         e.frames_empty = data_empty
         e.frames_unreadable = data_unread
-        # Each enabled sub-cache (liquid mesh, smoke noise, liquid particles)
-        # must cover the SAME frames, not merely "have at least one file". A
-        # sub-cache missing frames makes the whole bake incomplete (R01).
+        # Each required sub-cache must cover the SAME frames, not merely "have at
+        # least one file". A sub-cache missing frames makes the whole bake
+        # incomplete (R01). config/ is required on every bake (R11); mesh/noise/
+        # particles only when their feature is enabled.
         use_particles = any(bool(getattr(ds, a, False)) for a in (
             "use_spray_particles", "use_foam_particles",
             "use_bubble_particles", "use_tracer_particles"))
-        for comp_name, enabled in (("mesh", bool(getattr(ds, "use_mesh", False))),
-                                   ("noise", bool(getattr(ds, "use_noise", False))),
-                                   ("particles", use_particles)):
+        components = [
+            ("config", True),
+            ("mesh", bool(getattr(ds, "use_mesh", False))),
+            ("noise", bool(getattr(ds, "use_noise", False))),
+            ("particles", use_particles),
+        ]
+        for comp_name, enabled in components:
             if not enabled:
+                continue
+            # R13: an enabled stage whose own baked flag is OFF is not a valid
+            # bake, even if stale files from an earlier bake still sit in its
+            # folder. Flag it rather than counting those files as coverage.
+            flag_attr = _FLUID_STAGE_FLAG.get(comp_name)
+            if flag_attr is not None and not bool(getattr(ds, flag_attr, True)):
+                e.components_missing.append("%s (stage not baked)" % comp_name)
                 continue
             cp, ce_empty, cu = _scan_fluid_dir(
                 os.path.join(e.cache_dir, comp_name), comp_name)

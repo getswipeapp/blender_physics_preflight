@@ -97,6 +97,12 @@ CASES = [
     ("HS fluid missing data frame (fail)", 18, fixtures.build_fluid_missing_data_frame, True, {Status.FAIL}),
     ("HS fluid missing mesh frame (fail)", 18, fixtures.build_fluid_missing_mesh_frame, True, {Status.FAIL}),
     ("HS fluid mislabeled data-in-mesh (fail)", 18, fixtures.build_fluid_mislabeled_mesh, True, {Status.FAIL}),
+    # R11: config/ is a required component; deleting one config frame fails #18
+    # even though data/ and mesh/ are intact.
+    ("HS fluid missing config frame (fail)", 18, fixtures.build_fluid_missing_config, True, {Status.FAIL}),
+    # R12: a non-zero cache frame offset makes #19 UNKNOWN (coverage can't be
+    # confirmed from the raw range), never a false PASS.
+    ("R12 fluid cache offset (unknown)", 19, fixtures.build_fluid_offset_unknown, True, {Status.UNKNOWN}),
 ]
 
 
@@ -126,7 +132,8 @@ def verdict_unit_tests():
 
     def entry(present, expected=(1, 2, 3, 4, 5), baked=True, empty=(),
               unreadable=(), replay=False, memory=False, determinable=True,
-              applicable=True, components=(), sampled=False, step=1):
+              applicable=True, components=(), sampled=False, step=1,
+              outdated=False):
         e = ci.CacheEntry("Obj", "Cloth", "point")
         e.baked_flag = baked
         e.baked_determinable = determinable
@@ -141,6 +148,7 @@ def verdict_unit_tests():
         e.sampled = sampled
         e.frame_step = step
         e.components_missing = list(components)
+        e.cache_outdated = outdated
         return e
 
     cases = [
@@ -161,6 +169,23 @@ def verdict_unit_tests():
                                            sampled=True, step=2), ci.V_INCOMPLETE),
         ("F02 fluid missing mesh sub-cache",
          entry(present=[1, 2, 3, 4, 5], components=["mesh"]), ci.V_INCOMPLETE),
+        # R11: a missing config sub-cache makes a full data set INCOMPLETE.
+        ("R11 fluid missing config sub-cache",
+         entry(present=[1, 2, 3, 4, 5], components=["config (missing 1 frame)"]),
+         ci.V_INCOMPLETE),
+        # R13: an enabled stage whose baked flag is off is flagged as a missing
+        # component even when (stale) files are present -> not COMPLETE.
+        ("R13 fluid stage-not-baked sub-cache",
+         entry(present=[1, 2, 3, 4, 5], components=["noise (stage not baked)"]),
+         ci.V_INCOMPLETE),
+        # R14: a complete cache Blender has marked outdated is not a confident
+        # PASS -> UNVERIFIABLE (UNKNOWN), never COMPLETE.
+        ("R14 complete but outdated -> UNVERIFIABLE",
+         entry(present=[1, 2, 3, 4, 5], outdated=True), ci.V_UNVERIFIABLE),
+        # R14: outdated must not override a harder failure — no files is still
+        # EMPTY, not a soft UNKNOWN.
+        ("R14 outdated but no files -> EMPTY",
+         entry(present=[], baked=True, outdated=True), ci.V_EMPTY),
     ]
     out = []
     for label, e, expect in cases:

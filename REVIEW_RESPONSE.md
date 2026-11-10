@@ -138,3 +138,31 @@ Test suite: **91/91 on Blender 5.2.3** (added the mislabeled-file fixture, 8 flu
 - Headless runs on Blender 4.2/4.5/5.0; a live GN disk-bake integration test
   (its logic is unit-tested; GN disk now reports UNKNOWN regardless);
   per-fixture exact-status assertions; GUI acceptance; Windows paths.
+
+---
+
+# Re-review v5 responses (commit 82f0fe2 → this commit)
+
+Round 5 confirmed R09/R10 fixed at source and raised four new omissions. Each was
+verified against a real Blender 5.2.3 bake (probes), then fixed so the add-on can
+only become *more* cautious (UNKNOWN / FAIL), never falsely reassure.
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| **R11** | Fluid `config/` files were not checked — deleting them left a COMPLETE verdict | **Fixed.** A real bake writes one `config/config_NNNN.uni` per frame (confirmed by probe). `config` is now a **required** fluid component scanned over the full range; a missing config frame makes the bake INCOMPLETE → #18 FAIL. Covered by a **real-bake integration test** (`build_fluid_missing_config`) plus a verdict unit test. |
+| **R12** | `cache_frame_offset` was ignored — a shifted cache could get a false coverage PASS | **Fixed.** The offset is captured on the fluid entry; when it is non-zero, #19 (range covers render range) reports **UNKNOWN** instead of PASS, because the baked range no longer maps straight onto the render range. Covered by a **real-bake integration test** (`build_fluid_offset_unknown`, offset=5 → #19 UNKNOWN). |
+| **R13** | Only `has_cache_baked_data` was read; an enabled stage with its flag off but stale files could be miscounted | **Fixed.** Each enabled sub-cache (mesh/noise/particles) is reconciled against its own `has_cache_baked_<stage>` flag. A stage whose flag is **off** is reported "stage not baked" (→ INCOMPLETE) regardless of stray files. The flag is used **only to downgrade** (a True flag is still distrusted, per the product's premise). Verdict unit-tested. |
+| **R14** | Point-cache `is_outdated` / `is_frame_skip` were ignored — a stale cache with files present could PASS | **Fixed.** Both are captured on point-cache entries. When every file is present **but** Blender marks the cache outdated, `cache_status()` returns UNKNOWN (UNVERIFIABLE) with a clear note, never COMPLETE. Downgrade-only. Verdict unit-tested (outdated→UNKNOWN, and outdated-with-no-files still EMPTY so it can't soften a harder failure). |
+
+**Note on R14 live testing:** `is_outdated` is set by Blender's depsgraph in response to
+interactive edits and does **not** flip under headless `--factory-startup` (verified by
+probe: changing cloth quality / frame range left it False). The verdict logic is therefore
+unit-tested deterministically; confirming the live flip belongs to the GUI runtime matrix.
+
+**Note on R13 live testing:** after a full headless bake every `has_cache_baked_*` flag is
+True and Blender exposes no way to script the "enabled stage, flag off, stale files present"
+state. The reconciliation is unit-tested at the verdict level; the live trigger is a
+runtime-matrix item.
+
+Test suite: **97/97 on Blender 5.2.3** (added two real-bake fluid fixtures for R11/R12 and
+four verdict unit tests for R11/R13/R14).

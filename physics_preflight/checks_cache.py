@@ -249,6 +249,20 @@ def c19_range_covers(ctx, mk):
         cs, ce = e.cache_range
         ss, se = e.scene_range
         name = e.obj_name
+        off = int(getattr(e, "cache_frame_offset", 0) or 0)
+        if off:
+            # A cache frame offset shifts which cached frame plays at each scene
+            # frame, so the baked range no longer lines up with the render range
+            # directly. We won't assert coverage from the raw numbers. (R12)
+            out.append(mk(Status.UNKNOWN,
+                          "%s has a cache frame offset of %d, so the baked range "
+                          "(%d–%d) doesn't map straight onto the render range "
+                          "(%d–%d). Coverage can't be confirmed automatically."
+                          % (e.system, off, cs, ce, ss, se),
+                          object_name=name,
+                          hint="Set the offset to 0, or check by hand that the "
+                               "shifted range still covers the scene."))
+            continue
         if cs > ss or ce < se:
             out.append(mk(Status.WARNING,
                           "Bake covers frames %d–%d but the scene renders %d–%d. "

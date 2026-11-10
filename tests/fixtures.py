@@ -635,6 +635,30 @@ def build_fluid_mislabeled_mesh(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+def build_fluid_missing_config(outdir):
+    """R11: a real bake, then delete a config/ file. config is a required
+    component, so its absence must FAIL #18 even though data/ is intact."""
+    blend = _make_fluid_blend(outdir, use_mesh=True)
+    cfg = os.path.join(outdir, "fluidcache", "config")
+    files = sorted(os.listdir(cfg))
+    assert files, "expected baked fluid config files"
+    os.remove(os.path.join(cfg, files[-1]))  # delete a required config frame
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_fluid_offset_unknown(outdir):
+    """R12: a fully-baked fluid whose cache_frame_offset is non-zero. The baked
+    range no longer maps straight onto the render range, so #19 must report
+    UNKNOWN rather than a false 'range covers' PASS."""
+    blend = _make_fluid_blend(outdir, use_mesh=True)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+    for o in bpy.context.scene.objects:
+        for md in o.modifiers:
+            if md.type == "FLUID" and md.fluid_type == "DOMAIN":
+                md.domain_settings.cache_frame_offset = 5
+    bpy.ops.wm.save_mainfile()
+
+
 def build_22_fail(outdir):
     reset()
     sc = bpy.context.scene
