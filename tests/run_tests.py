@@ -473,6 +473,47 @@ def readonly_tests():
     ]
 
 
+def roundtrip_fix_tests():
+    """A finding must CLEAR when the problem is fixed, not only appear when it
+    breaks (the owner verified this by hand: delete the cache files -> #18 FAIL,
+    put them back -> #18 PASS). Prove the full round-trip on a real baked cache:
+    PASS -> (delete a frame) FAIL -> (restore it) PASS again."""
+    import glob
+    import shutil
+    out = []
+    outdir = tempfile.mkdtemp(prefix="physpf_roundtrip_")
+    try:
+        fixtures.build_softbody_pass(outdir)
+    except Exception as ex:
+        return [("roundtrip: build soft-body", False, repr(ex), "built")]
+
+    r = engine.run_all(bpy.context)
+    s1 = worst_for_check(r, 18)
+    out.append(("roundtrip 1/3 baked+present -> #18 PASS", s1 == Status.PASS,
+                s1, Status.PASS))
+
+    caches = glob.glob(os.path.join(outdir, "blendcache_*"))
+    files = sorted(glob.glob(os.path.join(caches[0], "*.bphys"))) if caches else []
+    if not files:
+        out.append(("roundtrip: found cache files", False, len(files), ">0"))
+        return out
+    victim = files[-1]
+    backup = victim + ".bak"
+    shutil.copy2(victim, backup)
+    os.remove(victim)                         # break it: one frame missing
+    r = engine.run_all(bpy.context)
+    s2 = worst_for_check(r, 18)
+    out.append(("roundtrip 2/3 frame deleted -> #18 FAIL", s2 == Status.FAIL,
+                s2, Status.FAIL))
+
+    shutil.move(backup, victim)               # fix it: restore the frame
+    r = engine.run_all(bpy.context)
+    s3 = worst_for_check(r, 18)
+    out.append(("roundtrip 3/3 frame restored -> #18 PASS again",
+                s3 == Status.PASS, s3, Status.PASS))
+    return out
+
+
 def readonly_filesystem_tests():
     """A scan must not WRITE to disk — it only reads cache files. Build a real
     baked soft-body (so there are cache files on disk), snapshot the whole cache
@@ -581,7 +622,8 @@ def main():
                                    + fluid_matcher_unit_tests()
                                    + memory_reliability_tests()
                                    + stage_flag_state_tests() + readonly_tests()
-                                   + readonly_filesystem_tests()):
+                                   + readonly_filesystem_tests()
+                                   + roundtrip_fix_tests()):
         if ok:
             passed += 1
             print("  PASS  unit: %s  -> %s" % (label, got))
@@ -594,7 +636,8 @@ def main():
     total = (len(CASES) + len(CACHE_REGRESSION) + len(verdict_unit_tests())
              + len(gn_unit_tests()) + len(fluid_matcher_unit_tests())
              + len(memory_reliability_tests()) + len(stage_flag_state_tests())
-             + len(readonly_tests()) + len(readonly_filesystem_tests()))
+             + len(readonly_tests()) + len(readonly_filesystem_tests())
+             + len(roundtrip_fix_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))
