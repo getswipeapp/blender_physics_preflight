@@ -134,12 +134,29 @@ class PHYSPF_OT_toggle_detail(Operator):
         return {"FINISHED"}
 
 
+class PHYSPF_OT_set_filter(Operator):
+    bl_idname = "physpf.set_filter"
+    bl_label = "Filter By Severity"
+    bl_description = ("Show only this severity. Click again to show everything. "
+                      "Handy when a scan turns up a lot of findings")
+    bl_options = {"INTERNAL"}
+
+    sev: StringProperty()
+
+    def execute(self, context):
+        wm = context.window_manager
+        # Clicking the active filter again clears it (back to showing all).
+        wm.physpf_filter = "" if wm.physpf_filter == self.sev else self.sev
+        return {"FINISHED"}
+
+
 classes = (
     PHYSPF_ResultItem,
     PHYSPF_OT_scan,
     PHYSPF_OT_select_object,
     PHYSPF_OT_export_report,
     PHYSPF_OT_toggle_detail,
+    PHYSPF_OT_set_filter,
 )
 
 
@@ -154,9 +171,12 @@ def register():
     # space-separated list of check ids whose detail is collapsed. Empty by
     # default, so every finding starts EXPANDED (nothing hidden from the user).
     bpy.types.WindowManager.physpf_collapsed = StringProperty(default="")
+    # active severity filter: "" (all), "FAIL", "WARNING" or "UNKNOWN".
+    bpy.types.WindowManager.physpf_filter = StringProperty(default="")
 
 
 def unregister():
+    del bpy.types.WindowManager.physpf_filter
     del bpy.types.WindowManager.physpf_collapsed
     del bpy.types.WindowManager.physpf_show_passed
     del bpy.types.WindowManager.physpf_has_run

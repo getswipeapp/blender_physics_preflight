@@ -131,17 +131,37 @@ class PHYSPF_PT_panel(Panel):
             w = _worst_for_check(items, m.id)
             if w in c:
                 c[w] += 1
+        active_filter = wm.physpf_filter
         s = layout.row(align=True)
-        _status_label(s, "%d" % c[Status.FAIL], Status.FAIL)
-        _status_label(s, "%d" % c[Status.WARNING], Status.WARNING)
-        _status_label(s, "%d" % c[Status.UNKNOWN], Status.UNKNOWN)
+        s.scale_y = 1.2
+        self._filter_button(s, c[Status.FAIL], Status.FAIL, active_filter)
+        self._filter_button(s, c[Status.WARNING], Status.WARNING, active_filter)
+        self._filter_button(s, c[Status.UNKNOWN], Status.UNKNOWN, active_filter)
+        if active_filter:
+            fr = layout.row()
+            fr.label(text="Showing %s only — click its icon again to clear."
+                     % active_filter.lower(), icon="FILTER")
 
         collapsed = set(wm.physpf_collapsed.split()) if wm.physpf_collapsed else set()
         show_passed = wm.physpf_show_passed
         for group in (GROUP_SETUP, GROUP_CACHE):
-            self._draw_group(context, layout, items, group, show_passed, collapsed)
+            self._draw_group(context, layout, items, group, show_passed,
+                             collapsed, active_filter)
 
-    def _draw_group(self, context, layout, items, group, show_passed, collapsed):
+    def _filter_button(self, row, count, status, active_filter):
+        """A clickable severity tally that filters the list to that severity."""
+        iv = _icon_value(status)
+        if iv:
+            op = row.operator("physpf.set_filter", text="%d" % count,
+                              icon_value=iv, depress=(active_filter == status))
+        else:
+            op = row.operator("physpf.set_filter", text="%d" % count,
+                              icon=_STATUS_ICON.get(status, "DOT"),
+                              depress=(active_filter == status))
+        op.sev = status
+
+    def _draw_group(self, context, layout, items, group, show_passed, collapsed,
+                    active_filter=""):
         box = layout.box()
         box.label(text=group,
                   icon="PHYSICS" if group == GROUP_SETUP else "FILE_CACHE")
@@ -152,15 +172,21 @@ class PHYSPF_PT_panel(Panel):
                 worst = Status.NA
             if not show_passed and worst in (Status.PASS, Status.NA):
                 continue
+            # Severity filter from the clickable tally (empty = show all).
+            if active_filter and worst != active_filter:
+                continue
             drew_any = True
             is_collapsed = str(m.id) in collapsed
 
             # Clickable header: coloured severity icon + expand/collapse arrow.
+            # Slightly larger so the plain-English title reads as the headline
+            # and the "#n" is just a small checklist tag.
             head = box.row(align=True)
+            head.scale_y = 1.15
             _status_label(head, "", worst)
             op = head.operator(
                 "physpf.toggle_detail",
-                text="#%d %s" % (m.id, m.name),
+                text="#%d  %s" % (m.id, m.name),
                 icon="TRIA_RIGHT" if is_collapsed else "TRIA_DOWN",
                 emboss=False)
             op.key = str(m.id)
@@ -186,8 +212,13 @@ class PHYSPF_PT_panel(Panel):
                     _wrap_label(sub, context, "Tip: " + it.hint, status=None,
                                 indent=1.6)
         if not drew_any:
-            box.label(text="No problems reported (toggle the eye for details).",
-                      icon="INFO")
+            if active_filter:
+                box.label(text="No %s items in this group." % active_filter.lower(),
+                          icon="BLANK1")
+            else:
+                box.label(
+                    text="No problems reported (toggle the eye for details).",
+                    icon="INFO")
 
 
 classes = (PHYSPF_PT_panel,)
