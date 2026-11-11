@@ -602,6 +602,58 @@ def render_check_tests():
                 on["problem"] is True, on["problem"], True))
     out.append(("render check: include_warnings=False -> no problem",
                 off["problem"] is False, off["problem"], False))
+
+    # Banner honesty (V03): an UNKNOWN-only result is never a clean "no problems".
+    rb = handlers.render_banner
+    out.append(("render banner: unknown-only is not a clean result",
+                "unverified" in rb(0, 0, 3, False), rb(0, 0, 3, False),
+                "...unverified..."))
+    out.append(("render banner: truly clean says all clear",
+                rb(0, 0, 0, False) == "Last render check: all clear",
+                rb(0, 0, 0, False), "all clear"))
+    out.append(("render banner: confirmed problems show counts",
+                "fail" in rb(2, 1, 1, True), rb(2, 1, 1, True), "...fail..."))
+    return out
+
+
+def title_tests():
+    """V01/V02: the headline must never make a stronger claim than the status.
+    UNKNOWN and N/A must not borrow the positive PASS wording."""
+    from failsafe.engine import display_name, Status, CHECKS
+    by_id = {m.id: m for m in CHECKS}
+    out = []
+
+    # Every check that can report UNKNOWN carries an explicit "couldn't verify"
+    # headline, so it never falls back to the positive statement.
+    for cid in (3, 4, 5, 15, 17, 18, 19, 20, 21, 22, 23):
+        m = by_id[cid]
+        dn = display_name(m, Status.UNKNOWN)
+        out.append(("title #%d UNKNOWN is explicit, not the positive name" % cid,
+                    bool(m.name_unknown) and dn == m.name_unknown and dn != m.name,
+                    dn, m.name_unknown))
+
+    # #23 specifically must not assert 'unchanged' when it cannot know.
+    dn23 = display_name(by_id[23], Status.UNKNOWN).lower()
+    out.append(("title #23 UNKNOWN doesn't claim 'unchanged'",
+                "unchanged" not in dn23 and ("confirm" in dn23 or "couldn't" in dn23),
+                dn23, "a 'couldn't confirm' statement"))
+
+    # #18 N/A must not claim files are on disk.
+    dn18na = display_name(by_id[18], Status.NA)
+    out.append(("title #18 N/A isn't a positive on-disk claim",
+                dn18na == by_id[18].name_na and dn18na != by_id[18].name,
+                dn18na, by_id[18].name_na))
+
+    # #20 WARNING (sampled cache) reads differently from its FAIL headline.
+    m20 = by_id[20]
+    out.append(("title #20 WARNING != FAIL headline",
+                display_name(m20, Status.WARNING) != display_name(m20, Status.FAIL),
+                display_name(m20, Status.WARNING), display_name(m20, Status.FAIL)))
+
+    # PASS always shows the positive statement.
+    out.append(("title PASS shows positive name",
+                display_name(by_id[18], Status.PASS) == by_id[18].name,
+                display_name(by_id[18], Status.PASS), by_id[18].name))
     return out
 
 
@@ -676,7 +728,7 @@ def main():
                                    + stage_flag_state_tests() + readonly_tests()
                                    + readonly_filesystem_tests()
                                    + roundtrip_fix_tests()
-                                   + render_check_tests()):
+                                   + render_check_tests() + title_tests()):
         if ok:
             passed += 1
             print("  PASS  unit: %s  -> %s" % (label, got))
@@ -690,7 +742,8 @@ def main():
              + len(gn_unit_tests()) + len(fluid_matcher_unit_tests())
              + len(memory_reliability_tests()) + len(stage_flag_state_tests())
              + len(readonly_tests()) + len(readonly_filesystem_tests())
-             + len(roundtrip_fix_tests()) + len(render_check_tests()))
+             + len(roundtrip_fix_tests()) + len(render_check_tests())
+             + len(title_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

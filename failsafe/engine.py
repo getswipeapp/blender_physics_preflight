@@ -73,36 +73,58 @@ CHECKS = []
 
 
 class CheckMeta:
-    __slots__ = ("id", "name", "group", "func", "name_bad")
+    __slots__ = ("id", "name", "group", "func",
+                 "name_bad", "name_warn", "name_unknown", "name_na")
 
-    def __init__(self, id, name, group, func, name_bad=None):
+    def __init__(self, id, name, group, func, name_bad=None, name_warn=None,
+                 name_unknown=None, name_na=None):
         self.id = id
-        self.name = name          # positive headline, shown when the check PASSES
-        self.name_bad = name_bad  # problem headline, shown on WARNING / FAIL
+        self.name = name                  # shown on PASS (positive)
+        self.name_bad = name_bad          # shown on FAIL (and WARNING, unless…)
+        self.name_warn = name_warn        # …a WARNING-specific headline is given
+        self.name_unknown = name_unknown  # shown on UNKNOWN ("couldn't verify")
+        self.name_na = name_na            # shown on NOT APPLICABLE (neutral)
         self.group = group
         self.func = func
 
 
-def check(id, name, group, name_bad=None):
+def check(id, name, group, name_bad=None, name_warn=None, name_unknown=None,
+          name_na=None):
     """Register a check function. Keeps CHECKS sorted by id.
 
-    ``name`` is the green, positive headline ("Simulation is baked"). ``name_bad``
-    is the short problem headline shown the moment the check is a WARNING or FAIL
-    ("Simulation is not baked"), so a collapsed row never reads as reassurance
-    while its icon is amber or red. UNKNOWN keeps ``name`` — the blue "?" already
-    reframes it as "can't confirm", never as "all good".
+    The display layer must never make a stronger claim than the verification. So
+    each check can carry a headline per status, and ``display_name`` picks it:
+
+      * PASS      -> ``name``        (the green positive statement)
+      * FAIL      -> ``name_bad``    (a definite problem)
+      * WARNING   -> ``name_warn`` if given, else ``name_bad``
+      * UNKNOWN   -> ``name_unknown``  ("… couldn't be verified") — NOT the
+                     positive ``name``; an unverified thing is never stated as a
+                     fact, even with a blue "?" icon.
+      * N/A       -> ``name_na`` if given, else ``name``
+
+    ``name`` is always truthful for PASS; the others default sensibly so a check
+    only needs to spell out the variants that would otherwise over-claim.
     """
     def deco(func):
-        CHECKS.append(CheckMeta(id, name, group, func, name_bad))
+        CHECKS.append(CheckMeta(id, name, group, func, name_bad, name_warn,
+                                name_unknown, name_na))
         CHECKS.sort(key=lambda m: m.id)
         return func
     return deco
 
 
 def display_name(meta, status):
-    """The headline to show for a check given its (worst) status."""
-    if status in (Status.WARNING, Status.FAIL) and getattr(meta, "name_bad", None):
-        return meta.name_bad
+    """The headline to show for a check given its (worst) status — never a
+    stronger assertion than the status justifies."""
+    if status == Status.FAIL:
+        return meta.name_bad or meta.name
+    if status == Status.WARNING:
+        return meta.name_warn or meta.name_bad or meta.name
+    if status == Status.UNKNOWN:
+        return meta.name_unknown or meta.name
+    if status == Status.NA:
+        return meta.name_na or meta.name
     return meta.name
 
 

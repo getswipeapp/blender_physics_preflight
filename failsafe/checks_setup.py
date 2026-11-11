@@ -63,7 +63,7 @@ def c01_unapplied_transform(ctx, mk):
 
 # --------------------------------------------------------------------- 2 ----
 @check(2, "Rigid body mass fits the object", GROUP_SETUP,
-       name_bad="Rigid body mass looks wrong")
+       name_bad="Rigid body mass may need review")
 def c02_mass_sanity(ctx, mk):
     out = []
     any_active = False
@@ -96,7 +96,8 @@ def c02_mass_sanity(ctx, mk):
 
 # --------------------------------------------------------------------- 3 ----
 @check(3, "Objects don't overlap at the start", GROUP_SETUP,
-       name_bad="Objects overlap at the start")
+       name_bad="Objects overlap at the start",
+       name_unknown="Start overlap couldn't be checked")
 def c03_initial_intersections(ctx, mk):
     dg = _dg(ctx)
     scene = ctx.scene
@@ -177,7 +178,8 @@ def c03_initial_intersections(ctx, mk):
 
 # --------------------------------------------------------------------- 4 ----
 @check(4, "Collision shape fits the object", GROUP_SETUP,
-       name_bad="Collision shape doesn't fit")
+       name_bad="Collision shape doesn't fit",
+       name_unknown="Collision shape couldn't be checked")
 def c04_shape_mismatch(ctx, mk):
     dg = _dg(ctx)
     out = []
@@ -211,7 +213,8 @@ def c04_shape_mismatch(ctx, mk):
 
 # --------------------------------------------------------------------- 5 ----
 @check(5, "Colliders are clean, not too heavy", GROUP_SETUP,
-       name_bad="Collider is heavy or messy")
+       name_bad="Collider is heavy or messy",
+       name_unknown="Collider couldn't be fully checked")
 def c05_collider_geometry(ctx, mk):
     dg = _dg(ctx)
     scene = ctx.scene
@@ -254,7 +257,8 @@ def c05_collider_geometry(ctx, mk):
 
 # --------------------------------------------------------------------- 6 ----
 @check(6, "Rigid Body World is enabled", GROUP_SETUP,
-       name_bad="Rigid Body World isn't set up right")
+       name_bad="Rigid Body World isn't set up right",
+       name_warn="Rigid Body World settings may cause jitter")
 def c06_rigidbody_world(ctx, mk):
     scene = ctx.scene
     bodies = util.all_rigid_bodies(scene)
@@ -560,7 +564,8 @@ def c14_collision_stack_order(ctx, mk):
 
 # -------------------------------------------------------------------- 15 ----
 @check(15, "Cloth pin group is valid", GROUP_SETUP,
-       name_bad="Cloth pin group is broken")
+       name_bad="Cloth pin group is broken",
+       name_unknown="Cloth pin group couldn't be checked")
 def c15_cloth_pin_group(ctx, mk):
     out = []
     any_pin = False
@@ -598,7 +603,7 @@ def c15_cloth_pin_group(ctx, mk):
 
 # -------------------------------------------------------------------- 16 ----
 @check(16, "Fluid flow is inside the domain", GROUP_SETUP,
-       name_bad="Fluid flow is outside the domain")
+       name_bad="Fluid won't fill the domain")
 def c16_fluid_layout(ctx, mk):
     scene = ctx.scene
     out = []

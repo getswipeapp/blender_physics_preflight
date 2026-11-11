@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Opt-in 'check before render' — a read-only, non-blocking render warning.
+"""Opt-in 'check before render' — a read-only, non-cancelling render warning.
 
 When the user turns it on in the add-on preferences, Failsafe runs its scan once
 at the start of a render. If it finds problems it prints a clear warning to the
@@ -7,6 +7,10 @@ system console (so it also lands in render-farm logs) and leaves a one-line
 banner in the panel. It NEVER changes the scene, writes files, touches the
 network, or cancels the render — a bug in here must not break a render, so the
 whole handler is wrapped in try/except.
+
+"Non-cancelling", not "non-blocking": the scan runs synchronously at render
+start, so on a very heavy scene it can add a short delay before rendering begins
+— it just never stops or alters the render.
 
 The scan logic lives in ``run_render_check()``, a pure function that reads
 nothing from preferences and writes nothing back — so the test harness can drive
@@ -57,11 +61,24 @@ def _fail_lines(results):
     return out
 
 
+def render_banner(f, w, u, problem):
+    """The panel banner for a render check. Honesty rule: a scene with only
+    UNKNOWN results is NOT 'no problems' — those are the exact checks that
+    couldn't be verified, which is what a buyer most wants to know before a
+    render. Never present them as a clean result."""
+    if problem:
+        return "Last render check: %d fail, %d warning, %d unknown" % (f, w, u)
+    if u > 0:
+        return "Last render check: no confirmed problems, %d unverified" % u
+    return "Last render check: all clear"
+
+
 def run_render_check(scene, depsgraph=None, include_warnings=True):
     """Run every check against ``scene`` and summarise it for a pre-render warning.
 
-    Pure and read-only: reads no preferences, writes no properties, changes
-    nothing. Returns a dict the handler (or a test) can act on.
+    Read-only and side-effect-free: it reads no preferences and writes no
+    properties (it does read the scene and build the same evaluated data a scan
+    does). Returns a dict the handler (or a test) can act on.
     """
     if depsgraph is None:
         try:
@@ -75,10 +92,7 @@ def run_render_check(scene, depsgraph=None, include_warnings=True):
     w = counts[engine.Status.WARNING]
     u = counts[engine.Status.UNKNOWN]
     problem = (f > 0) or (include_warnings and w > 0)
-    if problem:
-        banner = "Last render check: %d fail, %d warning, %d unknown" % (f, w, u)
-    else:
-        banner = "Last render check: no problems (%d unknown)" % u
+    banner = render_banner(f, w, u, problem)
     return {
         "fail": f, "warning": w, "unknown": u,
         "problem": problem, "banner": banner,
@@ -88,31 +102,45 @@ def run_render_check(scene, depsgraph=None, include_warnings=True):
 
 @persistent
 def failsafe_render_init(scene, depsgraph=None):
-    """Fires once at the start of a render (opt-in). Never blocks the render."""
+    """Fires once at the start of a render (opt-in). Never cancels the render."""
+    wm = None
     try:
         prefs = get_prefs()
         if prefs is None or not getattr(prefs, "check_before_render", False):
             return
+        # Mark the banner "running" BEFORE the scan, so if the scan raises the
+        # panel can't keep showing an earlier success (V06: no stale banner).
+        try:
+            wm = bpy.context.window_manager
+            wm.failsafe_render_banner = "Render check running…"
+            wm.failsafe_render_had_problem = False
+        except Exception:
+            wm = None
+
         include_warn = bool(getattr(prefs, "include_warnings", True))
         info = run_render_check(scene, depsgraph, include_warnings=include_warn)
 
-        # Leave a banner in the panel (a UI property — not scene data).
+        # Leave the result banner in the panel (a UI property — not scene data).
         try:
-            wm = bpy.context.window_manager
-            wm.failsafe_render_banner = info["banner"]
-            wm.failsafe_render_had_problem = bool(info["problem"])
+            if wm is not None:
+                wm.failsafe_render_banner = info["banner"]
+                wm.failsafe_render_had_problem = bool(info["problem"])
         except Exception:
             pass
 
+        # Always print a one-line summary so the UNKNOWN count is visible in the
+        # terminal and farm logs, even when nothing is a confirmed problem.
+        head = ("FAILSAFE render check: %d FAIL, %d WARNING, %d UNKNOWN"
+                % (info["fail"], info["warning"], info["unknown"]))
         if not info["problem"]:
+            tail = (" — no confirmed problems" if info["unknown"]
+                    else " — all clear")
+            print(head + tail)
             return
 
-        # Prominent console warning — shows in the terminal and farm logs.
+        # Confirmed problems: the prominent, detailed warning.
         sep = "=" * 64
-        lines = [sep,
-                 "FAILSAFE — problems found right before render:",
-                 "  %d FAIL, %d WARNING, %d UNKNOWN"
-                 % (info["fail"], info["warning"], info["unknown"])]
+        lines = [sep, head, "(problems found right before render)"]
         if info["fail_lines"]:
             lines.append("FAIL:")
             lines.extend(info["fail_lines"])
@@ -120,6 +148,14 @@ def failsafe_render_init(scene, depsgraph=None):
         lines.append(sep)
         print("\n".join(lines))
     except Exception as e:  # never let a check bug break a render
+        # Replace any "running…"/stale banner so a crash can't look like success.
+        try:
+            if wm is not None:
+                wm.failsafe_render_banner = ("Render check didn't finish — "
+                                             "see console")
+                wm.failsafe_render_had_problem = True
+        except Exception:
+            pass
         try:
             print("Failsafe render check skipped (internal error): %r" % e)
         except Exception:

@@ -146,9 +146,13 @@ class FAILSAFE_PT_panel(Panel):
             banner = getattr(wm, "failsafe_render_banner", "")
             if banner:
                 bad = getattr(wm, "failsafe_render_had_problem", False)
-                bb = layout.box()
-                bb.label(text=banner,
-                         icon="ERROR" if bad else "CHECKMARK")
+                if bad:
+                    icon = "ERROR"
+                elif "unverified" in banner:
+                    icon = "QUESTION"      # unknowns -> not a clean tick
+                else:
+                    icon = "CHECKMARK"
+                layout.box().label(text=banner, icon=icon)
 
         if not wm.failsafe_has_run:
             box = layout.box()
