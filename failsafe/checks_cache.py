@@ -35,7 +35,7 @@ def _missing_summary(missing):
 
 
 # -------------------------------------------------------------------- 17 ----
-@check(17, "Is the simulation baked?", GROUP_CACHE)
+@check(17, "Simulation is baked", GROUP_CACHE)
 def c17_baked(ctx, mk):
     entries = _caches(ctx)
     if not entries:
@@ -139,13 +139,13 @@ def c17_baked(ctx, mk):
                                    "current simulation."))
         elif s == ci.V_EMPTY:
             out.append(mk(Status.FAIL,
-                          "%s is marked baked, but no cache files exist on disk "
-                          "(see #18)." % e.system, object_name=name,
+                          "%s is marked baked, but no cache files exist on disk."
+                          % e.system, object_name=name,
                           hint="Re-bake the simulation."))
         elif s in (ci.V_INCOMPLETE, ci.V_CORRUPT):
             out.append(mk(Status.FAIL,
                           "%s is marked baked, but its cache on disk is "
-                          "incomplete (see #18 and #20)." % e.system,
+                          "incomplete." % e.system,
                           object_name=name, hint="Delete the cache and re-bake."))
         elif s == ci.V_UNREADABLE:
             out.append(mk(Status.UNKNOWN,
@@ -159,7 +159,7 @@ def c17_baked(ctx, mk):
 
 
 # -------------------------------------------------------------------- 18 ----
-@check(18, "Cache files actually present on disk (not just the 'baked' flag)",
+@check(18, "Cache files are really on disk",
        GROUP_CACHE)
 def c18_files_present(ctx, mk):
     entries = _caches(ctx)
@@ -255,7 +255,7 @@ def c18_files_present(ctx, mk):
 
 
 # -------------------------------------------------------------------- 19 ----
-@check(19, "Baked range covers the render range", GROUP_CACHE)
+@check(19, "Baked frames cover the render", GROUP_CACHE)
 def c19_range_covers(ctx, mk):
     entries = _caches(ctx)
     out = []
@@ -315,7 +315,7 @@ def c19_range_covers(ctx, mk):
 
 
 # -------------------------------------------------------------------- 20 ----
-@check(20, "Frame gaps: every frame cached (not sampled)", GROUP_CACHE)
+@check(20, "Every frame is cached (no gaps)", GROUP_CACHE)
 def c20_frame_gaps(ctx, mk):
     entries = _caches(ctx)
     file_entries = [e for e in entries if e.kind in ("point", "fluid", "gn")]
@@ -361,7 +361,7 @@ def c20_frame_gaps(ctx, mk):
 
 
 # -------------------------------------------------------------------- 21 ----
-@check(21, "Two simulations sharing one cache location", GROUP_CACHE)
+@check(21, "Each sim has its own cache folder", GROUP_CACHE)
 def c21_shared_cache(ctx, mk):
     entries = _caches(ctx)
     buckets = {}
@@ -397,7 +397,7 @@ def c21_shared_cache(ctx, mk):
 
 
 # -------------------------------------------------------------------- 22 ----
-@check(22, "Non-portable cache paths (absolute / outside the project)",
+@check(22, "Cache is saved inside the project",
        GROUP_CACHE)
 def c22_portable(ctx, mk):
     entries = _caches(ctx)
@@ -434,7 +434,7 @@ def c22_portable(ctx, mk):
 
 
 # -------------------------------------------------------------------- 23 ----
-@check(23, "FPS / time-scale changed after baking", GROUP_CACHE)
+@check(23, "Frame rate/speed unchanged since bake", GROUP_CACHE)
 def c23_fps_timescale(ctx, mk):
     entries = _caches(ctx)
     baked_any = any((e.baked_flag or e.frames_present) for e in entries)

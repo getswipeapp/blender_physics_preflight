@@ -186,7 +186,7 @@ class FAILSAFE_PT_panel(Panel):
             _status_label(head, "", worst)
             op = head.operator(
                 "failsafe.toggle_detail",
-                text="#%d  %s" % (m.id, m.name),
+                text=m.name,
                 icon="TRIA_RIGHT" if is_collapsed else "TRIA_DOWN",
                 emboss=False)
             op.key = str(m.id)

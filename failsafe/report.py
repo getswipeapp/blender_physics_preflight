@@ -33,7 +33,7 @@ def build_text_report(results):
         group_checks = [m for m in CHECKS if m.group == group]
         for m in group_checks:
             st = check_status(results, m)
-            lines.append("%s #%d %s" % (_ICON[st], m.id, m.name))
+            lines.append("%s %s" % (_ICON[st], m.name))
             for r in [r for r in results if r.check_id == m.id]:
                 who = (" (%s)" % r.object_name) if r.object_name else ""
                 lines.append("        %s%s: %s" % (_ICON[r.status], who, r.message))
