@@ -157,7 +157,8 @@ class FAILSAFE_PT_panel(Panel):
         if not wm.failsafe_has_run:
             box = layout.box()
             box.label(text="Press Scan Scene to check this scene.", icon="INFO")
-            box.label(text="Read-only. Nothing is changed.")
+            box.label(text="Read-only scan — your scene, caches and files")
+            box.label(text="are never changed.")
             return
 
         items = wm.failsafe_results
