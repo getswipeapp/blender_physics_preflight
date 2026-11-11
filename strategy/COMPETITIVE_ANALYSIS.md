@@ -4,6 +4,14 @@
 the end). This is Claude's independent take; a separate neutral brief
 (`CHATGPT_REVIEW_BRIEF.md`) asks ChatGPT for its own, so the two can be compared.*
 
+> **⚠️ CORRECTION (2026-11-10, after ChatGPT's review + verification).** My §1/§3
+> claim that *no competitor checks physics/sim caches* was **wrong**. ChatGPT's
+> independent review found several, and I verified the pages directly. The
+> accurate, verified landscape and the reconciled plan are in **`GAMEPLAN.md`** —
+> read that, not the table below, for the real competitive picture. The roadmap
+> in §5 here still broadly holds (both reviews agree on it). Keeping this file as
+> an honest record of the first pass.
+
 ---
 
 ## 1. TL;DR
