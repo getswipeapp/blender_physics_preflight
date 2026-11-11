@@ -13,7 +13,7 @@ import bpy
 import bpy.utils.previews
 from bpy.types import Panel
 
-from .engine import (CHECKS, Status, GROUP_SETUP, GROUP_CACHE)
+from .engine import (CHECKS, Status, GROUP_SETUP, GROUP_CACHE, display_name)
 
 # Fallback monochrome icons if the coloured previews fail to load.
 _STATUS_ICON = {
@@ -179,14 +179,16 @@ class FAILSAFE_PT_panel(Panel):
             is_collapsed = str(m.id) in collapsed
 
             # Clickable header: coloured severity icon + expand/collapse arrow.
-            # Slightly larger so the plain-English title reads as the headline
-            # and the "#n" is just a small checklist tag.
+            # The headline matches the icon colour: the green "pass" wording when
+            # the check passes, and a short problem wording the moment it is a
+            # warning or fail — so a collapsed row never reads as reassurance
+            # while its dot is amber or red.
             head = box.row(align=True)
             head.scale_y = 1.15
             _status_label(head, "", worst)
             op = head.operator(
                 "failsafe.toggle_detail",
-                text=m.name,
+                text=display_name(m, worst),
                 icon="TRIA_RIGHT" if is_collapsed else "TRIA_DOWN",
                 emboss=False)
             op.key = str(m.id)

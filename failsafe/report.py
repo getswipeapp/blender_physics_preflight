@@ -2,7 +2,8 @@
 """Plain-text report builder (shared by the GUI export and the test harness)."""
 import bpy
 
-from .engine import CHECKS, Status, GROUP_SETUP, GROUP_CACHE, check_status, summary_counts
+from .engine import (CHECKS, Status, GROUP_SETUP, GROUP_CACHE, check_status,
+                     summary_counts, display_name)
 
 _ICON = {
     Status.PASS: "[ OK ]",
@@ -33,7 +34,7 @@ def build_text_report(results):
         group_checks = [m for m in CHECKS if m.group == group]
         for m in group_checks:
             st = check_status(results, m)
-            lines.append("%s %s" % (_ICON[st], m.name))
+            lines.append("%s %s" % (_ICON[st], display_name(m, st)))
             for r in [r for r in results if r.check_id == m.id]:
                 who = (" (%s)" % r.object_name) if r.object_name else ""
                 lines.append("        %s%s: %s" % (_ICON[r.status], who, r.message))

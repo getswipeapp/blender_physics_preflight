@@ -73,22 +73,37 @@ CHECKS = []
 
 
 class CheckMeta:
-    __slots__ = ("id", "name", "group", "func")
+    __slots__ = ("id", "name", "group", "func", "name_bad")
 
-    def __init__(self, id, name, group, func):
+    def __init__(self, id, name, group, func, name_bad=None):
         self.id = id
-        self.name = name
+        self.name = name          # positive headline, shown when the check PASSES
+        self.name_bad = name_bad  # problem headline, shown on WARNING / FAIL
         self.group = group
         self.func = func
 
 
-def check(id, name, group):
-    """Register a check function. Keeps CHECKS sorted by id."""
+def check(id, name, group, name_bad=None):
+    """Register a check function. Keeps CHECKS sorted by id.
+
+    ``name`` is the green, positive headline ("Simulation is baked"). ``name_bad``
+    is the short problem headline shown the moment the check is a WARNING or FAIL
+    ("Simulation is not baked"), so a collapsed row never reads as reassurance
+    while its icon is amber or red. UNKNOWN keeps ``name`` — the blue "?" already
+    reframes it as "can't confirm", never as "all good".
+    """
     def deco(func):
-        CHECKS.append(CheckMeta(id, name, group, func))
+        CHECKS.append(CheckMeta(id, name, group, func, name_bad))
         CHECKS.sort(key=lambda m: m.id)
         return func
     return deco
+
+
+def display_name(meta, status):
+    """The headline to show for a check given its (worst) status."""
+    if status in (Status.WARNING, Status.FAIL) and getattr(meta, "name_bad", None):
+        return meta.name_bad
+    return meta.name
 
 
 def _mk(meta):

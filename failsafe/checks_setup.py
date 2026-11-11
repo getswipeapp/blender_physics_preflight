@@ -21,7 +21,8 @@ def _dg(ctx):
 
 
 # --------------------------------------------------------------------- 1 ----
-@check(1, "Scale and rotation are applied", GROUP_SETUP)
+@check(1, "Scale and rotation are applied", GROUP_SETUP,
+       name_bad="Scale or rotation not applied")
 def c01_unapplied_transform(ctx, mk):
     out = []
     objs = util.physics_objects(ctx.scene)
@@ -61,7 +62,8 @@ def c01_unapplied_transform(ctx, mk):
 
 
 # --------------------------------------------------------------------- 2 ----
-@check(2, "Rigid body mass fits the object", GROUP_SETUP)
+@check(2, "Rigid body mass fits the object", GROUP_SETUP,
+       name_bad="Rigid body mass looks wrong")
 def c02_mass_sanity(ctx, mk):
     out = []
     any_active = False
@@ -93,7 +95,8 @@ def c02_mass_sanity(ctx, mk):
 
 
 # --------------------------------------------------------------------- 3 ----
-@check(3, "Objects don't overlap at the start", GROUP_SETUP)
+@check(3, "Objects don't overlap at the start", GROUP_SETUP,
+       name_bad="Objects overlap at the start")
 def c03_initial_intersections(ctx, mk):
     dg = _dg(ctx)
     scene = ctx.scene
@@ -173,7 +176,8 @@ def c03_initial_intersections(ctx, mk):
 
 
 # --------------------------------------------------------------------- 4 ----
-@check(4, "Collision shape fits the object", GROUP_SETUP)
+@check(4, "Collision shape fits the object", GROUP_SETUP,
+       name_bad="Collision shape doesn't fit")
 def c04_shape_mismatch(ctx, mk):
     dg = _dg(ctx)
     out = []
@@ -206,7 +210,8 @@ def c04_shape_mismatch(ctx, mk):
 
 
 # --------------------------------------------------------------------- 5 ----
-@check(5, "Colliders are clean, not too heavy", GROUP_SETUP)
+@check(5, "Colliders are clean, not too heavy", GROUP_SETUP,
+       name_bad="Collider is heavy or messy")
 def c05_collider_geometry(ctx, mk):
     dg = _dg(ctx)
     scene = ctx.scene
@@ -248,7 +253,8 @@ def c05_collider_geometry(ctx, mk):
 
 
 # --------------------------------------------------------------------- 6 ----
-@check(6, "Rigid Body World is enabled", GROUP_SETUP)
+@check(6, "Rigid Body World is enabled", GROUP_SETUP,
+       name_bad="Rigid Body World isn't set up right")
 def c06_rigidbody_world(ctx, mk):
     scene = ctx.scene
     bodies = util.all_rigid_bodies(scene)
@@ -299,7 +305,8 @@ def c06_rigidbody_world(ctx, mk):
 
 
 # --------------------------------------------------------------------- 7 ----
-@check(7, "Cloth/soft body has a collider", GROUP_SETUP)
+@check(7, "Cloth/soft body has a collider", GROUP_SETUP,
+       name_bad="Cloth/soft body has no collider")
 def c07_cloth_collision(ctx, mk):
     scene = ctx.scene
     out = []
@@ -343,7 +350,8 @@ def c07_cloth_collision(ctx, mk):
 
 
 # --------------------------------------------------------------------- 8 ----
-@check(8, "No negative or inherited scale", GROUP_SETUP)
+@check(8, "No negative or inherited scale", GROUP_SETUP,
+       name_bad="Negative or inherited scale")
 def c08_negative_scale(ctx, mk):
     out = []
     for o in util.physics_objects(ctx.scene):
@@ -378,7 +386,8 @@ def c08_negative_scale(ctx, mk):
 
 
 # --------------------------------------------------------------------- 9 ----
-@check(9, "Object sizes look realistic", GROUP_SETUP)
+@check(9, "Object sizes look realistic", GROUP_SETUP,
+       name_bad="Object size looks off")
 def c09_size_sanity(ctx, mk):
     scene = ctx.scene
     us = util.unit_scale(scene)
@@ -410,7 +419,8 @@ def c09_size_sanity(ctx, mk):
 
 
 # -------------------------------------------------------------------- 10 ----
-@check(10, "Object origin sits on its shape", GROUP_SETUP)
+@check(10, "Object origin sits on its shape", GROUP_SETUP,
+       name_bad="Object origin is off-center")
 def c10_origin_offset(ctx, mk):
     out = []
     bodies = util.active_rigid_bodies(ctx.scene)
@@ -435,7 +445,8 @@ def c10_origin_offset(ctx, mk):
 
 
 # -------------------------------------------------------------------- 11 ----
-@check(11, "Collision margin fits the object", GROUP_SETUP)
+@check(11, "Collision margin fits the object", GROUP_SETUP,
+       name_bad="Collision margin is too big")
 def c11_collision_margin(ctx, mk):
     out = []
     bodies = util.all_rigid_bodies(ctx.scene)
@@ -463,7 +474,8 @@ def c11_collision_margin(ctx, mk):
 
 
 # -------------------------------------------------------------------- 12 ----
-@check(12, "Moving colliders marked 'Animated'", GROUP_SETUP)
+@check(12, "Moving colliders marked 'Animated'", GROUP_SETUP,
+       name_bad="Moving collider not marked 'Animated'")
 def c12_animated_passive(ctx, mk):
     out = []
     bodies = util.all_rigid_bodies(ctx.scene)
@@ -484,7 +496,8 @@ def c12_animated_passive(ctx, mk):
 
 
 # -------------------------------------------------------------------- 13 ----
-@check(13, "Rigid body constraints are intact", GROUP_SETUP)
+@check(13, "Rigid body constraints are intact", GROUP_SETUP,
+       name_bad="Rigid body constraint is broken")
 def c13_constraints(ctx, mk):
     out = []
     any_con = False
@@ -518,7 +531,8 @@ def c13_constraints(ctx, mk):
 
 
 # -------------------------------------------------------------------- 14 ----
-@check(14, "Collision modifier order is correct", GROUP_SETUP)
+@check(14, "Collision modifier order is correct", GROUP_SETUP,
+       name_bad="Collision modifier is out of order")
 def c14_collision_stack_order(ctx, mk):
     out = []
     any_col = False
@@ -545,7 +559,8 @@ def c14_collision_stack_order(ctx, mk):
 
 
 # -------------------------------------------------------------------- 15 ----
-@check(15, "Cloth pin group is valid", GROUP_SETUP)
+@check(15, "Cloth pin group is valid", GROUP_SETUP,
+       name_bad="Cloth pin group is broken")
 def c15_cloth_pin_group(ctx, mk):
     out = []
     any_pin = False
@@ -582,7 +597,8 @@ def c15_cloth_pin_group(ctx, mk):
 
 
 # -------------------------------------------------------------------- 16 ----
-@check(16, "Fluid flow is inside the domain", GROUP_SETUP)
+@check(16, "Fluid flow is inside the domain", GROUP_SETUP,
+       name_bad="Fluid flow is outside the domain")
 def c16_fluid_layout(ctx, mk):
     scene = ctx.scene
     out = []
