@@ -89,6 +89,62 @@ class FAILSAFE_OT_select_object(Operator):
         return {"FINISHED"}
 
 
+class FAILSAFE_OT_show_physics(Operator):
+    bl_idname = "failsafe.show_physics"
+    bl_label = "Open Physics Settings"
+    bl_description = ("Select this object and switch the Properties editor to the "
+                      "tab where you fix it (nothing in the scene is changed)")
+    bl_options = {"REGISTER", "UNDO"}
+
+    object_name: StringProperty()
+    # Properties-editor context to switch to: PHYSICS, OBJECT, DATA, SCENE…
+    target: StringProperty(default="PHYSICS")
+
+    def execute(self, context):
+        # 1) Select + activate the object, if one was given (same careful,
+        #    restore-on-failure logic as the Select button).
+        if self.object_name:
+            obj = context.scene.objects.get(self.object_name)
+            if obj is not None:
+                prev_selected = list(context.selected_objects)
+                prev_active = context.view_layer.objects.active
+                try:
+                    for o in prev_selected:
+                        o.select_set(False)
+                    obj.select_set(True)
+                    context.view_layer.objects.active = obj
+                except Exception:
+                    try:
+                        for o in context.selected_objects:
+                            o.select_set(False)
+                        for o in prev_selected:
+                            o.select_set(True)
+                        context.view_layer.objects.active = prev_active
+                    except Exception:
+                        pass
+
+        # 2) Switch a visible Properties editor to the right tab. This only
+        #    changes which tab is shown — no scene data is touched.
+        switched = False
+        try:
+            for area in context.screen.areas:
+                if area.type == "PROPERTIES":
+                    space = area.spaces.active
+                    try:
+                        space.context = self.target
+                        switched = True
+                    except Exception:
+                        pass
+                    area.tag_redraw()
+        except Exception:
+            pass
+        if not switched:
+            self.report({"INFO"},
+                        "Open a Properties editor to see the %s settings."
+                        % self.target.title())
+        return {"FINISHED"}
+
+
 class FAILSAFE_OT_export_report(Operator):
     bl_idname = "failsafe.export_report"
     bl_label = "Export Text Report"
@@ -154,6 +210,7 @@ classes = (
     FAILSAFE_ResultItem,
     FAILSAFE_OT_scan,
     FAILSAFE_OT_select_object,
+    FAILSAFE_OT_show_physics,
     FAILSAFE_OT_export_report,
     FAILSAFE_OT_toggle_detail,
     FAILSAFE_OT_set_filter,

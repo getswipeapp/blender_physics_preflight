@@ -553,6 +553,52 @@ def readonly_filesystem_tests():
     return out
 
 
+def render_check_tests():
+    """The opt-in 'check before render' logic (handlers.run_render_check): it must
+    flag a broken scene, stay read-only, and honour the 'also warn on warnings'
+    toggle — all without blocking anything."""
+    from failsafe import handlers
+    out = []
+
+    # 1) A known-broken scene (baked flag on, no cache files -> #18 FAIL) must be
+    #    reported as a problem, with the fail surfaced in the banner.
+    outdir = tempfile.mkdtemp(prefix="failsafe_render_fail_")
+    fixtures.build_18_fail(outdir)
+    info = handlers.run_render_check(bpy.context.scene)
+    out.append(("render check: broken scene -> fail>0",
+                info["fail"] > 0, info["fail"], ">0"))
+    out.append(("render check: broken scene -> problem flagged",
+                info["problem"] is True, info["problem"], True))
+    out.append(("render check: banner mentions the fail count",
+                "fail" in info["banner"], info["banner"], "<...fail...>"))
+
+    # 2) Read-only: running the render check must not touch the scene/datablocks.
+    def snap():
+        sc = bpy.context.scene
+        return (sorted(o.name for o in sc.objects), sc.frame_current,
+                len(bpy.data.texts), len(bpy.data.objects), len(bpy.data.meshes))
+    before = snap()
+    handlers.run_render_check(bpy.context.scene)
+    after = snap()
+    out.append(("render check: read-only (scene unchanged)", before == after,
+                after, before))
+
+    # 3) The 'also warn on warnings' toggle: a warn-only scene (#17 not baked) is
+    #    a problem only when warnings are included.
+    fixtures.build_17_fail()
+    on = handlers.run_render_check(bpy.context.scene, include_warnings=True)
+    off = handlers.run_render_check(bpy.context.scene, include_warnings=False)
+    out.append(("render check: warn-only scene has no hard fail",
+                on["fail"] == 0, on["fail"], 0))
+    out.append(("render check: warn-only scene has a warning",
+                on["warning"] > 0, on["warning"], ">0"))
+    out.append(("render check: include_warnings=True -> problem",
+                on["problem"] is True, on["problem"], True))
+    out.append(("render check: include_warnings=False -> no problem",
+                off["problem"] is False, off["problem"], False))
+    return out
+
+
 def main():
     passed = 0
     failed = 0
@@ -623,7 +669,8 @@ def main():
                                    + memory_reliability_tests()
                                    + stage_flag_state_tests() + readonly_tests()
                                    + readonly_filesystem_tests()
-                                   + roundtrip_fix_tests()):
+                                   + roundtrip_fix_tests()
+                                   + render_check_tests()):
         if ok:
             passed += 1
             print("  PASS  unit: %s  -> %s" % (label, got))
@@ -637,7 +684,7 @@ def main():
              + len(gn_unit_tests()) + len(fluid_matcher_unit_tests())
              + len(memory_reliability_tests()) + len(stage_flag_state_tests())
              + len(readonly_tests()) + len(readonly_filesystem_tests())
-             + len(roundtrip_fix_tests()))
+             + len(roundtrip_fix_tests()) + len(render_check_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

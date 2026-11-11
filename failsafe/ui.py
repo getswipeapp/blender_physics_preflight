@@ -34,6 +34,26 @@ _ICON_FILE = {
 
 _preview_coll = None
 
+# Per-check "take me there" jump: which Properties-editor tab fixes this check,
+# and the button label. Only drawn for per-object findings; scene-wide findings
+# (e.g. a shared cache location) rely on their written Tip instead.
+_PHYS = ("PHYSICS", "Open Physics settings")
+_OBJ = ("OBJECT", "Open Object settings")
+_FIX_TARGET = {
+    1: _OBJ, 8: _OBJ, 9: _OBJ,                     # transforms / size
+    2: _PHYS, 4: _PHYS, 5: _PHYS, 6: _PHYS, 7: _PHYS, 10: _PHYS, 11: _PHYS,
+    12: _PHYS, 13: _PHYS, 14: _PHYS, 15: _PHYS, 16: _PHYS,   # rigid/cloth/fluid
+    17: _PHYS, 18: _PHYS, 19: _PHYS, 20: _PHYS, 21: _PHYS, 22: _PHYS, 23: _PHYS,
+}
+
+
+def _get_prefs(context):
+    """The add-on preferences, or None if unavailable."""
+    try:
+        return context.preferences.addons[__package__].preferences
+    except Exception:
+        return None
+
 
 def _icon_value(status):
     """icon_id for the coloured severity icon, or 0 if previews unavailable."""
@@ -116,6 +136,17 @@ class FAILSAFE_PT_panel(Panel):
         row = layout.row(align=True)
         row.operator("failsafe.export_report", icon="TEXT")
         row.prop(wm, "failsafe_show_passed", text="", icon="HIDE_OFF", toggle=True)
+
+        # Opt-in: check automatically at the start of each render.
+        prefs = _get_prefs(context)
+        if prefs is not None:
+            layout.prop(prefs, "check_before_render", icon="RENDER_STILL")
+            banner = getattr(wm, "failsafe_render_banner", "")
+            if banner:
+                bad = getattr(wm, "failsafe_render_had_problem", False)
+                bb = layout.box()
+                bb.label(text=banner,
+                         icon="ERROR" if bad else "CHECKMARK")
 
         if not wm.failsafe_has_run:
             box = layout.box()
@@ -206,10 +237,22 @@ class FAILSAFE_PT_panel(Panel):
                 if it.object_name:
                     orow = sub.row(align=True)
                     orow.separator(factor=1.6)
-                    o = orow.operator("failsafe.select_object",
-                                      text="Select '%s'" % it.object_name,
-                                      icon="RESTRICT_SELECT_OFF")
-                    o.object_name = it.object_name
+                    target = _FIX_TARGET.get(it.check_id)
+                    if target and it.status not in (Status.PASS, Status.NA):
+                        # One button that both selects the object and jumps to the
+                        # tab where the fix lives.
+                        o = orow.operator(
+                            "failsafe.show_physics",
+                            text="%s  (%s)" % (target[1], it.object_name),
+                            icon="PHYSICS" if target[0] == "PHYSICS"
+                            else "OBJECT_DATA")
+                        o.object_name = it.object_name
+                        o.target = target[0]
+                    else:
+                        o = orow.operator("failsafe.select_object",
+                                          text="Select '%s'" % it.object_name,
+                                          icon="RESTRICT_SELECT_OFF")
+                        o.object_name = it.object_name
                 if it.hint:
                     _wrap_label(sub, context, "Tip: " + it.hint, status=None,
                                 indent=1.6)

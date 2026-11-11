@@ -7,6 +7,7 @@ verify the actual files on disk instead of trusting Blender's "baked" flags,
 which stay True after the cache files are gone.
 """
 from . import operators
+from . import handlers
 from . import ui
 
 # Importing the check modules registers every check into engine.CHECKS via the
@@ -17,9 +18,11 @@ from . import checks_cache   # noqa: F401
 
 def register():
     operators.register()
+    handlers.register()
     ui.register()
 
 
 def unregister():
     ui.unregister()
+    handlers.unregister()
     operators.unregister()
