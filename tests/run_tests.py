@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Headless test harness for Physics Preflight.
+"""Headless test harness for Failsafe.
 
 Run:  blender -b --factory-startup -P tests/run_tests.py
 Exits non-zero if any case fails. Each case builds a scene that should make one
@@ -18,9 +18,9 @@ for p in (ROOT, HERE):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-import physics_preflight  # noqa: E402,F401
-from physics_preflight import engine  # noqa: E402
-from physics_preflight.engine import Status  # noqa: E402
+import failsafe  # noqa: E402,F401
+from failsafe import engine  # noqa: E402
+from failsafe.engine import Status  # noqa: E402
 
 import fixtures  # noqa: E402
 
@@ -131,7 +131,7 @@ def verdict_unit_tests():
     from constructed CacheEntry objects (no Blender bake needed). These
     reproduce the reviewer's isolated scenarios: F01 head/tail, F04 replay,
     F05 external vs memory, F06 sampled, F07 unreadable."""
-    from physics_preflight import cache_inspect as ci
+    from failsafe import cache_inspect as ci
 
     def entry(present, expected=(1, 2, 3, 4, 5), baked=True, empty=(),
               unreadable=(), replay=False, memory=False, determinable=True,
@@ -141,7 +141,7 @@ def verdict_unit_tests():
         e.baked_flag = baked
         e.baked_determinable = determinable
         e.file_check_applicable = applicable
-        e.cache_dir = "/tmp/physpf_unit"
+        e.cache_dir = "/tmp/failsafe_unit"
         e.frames_expected = list(expected)
         e.frames_present = set(present)
         e.frames_empty = set(empty)
@@ -225,7 +225,7 @@ def gn_unit_tests():
     """Geometry Nodes bake-target resolution (F03/R03). A live GN disk bake is
     too fragile to script headlessly, so these cover the INHERIT resolution and
     the blob-missing verdict directly."""
-    from physics_preflight import cache_inspect as ci
+    from failsafe import cache_inspect as ci
 
     class Fake:
         def __init__(self, **kw):
@@ -270,7 +270,7 @@ def gn_unit_tests():
     e = ci.CacheEntry("Obj", "Geometry Nodes", "gn")
     e.baked_determinable = True
     e.file_check_applicable = True
-    e.cache_dir = "/tmp/physpf_gn"
+    e.cache_dir = "/tmp/failsafe_gn"
     e.frames_expected = [1, 2, 3]
     e.frames_present = {1, 2, 3}
     e.baked_flag = True
@@ -284,7 +284,7 @@ def gn_unit_tests():
     e2 = ci.CacheEntry("Obj", "Geometry Nodes", "gn")
     e2.baked_determinable = True
     e2.file_check_applicable = True
-    e2.cache_dir = "/tmp/physpf_gn"
+    e2.cache_dir = "/tmp/failsafe_gn"
     e2.frames_expected = [1, 2, 3]
     e2.frames_present = {1, 2, 3}
     e2.baked_flag = True
@@ -298,7 +298,7 @@ def gn_unit_tests():
 def fluid_matcher_unit_tests():
     """R10: each fluid sub-cache matcher accepts only ITS component's files, so
     a file from one component can't be counted inside another's folder."""
-    from physics_preflight import cache_inspect as ci
+    from failsafe import cache_inspect as ci
     rx = ci._FLUID_COMPONENT_RE
     checks = [
         ("data accepts fluid_data", bool(rx["data"].match("fluid_data_0001.vdb")), True),
@@ -321,7 +321,7 @@ def fluid_matcher_unit_tests():
 def _run_check_entries(cid, entries):
     """Invoke one real check function against a constructed list of CacheEntry
     objects (bypasses disk enumeration), returning its worst status."""
-    from physics_preflight import engine, checks_cache  # noqa: F401
+    from failsafe import engine, checks_cache  # noqa: F401
     meta = next(m for m in engine.CHECKS if m.id == cid)
     mk = engine._mk(meta)
 
@@ -329,7 +329,7 @@ def _run_check_entries(cid, entries):
         pass
     ctx = Ctx()
     ctx.scene = bpy.context.scene
-    ctx._physpf_caches = entries
+    ctx._failsafe_caches = entries
     results = meta.func(ctx, mk)
     return worst_for_check(results, cid)
 
@@ -339,7 +339,7 @@ def memory_reliability_tests():
     MEMORY caches and the Rigid Body World too, not just disk caches. is_outdated
     doesn't flip under headless bake, so we drive the real #17/#19 check logic
     with constructed entries (the exact false-PASS combination from the review)."""
-    from physics_preflight import cache_inspect as ci
+    from failsafe import cache_inspect as ci
 
     def mem(kind="point", system="Cloth", baked=True, outdated=False,
             skipped=False, baking=False, crange=(1, 10), srange=(1, 10)):
@@ -386,7 +386,7 @@ def memory_reliability_tests():
 def stage_flag_state_tests():
     """R18: a fluid stage baked-flag that this Blender build does not expose must
     read as 'unknown' (-> UNKNOWN), never silently default to 'baked'."""
-    from physics_preflight import cache_inspect as ci
+    from failsafe import cache_inspect as ci
 
     class DS:  # stand-in for domain_settings
         def __init__(self, **kw):
@@ -407,7 +407,7 @@ def stage_flag_state_tests():
     e = ci.CacheEntry("Obj", "Fluid", "fluid")
     e.baked_determinable = True
     e.file_check_applicable = True
-    e.cache_dir = "/tmp/physpf_fluid"
+    e.cache_dir = "/tmp/failsafe_fluid"
     e.frames_expected = [1, 2, 3]
     e.frames_present = {1, 2, 3}
     e.baked_flag = True
@@ -481,7 +481,7 @@ def roundtrip_fix_tests():
     import glob
     import shutil
     out = []
-    outdir = tempfile.mkdtemp(prefix="physpf_roundtrip_")
+    outdir = tempfile.mkdtemp(prefix="failsafe_roundtrip_")
     try:
         fixtures.build_softbody_pass(outdir)
     except Exception as ex:
@@ -520,7 +520,7 @@ def readonly_filesystem_tests():
     tree (path -> size, mtime), run every check, and assert nothing changed and
     no file was added or removed."""
     out = []
-    outdir = tempfile.mkdtemp(prefix="physpf_ro_fs_")
+    outdir = tempfile.mkdtemp(prefix="failsafe_ro_fs_")
     try:
         fixtures.build_softbody_pass(outdir)
     except Exception as ex:
@@ -557,7 +557,7 @@ def main():
     passed = 0
     failed = 0
     fails = []
-    tmp = tempfile.mkdtemp(prefix="physpf_tests_")
+    tmp = tempfile.mkdtemp(prefix="failsafe_tests_")
     for i, (label, cid, builder, needs_outdir, expected) in enumerate(CASES):
         try:
             if needs_outdir:

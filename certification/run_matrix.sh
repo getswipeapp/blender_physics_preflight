@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run the Physics Preflight headless suite on every certified Blender build and
+# Run the Failsafe headless suite on every certified Blender build and
 # capture the pass/fail summary line per version.
 set -u
-ROOT="/Users/ralph/Downloads/blender_physics_preflight"
+ROOT="/Users/ralph/Downloads/blender_failsafe"
 APPS="/Users/ralph/Downloads/blender_runtime_certification/apps"
 RESULTS="/Users/ralph/Downloads/blender_runtime_certification/results"
 mkdir -p "$RESULTS"

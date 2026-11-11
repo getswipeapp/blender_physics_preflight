@@ -16,11 +16,11 @@ from . import cache_inspect as ci
 
 def _caches(ctx):
     # enumerate once per scan and stash on ctx to avoid rescanning the disk.
-    cached = getattr(ctx, "_physpf_caches", None)
+    cached = getattr(ctx, "_failsafe_caches", None)
     if cached is None:
         cached = ci.enumerate_caches(ctx.scene)
         try:
-            ctx._physpf_caches = cached
+            ctx._failsafe_caches = cached
         except Exception:
             pass
     return cached

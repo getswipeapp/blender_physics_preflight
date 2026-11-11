@@ -1,13 +1,13 @@
 schema_version = "1.0.0"
 
-id = "physics_preflight"
+id = "failsafe"
 version = "1.0.0"
-name = "Physics Preflight"
+name = "Failsafe"
 tagline = "Catch physics & simulation problems before you render"
 maintainer = "getswipeapp <nocaholdings@gmail.com>"
 type = "add-on"
 
-website = "https://github.com/getswipeapp/blender_physics_preflight"
+website = "https://github.com/getswipeapp/blender_failsafe"
 
 tags = ["Physics", "Pipeline"]
 

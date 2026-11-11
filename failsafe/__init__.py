@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Physics Preflight — a read-only Blender extension that catches physics and
+"""Failsafe — a read-only Blender extension that catches physics and
 simulation-cache problems before you render.
 
 23 checks in two groups (Physics Setup, Simulation Caches). The cache checks

@@ -98,12 +98,12 @@ def _worst_for_check(items, check_id):
     return best
 
 
-class PHYSPF_PT_panel(Panel):
-    bl_label = "Physics Preflight"
-    bl_idname = "PHYSPF_PT_panel"
+class FAILSAFE_PT_panel(Panel):
+    bl_label = "Failsafe"
+    bl_idname = "FAILSAFE_PT_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Physics Preflight"
+    bl_category = "Failsafe"
 
     def draw(self, context):
         layout = self.layout
@@ -111,19 +111,19 @@ class PHYSPF_PT_panel(Panel):
 
         col = layout.column(align=True)
         col.scale_y = 1.3
-        col.operator("physpf.scan", icon="VIEWZOOM")
+        col.operator("failsafe.scan", icon="VIEWZOOM")
 
         row = layout.row(align=True)
-        row.operator("physpf.export_report", icon="TEXT")
-        row.prop(wm, "physpf_show_passed", text="", icon="HIDE_OFF", toggle=True)
+        row.operator("failsafe.export_report", icon="TEXT")
+        row.prop(wm, "failsafe_show_passed", text="", icon="HIDE_OFF", toggle=True)
 
-        if not wm.physpf_has_run:
+        if not wm.failsafe_has_run:
             box = layout.box()
             box.label(text="Press Scan Scene to check this scene.", icon="INFO")
             box.label(text="Read-only. Nothing is changed.")
             return
 
-        items = wm.physpf_results
+        items = wm.failsafe_results
 
         # summary line (coloured counts)
         c = {Status.FAIL: 0, Status.WARNING: 0, Status.UNKNOWN: 0}
@@ -131,7 +131,7 @@ class PHYSPF_PT_panel(Panel):
             w = _worst_for_check(items, m.id)
             if w in c:
                 c[w] += 1
-        active_filter = wm.physpf_filter
+        active_filter = wm.failsafe_filter
         s = layout.row(align=True)
         s.scale_y = 1.2
         self._filter_button(s, c[Status.FAIL], Status.FAIL, active_filter)
@@ -142,8 +142,8 @@ class PHYSPF_PT_panel(Panel):
             fr.label(text="Showing %s only — click its icon again to clear."
                      % active_filter.lower(), icon="FILTER")
 
-        collapsed = set(wm.physpf_collapsed.split()) if wm.physpf_collapsed else set()
-        show_passed = wm.physpf_show_passed
+        collapsed = set(wm.failsafe_collapsed.split()) if wm.failsafe_collapsed else set()
+        show_passed = wm.failsafe_show_passed
         for group in (GROUP_SETUP, GROUP_CACHE):
             self._draw_group(context, layout, items, group, show_passed,
                              collapsed, active_filter)
@@ -152,10 +152,10 @@ class PHYSPF_PT_panel(Panel):
         """A clickable severity tally that filters the list to that severity."""
         iv = _icon_value(status)
         if iv:
-            op = row.operator("physpf.set_filter", text="%d" % count,
+            op = row.operator("failsafe.set_filter", text="%d" % count,
                               icon_value=iv, depress=(active_filter == status))
         else:
-            op = row.operator("physpf.set_filter", text="%d" % count,
+            op = row.operator("failsafe.set_filter", text="%d" % count,
                               icon=_STATUS_ICON.get(status, "DOT"),
                               depress=(active_filter == status))
         op.sev = status
@@ -185,7 +185,7 @@ class PHYSPF_PT_panel(Panel):
             head.scale_y = 1.15
             _status_label(head, "", worst)
             op = head.operator(
-                "physpf.toggle_detail",
+                "failsafe.toggle_detail",
                 text="#%d  %s" % (m.id, m.name),
                 icon="TRIA_RIGHT" if is_collapsed else "TRIA_DOWN",
                 emboss=False)
@@ -204,7 +204,7 @@ class PHYSPF_PT_panel(Panel):
                 if it.object_name:
                     orow = sub.row(align=True)
                     orow.separator(factor=1.6)
-                    o = orow.operator("physpf.select_object",
+                    o = orow.operator("failsafe.select_object",
                                       text="Select '%s'" % it.object_name,
                                       icon="RESTRICT_SELECT_OFF")
                     o.object_name = it.object_name
@@ -221,7 +221,7 @@ class PHYSPF_PT_panel(Panel):
                     icon="INFO")
 
 
-classes = (PHYSPF_PT_panel,)
+classes = (FAILSAFE_PT_panel,)
 
 
 def _load_icons():

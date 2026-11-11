@@ -107,12 +107,12 @@ class ScanContext:
     every check.
     """
 
-    __slots__ = ("scene", "_dg", "_physpf_caches")
+    __slots__ = ("scene", "_dg", "_failsafe_caches")
 
     def __init__(self, context):
         self.scene = context.scene
         self._dg = context.evaluated_depsgraph_get()
-        self._physpf_caches = None
+        self._failsafe_caches = None
 
     def evaluated_depsgraph_get(self):
         return self._dg

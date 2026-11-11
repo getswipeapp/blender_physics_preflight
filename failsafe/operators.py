@@ -8,7 +8,7 @@ from . import engine
 from . import report as report_mod
 
 
-class PHYSPF_ResultItem(PropertyGroup):
+class FAILSAFE_ResultItem(PropertyGroup):
     check_id: IntProperty()
     check_name: StringProperty()
     group: StringProperty()
@@ -19,7 +19,7 @@ class PHYSPF_ResultItem(PropertyGroup):
 
 
 def _store_results(wm, results):
-    coll = wm.physpf_results
+    coll = wm.failsafe_results
     coll.clear()
     for r in results:
         it = coll.add()
@@ -30,13 +30,13 @@ def _store_results(wm, results):
         it.message = r.message
         it.object_name = r.object_name or ""
         it.hint = r.hint or ""
-    wm.physpf_has_run = True
+    wm.failsafe_has_run = True
 
 
-class PHYSPF_OT_scan(Operator):
-    bl_idname = "physpf.scan"
+class FAILSAFE_OT_scan(Operator):
+    bl_idname = "failsafe.scan"
     bl_label = "Scan Scene"
-    bl_description = ("Run all Physics Preflight checks on the current scene "
+    bl_description = ("Run all Failsafe checks on the current scene "
                       "(read-only)")
     bl_options = {"REGISTER"}
 
@@ -46,14 +46,14 @@ class PHYSPF_OT_scan(Operator):
         counts = engine.summary_counts(results)
         self.report(
             {"INFO"},
-            "Physics Preflight: %d fail, %d warning, %d unknown"
+            "Failsafe: %d fail, %d warning, %d unknown"
             % (counts[engine.Status.FAIL], counts[engine.Status.WARNING],
                counts[engine.Status.UNKNOWN]))
         return {"FINISHED"}
 
 
-class PHYSPF_OT_select_object(Operator):
-    bl_idname = "physpf.select_object"
+class FAILSAFE_OT_select_object(Operator):
+    bl_idname = "failsafe.select_object"
     bl_label = "Select Affected Object"
     bl_description = "Select this object and make it active in the viewport"
     bl_options = {"REGISTER", "UNDO"}
@@ -89,8 +89,8 @@ class PHYSPF_OT_select_object(Operator):
         return {"FINISHED"}
 
 
-class PHYSPF_OT_export_report(Operator):
-    bl_idname = "physpf.export_report"
+class FAILSAFE_OT_export_report(Operator):
+    bl_idname = "failsafe.export_report"
     bl_label = "Export Text Report"
     bl_description = ("Write the report to a Text datablock inside this .blend "
                       "and copy it to the clipboard")
@@ -103,7 +103,7 @@ class PHYSPF_OT_export_report(Operator):
         # Always create a fresh, uniquely-named text block. Blender appends
         # .001/.002 if the base name is taken, so we never overwrite anything the
         # user has — including an earlier report they may have edited.
-        txt = bpy.data.texts.new("physics_preflight_report.txt")
+        txt = bpy.data.texts.new("failsafe_report.txt")
         txt.write(text)
         try:
             context.window_manager.clipboard = text
@@ -115,8 +115,8 @@ class PHYSPF_OT_export_report(Operator):
         return {"FINISHED"}
 
 
-class PHYSPF_OT_toggle_detail(Operator):
-    bl_idname = "physpf.toggle_detail"
+class FAILSAFE_OT_toggle_detail(Operator):
+    bl_idname = "failsafe.toggle_detail"
     bl_label = "Toggle Finding Detail"
     bl_description = "Show or hide the full explanation for this check"
     bl_options = {"INTERNAL"}
@@ -125,17 +125,17 @@ class PHYSPF_OT_toggle_detail(Operator):
 
     def execute(self, context):
         wm = context.window_manager
-        collapsed = set(wm.physpf_collapsed.split()) if wm.physpf_collapsed else set()
+        collapsed = set(wm.failsafe_collapsed.split()) if wm.failsafe_collapsed else set()
         if self.key in collapsed:
             collapsed.discard(self.key)
         else:
             collapsed.add(self.key)
-        wm.physpf_collapsed = " ".join(sorted(collapsed))
+        wm.failsafe_collapsed = " ".join(sorted(collapsed))
         return {"FINISHED"}
 
 
-class PHYSPF_OT_set_filter(Operator):
-    bl_idname = "physpf.set_filter"
+class FAILSAFE_OT_set_filter(Operator):
+    bl_idname = "failsafe.set_filter"
     bl_label = "Filter By Severity"
     bl_description = ("Show only this severity. Click again to show everything. "
                       "Handy when a scan turns up a lot of findings")
@@ -146,40 +146,40 @@ class PHYSPF_OT_set_filter(Operator):
     def execute(self, context):
         wm = context.window_manager
         # Clicking the active filter again clears it (back to showing all).
-        wm.physpf_filter = "" if wm.physpf_filter == self.sev else self.sev
+        wm.failsafe_filter = "" if wm.failsafe_filter == self.sev else self.sev
         return {"FINISHED"}
 
 
 classes = (
-    PHYSPF_ResultItem,
-    PHYSPF_OT_scan,
-    PHYSPF_OT_select_object,
-    PHYSPF_OT_export_report,
-    PHYSPF_OT_toggle_detail,
-    PHYSPF_OT_set_filter,
+    FAILSAFE_ResultItem,
+    FAILSAFE_OT_scan,
+    FAILSAFE_OT_select_object,
+    FAILSAFE_OT_export_report,
+    FAILSAFE_OT_toggle_detail,
+    FAILSAFE_OT_set_filter,
 )
 
 
 def register():
     for c in classes:
         bpy.utils.register_class(c)
-    bpy.types.WindowManager.physpf_results = CollectionProperty(type=PHYSPF_ResultItem)
-    bpy.types.WindowManager.physpf_has_run = BoolProperty(default=False)
-    bpy.types.WindowManager.physpf_show_passed = BoolProperty(
+    bpy.types.WindowManager.failsafe_results = CollectionProperty(type=FAILSAFE_ResultItem)
+    bpy.types.WindowManager.failsafe_has_run = BoolProperty(default=False)
+    bpy.types.WindowManager.failsafe_show_passed = BoolProperty(
         name="Show Passed", default=False,
         description="Also show checks that passed or do not apply")
     # space-separated list of check ids whose detail is collapsed. Empty by
     # default, so every finding starts EXPANDED (nothing hidden from the user).
-    bpy.types.WindowManager.physpf_collapsed = StringProperty(default="")
+    bpy.types.WindowManager.failsafe_collapsed = StringProperty(default="")
     # active severity filter: "" (all), "FAIL", "WARNING" or "UNKNOWN".
-    bpy.types.WindowManager.physpf_filter = StringProperty(default="")
+    bpy.types.WindowManager.failsafe_filter = StringProperty(default="")
 
 
 def unregister():
-    del bpy.types.WindowManager.physpf_filter
-    del bpy.types.WindowManager.physpf_collapsed
-    del bpy.types.WindowManager.physpf_show_passed
-    del bpy.types.WindowManager.physpf_has_run
-    del bpy.types.WindowManager.physpf_results
+    del bpy.types.WindowManager.failsafe_filter
+    del bpy.types.WindowManager.failsafe_collapsed
+    del bpy.types.WindowManager.failsafe_show_passed
+    del bpy.types.WindowManager.failsafe_has_run
+    del bpy.types.WindowManager.failsafe_results
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

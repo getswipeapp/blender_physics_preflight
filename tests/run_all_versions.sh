@@ -10,13 +10,13 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Required versions and where to find them. Override any path via the matching
-# PHYSPF_BLENDER_<ver> environment variable (e.g. PHYSPF_BLENDER_4_2=/path/Blender).
+# FAILSAFE_BLENDER_<ver> environment variable (e.g. FAILSAFE_BLENDER_4_2=/path/Blender).
 CERT="/Users/ralph/Downloads/blender_runtime_certification/apps"
 declare -A BINS=(
-  ["4.2"]="${PHYSPF_BLENDER_4_2:-$CERT/4.2/Blender.app/Contents/MacOS/Blender}"
-  ["4.5"]="${PHYSPF_BLENDER_4_5:-$CERT/4.5/Blender.app/Contents/MacOS/Blender}"
-  ["5.0"]="${PHYSPF_BLENDER_5_0:-$CERT/5.0/Blender.app/Contents/MacOS/Blender}"
-  ["5.2"]="${PHYSPF_BLENDER_5_2:-/Applications/Blender.app/Contents/MacOS/Blender}"
+  ["4.2"]="${FAILSAFE_BLENDER_4_2:-$CERT/4.2/Blender.app/Contents/MacOS/Blender}"
+  ["4.5"]="${FAILSAFE_BLENDER_4_5:-$CERT/4.5/Blender.app/Contents/MacOS/Blender}"
+  ["5.0"]="${FAILSAFE_BLENDER_5_0:-$CERT/5.0/Blender.app/Contents/MacOS/Blender}"
+  ["5.2"]="${FAILSAFE_BLENDER_5_2:-/Applications/Blender.app/Contents/MacOS/Blender}"
 )
 REQUIRED=("4.2" "4.5" "5.0" "5.2")
 

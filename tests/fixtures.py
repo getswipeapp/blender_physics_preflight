@@ -738,7 +738,7 @@ def build_22_fail(outdir):
     m = o.modifiers.new("Fluid", "FLUID")
     m.fluid_type = "DOMAIN"
     m.domain_settings.domain_type = "GAS"
-    m.domain_settings.cache_directory = "/tmp/physpf_abs_cache_outside"
+    m.domain_settings.cache_directory = "/tmp/failsafe_abs_cache_outside"
     blend = os.path.join(outdir, "fluid_abs.blend")
     bpy.ops.wm.save_as_mainfile(filepath=blend)
 

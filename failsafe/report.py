@@ -15,7 +15,7 @@ _ICON = {
 
 def build_text_report(results):
     lines = []
-    lines.append("Physics Preflight report")
+    lines.append("Failsafe report")
     lines.append("Blender %s" % bpy.app.version_string)
     fp = bpy.data.filepath or "(unsaved file)"
     lines.append("File: %s" % fp)
