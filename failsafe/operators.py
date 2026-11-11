@@ -225,6 +225,10 @@ def register():
     bpy.types.WindowManager.failsafe_show_passed = BoolProperty(
         name="Show Passed", default=False,
         description="Also show checks that passed or do not apply")
+    bpy.types.WindowManager.failsafe_explain = BoolProperty(
+        name="Explain", default=False,
+        description=("Show a plain-English 'why it matters' line under each "
+                     "finding (for anyone new to Blender's physics)"))
     # space-separated list of check ids whose detail is collapsed. Empty by
     # default, so every finding starts EXPANDED (nothing hidden from the user).
     bpy.types.WindowManager.failsafe_collapsed = StringProperty(default="")
@@ -233,6 +237,7 @@ def register():
 
 
 def unregister():
+    del bpy.types.WindowManager.failsafe_explain
     del bpy.types.WindowManager.failsafe_filter
     del bpy.types.WindowManager.failsafe_collapsed
     del bpy.types.WindowManager.failsafe_show_passed

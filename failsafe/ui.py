@@ -14,6 +14,7 @@ import bpy.utils.previews
 from bpy.types import Panel
 
 from .engine import (CHECKS, Status, GROUP_SETUP, GROUP_CACHE, display_name)
+from .help_text import HELP
 
 # Fallback monochrome icons if the coloured previews fail to load.
 _STATUS_ICON = {
@@ -136,6 +137,7 @@ class FAILSAFE_PT_panel(Panel):
         row = layout.row(align=True)
         row.operator("failsafe.export_report", icon="TEXT")
         row.prop(wm, "failsafe_show_passed", text="", icon="HIDE_OFF", toggle=True)
+        row.prop(wm, "failsafe_explain", text="", icon="QUESTION", toggle=True)
 
         # Opt-in: check automatically at the start of each render.
         prefs = _get_prefs(context)
@@ -175,9 +177,10 @@ class FAILSAFE_PT_panel(Panel):
 
         collapsed = set(wm.failsafe_collapsed.split()) if wm.failsafe_collapsed else set()
         show_passed = wm.failsafe_show_passed
+        explain = wm.failsafe_explain
         for group in (GROUP_SETUP, GROUP_CACHE):
             self._draw_group(context, layout, items, group, show_passed,
-                             collapsed, active_filter)
+                             collapsed, active_filter, explain)
 
     def _filter_button(self, row, count, status, active_filter):
         """A clickable severity tally that filters the list to that severity."""
@@ -192,7 +195,7 @@ class FAILSAFE_PT_panel(Panel):
         op.sev = status
 
     def _draw_group(self, context, layout, items, group, show_passed, collapsed,
-                    active_filter=""):
+                    active_filter="", explain=False):
         box = layout.box()
         box.label(text=group,
                   icon="PHYSICS" if group == GROUP_SETUP else "FILE_CACHE")
@@ -225,6 +228,14 @@ class FAILSAFE_PT_panel(Panel):
             op.key = str(m.id)
             if is_collapsed:
                 continue
+
+            # Optional "why it matters" line (Explain mode), once per check.
+            if explain:
+                htext = HELP.get(m.id, "")
+                if htext:
+                    hb = box.column(align=True)
+                    _wrap_label(hb, context, "Why: " + htext, status=None,
+                                indent=1.6)
 
             # Expanded detail: wrapped message(s), select button, wrapped hint.
             for it in items:

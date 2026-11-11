@@ -558,7 +558,13 @@ def render_check_tests():
     flag a broken scene, stay read-only, and honour the 'also warn on warnings'
     toggle — all without blocking anything."""
     from failsafe import handlers
+    from failsafe.help_text import HELP
     out = []
+
+    # Every check must have a plain-English "why it matters" line.
+    ids = {m.id for m in engine.CHECKS}
+    out.append(("help: every check has a 'why' line", set(HELP) == ids,
+                sorted(set(HELP) ^ ids), "no diff"))
 
     # 1) A known-broken scene (baked flag on, no cache files -> #18 FAIL) must be
     #    reported as a problem, with the fail surfaced in the banner.
