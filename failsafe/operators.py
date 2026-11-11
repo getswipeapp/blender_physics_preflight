@@ -123,25 +123,37 @@ class FAILSAFE_OT_show_physics(Operator):
                     except Exception:
                         pass
 
-        # 2) Switch a visible Properties editor to the right tab. This only
-        #    changes which tab is shown — no scene data is touched.
+        # 2) Switch ONE unpinned Properties editor to the right tab. This only
+        #    changes which tab is shown — no scene data is touched. Pinned
+        #    editors are left alone so we don't disturb a customised workspace.
         switched = False
         try:
             for area in context.screen.areas:
-                if area.type == "PROPERTIES":
-                    space = area.spaces.active
-                    try:
-                        space.context = self.target
-                        switched = True
-                    except Exception:
-                        pass
+                if area.type != "PROPERTIES":
+                    continue
+                space = area.spaces.active
+                if getattr(space, "use_pin_id", False):
+                    continue      # respect a pinned Properties editor
+                try:
+                    space.context = self.target
                     area.tag_redraw()
+                    switched = True
+                    break         # switch only one
+                except Exception:
+                    pass
         except Exception:
             pass
         if not switched:
-            self.report({"INFO"},
-                        "Open a Properties editor to see the %s settings."
-                        % self.target.title())
+            # Be honest about what actually happened rather than implying both
+            # the select and the navigation succeeded.
+            if self.object_name:
+                self.report({"INFO"},
+                            "Selected '%s' — open its %s settings manually."
+                            % (self.object_name, self.target.title()))
+            else:
+                self.report({"INFO"},
+                            "Open an unpinned Properties editor to see the %s "
+                            "settings." % self.target.title())
         return {"FINISHED"}
 
 

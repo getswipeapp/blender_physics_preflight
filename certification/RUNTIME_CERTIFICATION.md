@@ -1,6 +1,53 @@
-# Physics Preflight — Runtime Certification Evidence
+# Failsafe — Runtime Certification Evidence
 
-**Package under test:** `physics_preflight_c977ac2.zip`
+*(Product renamed from the "Physics Preflight" placeholder to **Failsafe**;
+older references below predate the rename.)*
+
+---
+
+## 0. v1 feature round — re-certification (2026-11-11)
+
+After the UI correctness fix and the v1 features (status-aware titles,
+check-before-render, guided-fix jump, Explain mode) and the independent-review
+corrections, the suite was re-run. **Previous version certification does not
+automatically certify new features — so this is a fresh matrix.**
+
+**Headless suite (now 158 tests) — full matrix, all green:**
+
+| Blender build | Result | Tests |
+|---------------|--------|-------|
+| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 158 / 0 |
+| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 158 / 0 |
+| Blender 5.0.1 | ✅ PASS (rc=0) | 158 / 0 |
+| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 158 / 0 |
+
+Logs: `results/run_v1_{4.2,4.5,5.0,5.2}.log`. New in this round: title
+truthfulness (UNKNOWN/N-A never borrow the positive statement), render-banner
+honesty (UNKNOWN-only is never "no problems"), and the render-check read-only +
+warn-toggle behaviour.
+
+**Render handler — headless/background proof (Blender 5.2.3):**
+- `blender -b -P …` with the extension **enabled** registers the `render_init`
+  handler and it **fires during a background render** (`FAILSAFE render check:
+  0 FAIL, 0 WARNING, 0 UNKNOWN — all clear`).
+- Background render of a **broken-cache** scene printed `3 FAIL, 1 WARNING,
+  1 UNKNOWN` and **named the exact missing frame** in the log, and the render
+  **completed** (not cancelled). This is the render-farm path ChatGPT asked us
+  to prove.
+- Scan latency on a small live scene: **~92 ms** (benchmark; large scenes will be
+  higher — the check is synchronous/non-cancelling, not non-blocking).
+
+**Live GUI (5.2.3, owner's session):** 4-state titles, guided "Open Physics"
+jump (MODIFIER→PHYSICS and →OBJECT), Explain mode, and the render banner all
+verified in the real panel.
+
+**Still UNKNOWN (not claimed):** handler registration on 4.2/4.5/5.0 was not
+separately exercised in background (logic is version-agnostic and the 5.2 proof
+stands); a live Geometry-Nodes *disk* bake; and **Windows**.
+
+---
+
+**Package under test (original round):** `physics_preflight_c977ac2.zip`
 **Source commit:** `c977ac2` (branch `phase1-physics-preflight-extension`)
 **Package SHA-256:** `67c03635af34de73a65fc9d2e7f16d8beccf57b34ec9dfffd34909d58a6d210b`
 **Host:** macOS (Darwin 25, Apple Silicon / arm64)

@@ -4,55 +4,66 @@
 Shown in the panel only when the user turns on "Explain" (off by default, so the
 normal problem view stays uncluttered). This is the rationale — what the check
 means and why you'd care — which is different from a finding's message (what is
-wrong right now) and its Tip (how to fix it). Written for someone new to
-Blender's physics, without jargon.
+wrong right now) and its Tip (how to fix it).
+
+Wording is deliberately hedged ("can", "may"): most of these conditions are
+*risks*, not guaranteed failures, and some are legitimate in certain workflows.
+Overstating them would undermine the tool's trust story.
 """
 
 HELP = {
-    1: ("Physics uses an object's real size and pose. Unapplied scale or "
-        "rotation makes collisions and cloth behave as if the object were a "
-        "different size or angle than it looks."),
-    2: ("Mass decides how heavy a rigid body feels. A value far off for its "
-        "size makes it drift like a balloon or smash through things."),
-    3: ("Rigid bodies that already overlap on the first frame get shoved apart "
-        "violently as the sim starts."),
-    4: ("A Convex Hull collision shape fills in any hollow, so cups, bowls and "
-        "rooms act solid. Hollow shapes need a Mesh shape instead."),
-    5: ("Collision surfaces that are very dense or have internal/overlapping "
-        "faces make a simulation slow and jittery."),
-    6: ("Rigid bodies only move if a Rigid Body World exists, is enabled, and "
-        "actually contains them."),
-    7: ("Cloth and soft bodies only land on objects that have a Collision "
-        "modifier. Without one, they fall straight through."),
-    8: ("Negative or parent-inherited scale flips an object's normals and "
-        "distorts its collision size, so physics behaves backwards."),
-    9: ("Blender's solver is tuned around 1-metre objects. Very tiny or very "
-        "huge objects simulate unstably."),
-    10: ("A rigid body spins around its origin. An origin far from the shape "
-         "makes it tumble off-centre."),
-    11: ("The collision margin is an invisible buffer around a body. Too large, "
-         "and objects float with a visible gap."),
-    12: ("A passive collider that is animated must be marked 'Animated', or its "
-         "collision shape stays frozen at the start frame."),
-    13: ("A rigid-body constraint (a hinge or chain link) needs two valid "
-         "bodies, or it silently holds nothing together."),
-    14: ("Collision must sit below any deforming modifiers, or cloth collides "
-         "with the object's undeformed shape."),
-    15: ("A cloth pin group holds part of the cloth in place. If it's empty or "
-         "missing, the whole cloth drops."),
-    16: ("A fluid domain only fills if a Flow or Inflow source sits inside it."),
-    17: ("An unbaked simulation is re-computed at render time and can differ "
-         "from what you see in the viewport — or freeze a render farm."),
-    18: ("Blender keeps reporting 'baked' even after the cache files are gone. "
-         "The render needs the actual files on disk, so Failsafe checks them."),
-    19: ("If the bake stops before the last rendered frame, the simulation "
-         "freezes for the rest of the shot."),
-    20: ("A single missing cache frame is a freeze or pop at that exact moment "
-         "in the render."),
-    21: ("Two simulations pointed at the same cache folder overwrite each "
-         "other's frames."),
-    22: ("A cache saved outside the project folder won't be found on another "
-         "machine or a render farm."),
-    23: ("Blender doesn't re-time an existing bake. Changing FPS or time scale "
-         "after baking makes it play back at the wrong speed."),
+    1: ("Physics uses an object's transforms and mesh. Unapplied scale — and "
+        "some rotation setups — can make a simulation behave unexpectedly, so "
+        "it's worth applying them before baking."),
+    2: ("Mass sets how a rigid body responds to forces and collisions. A value "
+        "far off for its size can make it behave oddly — drifting, or pushing "
+        "hard into other objects."),
+    3: ("Rigid bodies that already overlap on the first frame can suddenly push "
+        "apart or jitter as the simulation starts."),
+    4: ("A Convex Hull shape approximates the outside of an object and can't "
+        "represent hollow or concave regions. A Mesh or compound shape may suit "
+        "the body's role better."),
+    5: ("Collision surfaces that are very dense, or have internal/overlapping "
+        "faces, can make a simulation slow or unstable."),
+    6: ("A rigid body is only simulated if a Rigid Body World exists, is "
+        "enabled, and contains it. (You can still move objects with animation "
+        "instead.)"),
+    7: ("Cloth and soft bodies only collide with objects that have a Collision "
+        "modifier. Without one, they can fall straight through."),
+    8: ("Negative or parent-inherited scale can invert normals and distort an "
+        "object's collision size, so physics may behave unexpectedly."),
+    9: ("Blender's physics has scale-dependent tolerances. Very tiny or very "
+        "large objects can simulate less stably than roughly human-scale ones."),
+    10: ("For mesh-based rigid-body shapes, Blender uses the object origin as "
+         "the centre of mass. An offset origin can change how the body rotates; "
+         "primitive shapes behave differently."),
+    11: ("Collision margin adds a small tolerance that helps stability. Some "
+         "shapes embed it, but if it's too large others can show a visible gap."),
+    12: ("An animated passive collider usually needs the 'Animated' option, or "
+         "its collision shape may stay frozen at the start frame."),
+    13: ("A rigid-body constraint (a hinge or chain link) needs two properly "
+         "set-up bodies, or it holds nothing together."),
+    14: ("On a collider, the Collision modifier should sit below any deforming "
+         "modifiers, or cloth may collide with the undeformed shape."),
+    15: ("A cloth pin group holds the chosen vertices in place. If pinning is "
+         "intended but the group is empty or missing, the whole cloth can drop."),
+    16: ("A fluid domain only fills from a Flow or Inflow source inside it. If "
+         "you expect fluid but see none, check the source."),
+    17: ("An unbaked simulation is recomputed at render time, so it can differ "
+         "from the viewport — or stall a render farm. Some workflows recalculate "
+         "on purpose."),
+    18: ("Blender can still report 'baked' after the cache files are gone. "
+         "Disk-backed caches need their files present; in-memory and packed "
+         "bakes are the exceptions."),
+    19: ("If the bake stops before the last rendered frame, the simulation can "
+         "freeze or look wrong past that point."),
+    20: ("A missing required cache frame can cause a freeze or jump at that "
+         "point in the render."),
+    21: ("Two simulations pointing at the same cache location can overwrite each "
+         "other's frames, unless their cache names differ."),
+    22: ("A cache saved outside the project may not be found on another machine "
+         "or a render farm, unless the path is still reachable there."),
+    23: ("Changing scene timing or simulation speed after baking can make the "
+         "existing cache play back wrong. Blender doesn't always record enough "
+         "to confirm the original bake settings."),
 }
