@@ -4,6 +4,14 @@
 directly-verified competitor data. This supersedes the competitive picture in
 `COMPETITIVE_ANALYSIS.md` (whose "no competitor" claim was wrong).*
 
+> **UPDATE (2026-11-11): full census done — see `COMPETITOR_CENSUS.md`.** A
+> systematic Superhive sweep (~19 checkers) confirms only **three** tools verify
+> sim caches *on disk*: **Cache Guardian ($14)**, **Cache Commander (~$9.99, new —
+> a 2nd disk-cache competitor we'd missed)**, and **MotionLab ($39, not $9 —
+> Rigid-Body-only, Windows-only)**. Everyone else reads only the bake *flag*. Our
+> full-frame-vs-sampled wedge holds against all three. Also correct: **Blend
+> Inspector is NOT on Superhive** (drop it from the set).
+
 ---
 
 ## 1. The verified competitive landscape
