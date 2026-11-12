@@ -1,0 +1,25 @@
+schema_version = "1.0.0"
+
+id = "failsafe"
+version = "1.0.0"
+name = "Failsafe"
+tagline = "Catch physics & simulation problems before you render"
+maintainer = "getswipeapp <nocaholdings@gmail.com>"
+type = "add-on"
+
+website = "https://github.com/getswipeapp/blender_physics_preflight"
+
+tags = ["Physics", "Pipeline"]
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+# Offline tool, no network access and no telemetry. It reads simulation cache
+# files to verify them on disk, and copies the report to the clipboard on
+# request. (Blender requires these to be declared for marketplace review.)
+[permissions]
+files = "Read simulation cache files on disk to verify them"
+clipboard = "Copy the report to the clipboard on export"
