@@ -81,11 +81,11 @@ find out when the render looks wrong — or after you've wasted hours.
 
 ## What makes it different
 
-In our Phase 0 competitor research, **no single add-on combined physics-setup
-checks with real file-level cache verification** — you'd assemble two or three
-separate tools to get partial coverage. Failsafe does both in one scan,
-and it verifies the real cache files instead of trusting Blender's "baked" flag,
-which stays on after the files are deleted.
+Failsafe covers **both** physics-setup checks **and** real file-level cache
+verification in one scan — and it verifies the actual cache files on disk instead
+of trusting Blender's "baked" flag, which stays on after the files are deleted.
+Most tools do one side or the other; Failsafe does both, and it says **UNKNOWN**
+rather than a false "all good" when Blender genuinely can't confirm something.
 
 ## How it works
 
@@ -146,15 +146,18 @@ The stack a buyer would otherwise assemble costs **≈ $24–27** (Phase 0). Opt
 ## Notes for Keith (not part of the public listing)
 
 - **Competitor names** are kept out of the public text (your selling rule). The
-  "no single add-on combines both" line is backed by the Phase 0 research, not a
-  guess. Say the word if you want a named comparison table.
+  "what makes it different" section now describes Failsafe's own coverage rather
+  than claiming no rival combines both (Phase 0 didn't check every add-on
+  exhaustively). Say the word if you want a named comparison table.
 - **Feature accuracy:** checks #1, #3, #16, #18–#20 and #23 are described above to
   match the **fixed** build, not the first draft. #23 is honestly a reminder, not
   a detector.
-- **Pre-launch gates (Superhive + your roadmap):** multi-version headless tests
-  (4.2/4.5/5.0/5.2) ✅ **done**; GUI acceptance ✅ **done** (owner, 5.2.3). Still
-  open: real screenshots + optional video, your beginner acceptance test, Windows
-  check (optional), and your publishing approval.
+- **Pre-launch gates (Superhive + your roadmap).** Done: multi-version headless
+  tests (4.2/4.5/5.0/5.2, 162/162 each); owner GUI smoke-test on 5.2.3 (install,
+  scan, deleted-cache catch, export). Still open: real screenshots + optional
+  video; a **separate** beginner usability test (a first-time user tries it);
+  optional Windows check; and your publishing approval. (The owner GUI test and
+  the beginner test are two different things — the first is done, the second isn't.)
 - **Superhive listing requirements** (per ChatGPT citing Superhive's seller docs —
   confirm current specs on the site when you set up the listing): at least **5**
   gallery images at **2:1 ratio, ≥1200 px wide**; written install instructions and

@@ -55,12 +55,12 @@ Two checks were corrected after the code review and now behave honestly:
 ## Platform / version coverage
 
 - **Minimum Blender: 4.2 LTS.**
-- The underlying Blender APIs were verified on 4.2, 4.5, 5.0 and 5.2 during
-  research, and the automated test suite currently passes on **5.2.3** (61/61).
-- **Pre-launch to-do (needs Keith's machine):** headless test runs on **4.2, 4.5,
-  5.0** (and 4.4 for the animation-slot path), plus heavy-sim end-to-end fixtures
-  (a real fluid bake, a geometry-nodes disk bake, soft-body and particle caches).
-  The listing should name **only the versions actually tested.**
+- The automated test suite passes **162/162 on Blender 4.2.9, 4.5.9, 5.0.1 and
+  5.2.3** (headless), including real heavy-sim bakes (cloth, soft body, particle,
+  fluid) and damaged-cache cases. See `certification/RUNTIME_CERTIFICATION.md`.
+- **Still untested (not advertised as working):** Windows, a live geometry-nodes
+  *disk* bake, and the CLI `-f`/`-a` render-handler paths. The listing names only
+  the versions actually tested.
 - Cache folder names and relative paths differ slightly between Windows and macOS;
   a Windows pass is also on the pre-launch list.
 
