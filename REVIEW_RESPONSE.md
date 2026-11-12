@@ -312,7 +312,7 @@ new section (−1) certifies the expanded build.
   logs `certification/results/run_v3_{4.2,4.5,5.0,5.2}.log`.
 - CLI proof `certification/results/cli_proof_5.2.3.log` (exit 0 clean / 3 usage;
   JSON keeps `UNKNOWN`; text shows "Couldn't verify").
-- Package `dist/failsafe-<commit>.zip`; SHA-256 in `certification/RELEASE_SHA256SUMS.txt`.
+- Package `dist/failsafe-599463b.zip` (commit `599463b`); SHA-256 in `certification/RELEASE_SHA256SUMS.txt`.
 - Feature matrix: `strategy/FEATURE_MATRIX.md` (consumer vs pipeline; vs competitors).
 
 **Batch-isolation caveat (stated plainly):** the subprocess orchestration is proven
