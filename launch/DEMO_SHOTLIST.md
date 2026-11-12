@@ -1,4 +1,4 @@
-# Physics Preflight — Screenshots & Demo Shot-List
+# Failsafe — Screenshots & Demo Shot-List
 
 Superhive listings sell on **genuine screenshots** and (optionally) a short demo.
 This is the shot-by-shot plan so you (Keith) can record them on your Mac. Every
@@ -54,7 +54,7 @@ Use a simple, good-looking scene.
 | 0:42–0:55 | Click **Select Object** → viewport jumps to the culprit. |
 | 0:55–1:10 | Scroll the rest: a couple of WARNINGs and an honest UNKNOWN. |
 | 1:10–1:25 | Card: "23 checks. Physics setup + real cache verification. One click." |
-| 1:25–1:30 | End card: "Physics Preflight" + the price. |
+| 1:25–1:30 | End card: "Failsafe" + the price. |
 
 ## C. Staging the hero "broken cache" scene (the strong version)
 

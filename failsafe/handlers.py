@@ -61,12 +61,18 @@ def _fail_lines(results):
     return out
 
 
-def render_banner(f, w, u, problem):
-    """The panel banner for a render check. Honesty rule: a scene with only
-    UNKNOWN results is NOT 'no problems' — those are the exact checks that
-    couldn't be verified, which is what a buyer most wants to know before a
-    render. Never present them as a clean result."""
-    if problem:
+def render_banner(f, w, u):
+    """The panel banner for a render check — a factual summary of the counts.
+
+    Honesty rules (V03 + V08): the banner reflects what was *found*, never the
+    user's alert preference. A scene with ANY fail or warning shows the counts
+    and is never 'all clear'; a scene with only UNKNOWN results is 'no confirmed
+    problems, N unverified' (those are the checks that couldn't be verified — the
+    thing a buyer most needs to know). Only a genuinely empty result — no fail,
+    no warning, no unknown — is 'all clear'. Crucially this does NOT depend on
+    ``include_warnings``: turning off warning *alerts* must never erase warnings
+    from the summary."""
+    if f > 0 or w > 0:
         return "Last render check: %d fail, %d warning, %d unknown" % (f, w, u)
     if u > 0:
         return "Last render check: no confirmed problems, %d unverified" % u
@@ -91,8 +97,12 @@ def run_render_check(scene, depsgraph=None, include_warnings=True):
     f = counts[engine.Status.FAIL]
     w = counts[engine.Status.WARNING]
     u = counts[engine.Status.UNKNOWN]
+    # `problem` is the ESCALATION flag (should we raise the loud, prominent
+    # alert?). It honours include_warnings. It is NOT the same as "is the scene
+    # clean?" — the banner answers that factually and independently (V08), so a
+    # warning-only scene with include_warnings=False is still reported honestly.
     problem = (f > 0) or (include_warnings and w > 0)
-    banner = render_banner(f, w, u, problem)
+    banner = render_banner(f, w, u)
     return {
         "fail": f, "warning": w, "unknown": u,
         "problem": problem, "banner": banner,
@@ -128,13 +138,21 @@ def failsafe_render_init(scene, depsgraph=None):
         except Exception:
             pass
 
-        # Always print a one-line summary so the UNKNOWN count is visible in the
-        # terminal and farm logs, even when nothing is a confirmed problem.
+        # Always print a one-line summary so the UNKNOWN (and WARNING) counts are
+        # visible in the terminal and farm logs, even when nothing escalates.
+        f, w, u = info["fail"], info["warning"], info["unknown"]
         head = ("FAILSAFE render check: %d FAIL, %d WARNING, %d UNKNOWN"
-                % (info["fail"], info["warning"], info["unknown"]))
+                % (f, w, u))
         if not info["problem"]:
-            tail = (" — no confirmed problems" if info["unknown"]
-                    else " — all clear")
+            # Not escalated — but the tail must still be truthful (V08): never
+            # print "all clear" when warnings or unknowns were found.
+            if f == 0 and w == 0 and u == 0:
+                tail = " — all clear"
+            elif f == 0 and w == 0:
+                tail = " — no confirmed problems (%d unverified)" % u
+            else:
+                tail = (" — warnings present; 'Also warn on warnings' is off, "
+                        "so this was not alerted")
             print(head + tail)
             return
 

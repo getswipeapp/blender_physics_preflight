@@ -1,29 +1,31 @@
-# Physics Preflight — Superhive Store Listing (DRAFT v2)
+# Failsafe — Superhive Store Listing (DRAFT v2)
 
 > **Status:** Draft for Keith to review and edit. Nothing here is published.
 > Revised after (a) ChatGPT's launch-doc review and (b) the code fixes from the
 > independent code review — feature descriptions below now match the **fixed**
 > build (see `REVIEW_RESPONSE.md`).
 > **Price:** _TBD_ — see "Pricing" at the bottom.
-> **Before publishing:** finish multi-version tests, add real screenshots/video,
-> and get Keith's approval. See `launch/LIMITATIONS.md` and `launch/DEMO_SHOTLIST.md`.
+> **Before publishing:** add real screenshots/video and get Keith's approval.
+> (Multi-version headless tests are **done** — 162/162 on 4.2.9 / 4.5.9 / 5.0.1 /
+> 5.2.3; see `certification/RUNTIME_CERTIFICATION.md`.) See `launch/LIMITATIONS.md`
+> and `launch/DEMO_SHOTLIST.md`.
 
 ---
 
 ## Headline
 
-**Physics Preflight — Check Physics Setup + Simulation Caches in One Click**
+**Failsafe — Check Physics Setup + Simulation Caches in One Click**
 
 ## Hook
 
-A Blender scene can still *look* baked after its cache files are gone. Physics
-Preflight checks the **actual cache files on disk**, frame by frame, alongside
+A Blender scene can still *look* baked after its cache files are gone. Failsafe
+checks the **actual cache files on disk**, frame by frame, alongside
 common physics-setup mistakes — so you catch the broken sim *before* you render,
 not hours into a frame farm.
 
 ## Short description
 
-Physics Preflight is a one-click, offline, read-only health check for your
+Failsafe is a one-click, offline, read-only health check for your
 physics and simulations. It runs **23 checks** across rigid bodies, cloth, soft
 body, fluid, and geometry-nodes bakes, and reports each as PASS / WARNING / FAIL
 / UNKNOWN / NOT APPLICABLE, grouped into **Physics Setup** and **Simulation
@@ -81,7 +83,7 @@ find out when the render looks wrong — or after you've wasted hours.
 
 In our Phase 0 competitor research, **no single add-on combined physics-setup
 checks with real file-level cache verification** — you'd assemble two or three
-separate tools to get partial coverage. Physics Preflight does both in one scan,
+separate tools to get partial coverage. Failsafe does both in one scan,
 and it verifies the real cache files instead of trusting Blender's "baked" flag,
 which stays on after the files are deleted.
 
@@ -89,7 +91,7 @@ which stays on after the files are deleted.
 
 1. Open your scene (and **save it** before checking caches — caches live next to
    the saved `.blend`).
-2. Open the **Physics Preflight** panel in the 3D viewport sidebar (press `N`).
+2. Open the **Failsafe** panel in the 3D viewport sidebar (press `N`).
 3. Click **Scan Scene**.
 4. Read the results — plain English, colour-coded, each with a **Select Object**
    button. Treat **UNKNOWN** as "not verified," not as a pass.
@@ -113,9 +115,8 @@ which stays on after the files are deleted.
 
 ## Requirements
 
-- Blender **4.2 LTS or newer**. _(Pre-launch: list only the versions actually
-  tested. The current build passes its automated tests on 5.2.3; 4.2 / 4.5 / 5.0
-  runs are pending — see Notes.)_
+- Blender **4.2 LTS or newer**. Automated headless tests pass on **4.2.9, 4.5.9,
+  5.0.1 and 5.2.3** (162/162 each). Windows is not yet tested — see `LIMITATIONS.md`.
 - No internet, no account, no extra downloads. Fully offline, no telemetry.
 - Read-only: it never changes your scene and never writes files unless you click
   Export (which adds a text block inside the `.blend`).
@@ -151,8 +152,9 @@ The stack a buyer would otherwise assemble costs **≈ $24–27** (Phase 0). Opt
   match the **fixed** build, not the first draft. #23 is honestly a reminder, not
   a detector.
 - **Pre-launch gates (Superhive + your roadmap):** multi-version headless tests
-  (4.2/4.5/5.0), a GUI acceptance test, real screenshots + optional video, your
-  beginner acceptance test, and your publishing approval.
+  (4.2/4.5/5.0/5.2) ✅ **done**; GUI acceptance ✅ **done** (owner, 5.2.3). Still
+  open: real screenshots + optional video, your beginner acceptance test, Windows
+  check (optional), and your publishing approval.
 - **Superhive listing requirements** (per ChatGPT citing Superhive's seller docs —
   confirm current specs on the site when you set up the listing): at least **5**
   gallery images at **2:1 ratio, ≥1200 px wide**; written install instructions and

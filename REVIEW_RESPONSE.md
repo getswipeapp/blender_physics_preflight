@@ -24,10 +24,13 @@ addressed and re-certified below.
 | **V05** | Medium | "non-blocking" wording overclaimed the handler's behaviour | ✅ Fixed |
 | **V06** | Required | A stale success banner could survive a scan that errored | ✅ Fixed |
 | **V07** | Required | New features not re-certified across supported versions | ✅ Re-certified |
+| **V08** | High (2nd review) | Turning off warning *alerts* could falsely report "all clear" | ✅ Fixed + 4 regressions |
 
 Plus the review's medium/accuracy notes: heuristic titles softened, guided-fix
 made pin-aware and honest, every Explain line hedged, and the panel's
-"read-only" claim scoped to the scan. All covered below.
+"read-only" claim scoped to the scan. All covered below. The second review's
+packaging items (LICENSE in the ZIP, manifest URL, Bash 3.2, buyer docs) are in
+the final section.
 
 ---
 
@@ -148,23 +151,55 @@ render.
 **As raised:** prior certification predated the v1 features; new behaviour must be
 re-run, not assumed from the old matrix.
 
-**Fix:** the suite (now **158 tests**, up from 128) was re-run green on all four
+**Fix:** the suite (now **162 tests**, up from 128) was re-run green on all four
 supported builds:
 
 | Blender build | Result | Tests |
 |---------------|--------|-------|
-| 4.2.9 LTS | ✅ PASS (rc=0) | 158 / 0 |
-| 4.5.9 LTS | ✅ PASS (rc=0) | 158 / 0 |
-| 5.0.1 | ✅ PASS (rc=0) | 158 / 0 |
-| 5.2.3 LTS | ✅ PASS (rc=0) | 158 / 0 |
+| 4.2.9 LTS | ✅ PASS (rc=0) | 162 / 0 |
+| 4.5.9 LTS | ✅ PASS (rc=0) | 162 / 0 |
+| 5.0.1 | ✅ PASS (rc=0) | 162 / 0 |
+| 5.2.3 LTS | ✅ PASS (rc=0) | 162 / 0 |
 
 New coverage: title truthfulness (UNKNOWN/N-A never borrow a positive statement),
-render-banner honesty (UNKNOWN-only is never "no problems"), and the render-check
-read-only + warn-toggle behaviour.
+render-banner honesty (UNKNOWN-only is never "no problems"), the render-check
+read-only + warn-toggle behaviour, and the V08 regressions below.
 
 **Files:** `certification/RUNTIME_CERTIFICATION.md` §0,
 `certification/results/run_v1_{4.2,4.5,5.0,5.2}.log`.
-**Commit:** `e0fef15`.
+**Commit:** `e0fef15` (re-run at 162 with the V08 fix).
+
+## V08 — Turning off warning *alerts* must not fake "all clear" *(High — 2nd review)*
+
+**As raised:** the "Also warn on warnings" preference (`include_warnings`)
+controlled both whether warnings *escalate* to a prominent alert **and** whether
+the scan counted as clean. A scene with **2 warnings, 0 fail, 0 unknown** and the
+preference off reported **"Last render check: all clear."** That is a false clean
+— exactly the thing Failsafe promises never to do.
+
+**Root cause:** `run_render_check` passed its escalation flag into the banner, and
+the banner used it (not the raw counts) to decide "clean." The console tail had
+the same flaw (`" — all clear"` on the non-escalated path), and the panel icon
+could show a green tick next to a warning-bearing banner.
+
+**Fix — separate the *alert threshold* from the *factual summary*:**
+- `render_banner(f, w, u)` no longer takes the escalation flag. It is clean only
+  when `f == 0 and w == 0 and u == 0`; any fail/warning shows the counts; an
+  UNKNOWN-only result is "no confirmed problems, N unverified." This is
+  independent of `include_warnings`.
+- The console tail on the non-escalated path is now truthful: it never prints
+  "all clear" when warnings or unknowns were found.
+- The panel icon reserves the green CHECKMARK for a genuinely clean banner;
+  anything with warnings/unknowns gets a neutral mark, never a tick.
+- `include_warnings` now only governs escalation (the loud console block + red
+  panel state), as intended.
+
+**Files:** `failsafe/handlers.py` (`render_banner`, `run_render_check`,
+`failsafe_render_init` console tail), `failsafe/ui.py` (banner icon).
+**Verified:** `tests/run_tests.py` → `render_check_tests()` adds four V08
+regressions — warning-only and warning+UNKNOWN with `include_warnings=False` must
+show the counts and never read as "all clear," and the banner must be identical
+whether alerts are on or off. Suite re-run **162/162 on all four versions**.
 
 ---
 
@@ -185,6 +220,18 @@ read-only + warn-toggle behaviour.
   buttons (which change selection) are read-only. *(File: `ui.py`; commit `672d991`.)*
 
 ---
+
+## Second-review packaging fixes
+
+| Item | Finding | Fix |
+|------|---------|-----|
+| **LICENSE in the ZIP** | GPL `LICENSE` was at the repo root but not inside `failsafe/`, so it wasn't in the buyer ZIP | Copied `LICENSE` into `failsafe/LICENSE`; it now ships in the package (verified in the rebuilt ZIP). |
+| **Manifest website 404** | `blender_manifest.toml` pointed to `…/blender_failsafe` (404) | Now points to the real repo `…/blender_physics_preflight`. |
+| **Bash 3.2 portability** | `tests/run_all_versions.sh` used a Bash-4 associative array (`declare -A`), which fails on macOS's default Bash 3.2 | Rewritten with an indexed array + indirect expansion; `bash -n` + a live run verified on Bash 3.2.57. |
+| **Buyer docs on old name** | README + `launch/*` still said "Physics Preflight," with an untested version note (`4.2.23 / 4.5.15`) | Reconciled to **Failsafe**; versions corrected to the certified `4.2.9 / 4.5.9 / 5.0.1 / 5.2.3`; "tests pending" notes updated to "done (162/162)." |
+
+Note on the reviewer's Bash remark: the item was in `tests/run_all_versions.sh`
+(the release gate), not `certification/run_matrix.sh`; both are now 3.2-safe.
 
 ## Documented limitations carried forward (not regressions)
 

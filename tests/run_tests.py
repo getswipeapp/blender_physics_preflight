@@ -598,21 +598,39 @@ def render_check_tests():
                 on["fail"] == 0, on["fail"], 0))
     out.append(("render check: warn-only scene has a warning",
                 on["warning"] > 0, on["warning"], ">0"))
-    out.append(("render check: include_warnings=True -> problem",
+    out.append(("render check: include_warnings=True -> problem (escalates)",
                 on["problem"] is True, on["problem"], True))
-    out.append(("render check: include_warnings=False -> no problem",
+    out.append(("render check: include_warnings=False -> not escalated",
                 off["problem"] is False, off["problem"], False))
 
-    # Banner honesty (V03): an UNKNOWN-only result is never a clean "no problems".
+    # V08: turning OFF warning alerts escalation must NOT turn a warning-bearing
+    # scene into "all clear". The banner is factual, independent of the toggle.
+    out.append(("V08: warn-only + include_warnings=False is NOT 'all clear'",
+                "all clear" not in off["banner"] and "warning" in off["banner"],
+                off["banner"], "shows the warning, not all-clear"))
+    out.append(("V08: warn-only banner identical with alerts on vs off",
+                on["banner"] == off["banner"], (on["banner"], off["banner"]),
+                "same factual banner"))
+
+    # Banner honesty (V03 + V08): the banner reflects the counts, never the
+    # alert preference. Warnings and unknowns always appear; only an empty
+    # result is "all clear".
     rb = handlers.render_banner
     out.append(("render banner: unknown-only is not a clean result",
-                "unverified" in rb(0, 0, 3, False), rb(0, 0, 3, False),
-                "...unverified..."))
+                "unverified" in rb(0, 0, 3), rb(0, 0, 3), "...unverified..."))
     out.append(("render banner: truly clean says all clear",
-                rb(0, 0, 0, False) == "Last render check: all clear",
-                rb(0, 0, 0, False), "all clear"))
+                rb(0, 0, 0) == "Last render check: all clear",
+                rb(0, 0, 0), "all clear"))
     out.append(("render banner: confirmed problems show counts",
-                "fail" in rb(2, 1, 1, True), rb(2, 1, 1, True), "...fail..."))
+                "fail" in rb(2, 1, 1), rb(2, 1, 1), "...fail..."))
+    # V08 regressions on the pure banner: warning-only and warning+unknown must
+    # show the counts and never read as clean, with no escalation flag in play.
+    out.append(("V08 banner: warning-only shows counts, not clear",
+                rb(0, 2, 0) == "Last render check: 0 fail, 2 warning, 0 unknown",
+                rb(0, 2, 0), "0 fail, 2 warning, 0 unknown"))
+    out.append(("V08 banner: warning+unknown is not clear",
+                "all clear" not in rb(0, 1, 2) and "warning" in rb(0, 1, 2),
+                rb(0, 1, 2), "not all clear, shows warning"))
     return out
 
 

@@ -1,8 +1,8 @@
-00:05.340  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_38/cloth.blend"
-00:05.417  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_40/cloth.blend"
-00:05.662  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_45/soft.blend"
-00:05.721  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_47/parts.blend"
-00:05.802  reports          | Fluid: Bake All complete (0.04s)
+00:02.219  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_38/cloth.blend"
+00:02.272  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_40/cloth.blend"
+00:02.492  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_45/soft.blend"
+00:02.550  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_47/parts.blend"
+00:02.626  reports          | Fluid: Bake All complete (0.04s)
 Blender 5.0.1 (hash a3db93c5b259 built 2025-12-16 01:51:40)
 bake: frame 1 :: 10
 bake: frame 2 :: 10
@@ -81,23 +81,23 @@ bake: frame 5 :: 8
 bake: frame 6 :: 8
 bake: frame 7 :: 8
 bake: frame 8 :: 8
-00:05.824  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_48/fluid.blend"
-00:05.921  reports          | Fluid: Bake All complete (0.04s)
-00:05.938  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_49/fluid.blend"
-00:06.036  reports          | Fluid: Bake All complete (0.04s)
-00:06.053  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_50/fluid.blend"
-00:06.160  reports          | Fluid: Bake All complete (0.05s)
-00:06.182  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_51/fluid.blend"
-00:06.299  reports          | Fluid: Bake All complete (0.05s)
-00:06.316  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_52/fluid.blend"
-00:06.422  reports          | Fluid: Bake All complete (0.04s)
-00:06.441  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_53/fluid.blend"
-00:06.625  reports          | Fluid: Bake All complete (0.11s)
-00:06.643  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/case_54/fluid_guide.blend"
-00:06.707  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/regr_00/cloth.blend"
-00:06.735  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/regr_01/cloth.blend"
-00:06.763  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_es_c4pq4/regr_02/cloth.blend"
-00:06.871  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_8_k1i2wk/cloth.blend"
+00:02.644  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_48/fluid.blend"
+00:02.749  reports          | Fluid: Bake All complete (0.04s)
+00:02.767  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_49/fluid.blend"
+00:02.875  reports          | Fluid: Bake All complete (0.04s)
+00:02.893  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_50/fluid.blend"
+00:03.008  reports          | Fluid: Bake All complete (0.05s)
+00:03.027  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_51/fluid.blend"
+00:03.133  reports          | Fluid: Bake All complete (0.04s)
+00:03.151  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_52/fluid.blend"
+00:03.260  reports          | Fluid: Bake All complete (0.04s)
+00:03.280  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_53/fluid.blend"
+00:03.478  reports          | Fluid: Bake All complete (0.13s)
+00:03.498  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/case_54/fluid_guide.blend"
+00:03.559  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/regr_00/cloth.blend"
+00:03.589  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/regr_01/cloth.blend"
+00:03.618  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_3t9t3mir/regr_02/cloth.blend"
+00:03.722  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_iomgwjj1/cloth.blend"
   PASS  01 unapplied scale (warn)  -> WARNING
   PASS  01 unapplied rotation on cloth (warn)  -> WARNING
   PASS  01 scale applied (pass)  -> PASS
@@ -269,7 +269,7 @@ Info: Saved "cloth.blend"
   PASS  unit: read-only: no new text datablocks created  -> 0
   PASS  unit: read-only: no new object datablocks  -> 2
   PASS  unit: read-only: no new mesh datablocks  -> 2
-  PASS  unit: read-only fs: cache had files to guard  -> 1000:06.996  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_usc2wq7y/cloth.blend"
+  PASS  unit: read-only fs: cache had files to guard  -> 1000:03.849  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_s8cnkoqr/cloth.blend"
 bake: frame 1 :: 10
 bake: frame 2 :: 10
 bake: frame 3 :: 10
@@ -366,11 +366,15 @@ bake: frame 10 :: 10
   PASS  unit: render check: read-only (scene unchanged)  -> (['Cloth'], 1, 0, 1, 1)
   PASS  unit: render check: warn-only scene has no hard fail  -> 0
   PASS  unit: render check: warn-only scene has a warning  -> 2
-  PASS  unit: render check: include_warnings=True -> problem  -> True
-  PASS  unit: render check: include_warnings=False -> no problem  -> False
+  PASS  unit: render check: include_warnings=True -> problem (escalates)  -> True
+  PASS  unit: render check: include_warnings=False -> not escalated  -> False
+  PASS  unit: V08: warn-only + include_warnings=False is NOT 'all clear'  -> Last render check: 0 fail, 2 warning, 2 unknown
+  PASS  unit: V08: warn-only banner identical with alerts on vs off  -> ('Last render check: 0 fail, 2 warning, 2 unknown', 'Last render check: 0 fail, 2 warning, 2 unknown')
   PASS  unit: render banner: unknown-only is not a clean result  -> Last render check: no confirmed problems, 3 unverified
   PASS  unit: render banner: truly clean says all clear  -> Last render check: all clear
   PASS  unit: render banner: confirmed problems show counts  -> Last render check: 2 fail, 1 warning, 1 unknown
+  PASS  unit: V08 banner: warning-only shows counts, not clear  -> Last render check: 0 fail, 2 warning, 0 unknown
+  PASS  unit: V08 banner: warning+unknown is not clear  -> Last render check: 0 fail, 1 warning, 2 unknown
   PASS  unit: title #3 UNKNOWN is explicit, not the positive name  -> Start overlap couldn't be checked
   PASS  unit: title #4 UNKNOWN is explicit, not the positive name  -> Collision shape couldn't be checked
   PASS  unit: title #5 UNKNOWN is explicit, not the positive name  -> Collider couldn't be fully checked
@@ -394,4 +398,4 @@ Info: Saved as "cloth.blend"
 Info: Saved "cloth.blend"
 
 ============================================================
-Blender 5.0.1  |  158 passed, 0 failed, 158 total
+Blender 5.0.1  |  162 passed, 0 failed, 162 total

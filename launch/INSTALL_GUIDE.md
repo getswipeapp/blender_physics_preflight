@@ -1,4 +1,4 @@
-# Physics Preflight — Quick Start (for beginners)
+# Failsafe — Quick Start (for beginners)
 
 This takes about two minutes. No account, no internet, nothing to configure.
 
@@ -7,10 +7,10 @@ This takes about two minutes. No account, no internet, nothing to configure.
 1. In Blender, go to **Edit → Preferences → Add-ons**.
 2. Click the **arrow icon (▾)** in the top-right of that window and choose
    **Install from Disk…**
-3. Pick the **`physics_preflight.zip`** file you downloaded. (Install the zip —
+3. Pick the **`failsafe.zip`** file you downloaded. (Install the zip —
    don't unzip it first.)
 4. After installing, make sure its checkbox is **ticked** to enable it. Search
-   "Physics Preflight" in the Add-ons list if you don't see it.
+   "Failsafe" in the Add-ons list if you don't see it.
 
 > On Blender 4.2+ this is an "extension," so you can also manage it under
 > **Edit → Preferences → Get Extensions / Add-ons**.
@@ -20,7 +20,7 @@ This takes about two minutes. No account, no internet, nothing to configure.
 1. Hover your mouse over the main **3D Viewport**.
 2. Press **`N`** to open the right-hand sidebar (or drag the little arrow on the
    right edge).
-3. Click the **Physics Preflight** tab.
+3. Click the **Failsafe** tab.
 
 ## 3. Scan
 
@@ -47,14 +47,14 @@ This takes about two minutes. No account, no internet, nothing to configure.
 
 ## Why "UNKNOWN" is a feature, not a bug
 
-Other tools will cheerfully say "all good" when they actually can't tell. Physics
-Preflight won't. If Blender genuinely can't confirm something — a packed
+Other tools will cheerfully say "all good" when they actually can't tell. Failsafe
+won't. If Blender genuinely can't confirm something — a packed
 geometry-nodes bake, an in-memory cache, an unsaved file — it says **UNKNOWN** so
 you know to check it yourself, instead of trusting a green light that was never real.
 
 ## Troubleshooting
 
-- **No "Physics Preflight" tab?** Enable the add-on in **Preferences → Add-ons**
+- **No "Failsafe" tab?** Enable the add-on in **Preferences → Add-ons**
   (search its name; the checkbox should be ticked).
 - **Cache checks all say UNKNOWN?** Save your `.blend` and scan again.
 - **Overlap check says UNKNOWN?** Move the timeline to the first frame and

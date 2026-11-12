@@ -11,19 +11,24 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Required versions and where to find them. Override any path via the matching
 # FAILSAFE_BLENDER_<ver> environment variable (e.g. FAILSAFE_BLENDER_4_2=/path/Blender).
+#
+# NOTE: indexed array + indirect expansion only — no `declare -A`, so this runs
+# on macOS's default Bash 3.2. Each entry is "version|override-var|default-path".
 CERT="/Users/ralph/Downloads/blender_runtime_certification/apps"
-declare -A BINS=(
-  ["4.2"]="${FAILSAFE_BLENDER_4_2:-$CERT/4.2/Blender.app/Contents/MacOS/Blender}"
-  ["4.5"]="${FAILSAFE_BLENDER_4_5:-$CERT/4.5/Blender.app/Contents/MacOS/Blender}"
-  ["5.0"]="${FAILSAFE_BLENDER_5_0:-$CERT/5.0/Blender.app/Contents/MacOS/Blender}"
-  ["5.2"]="${FAILSAFE_BLENDER_5_2:-/Applications/Blender.app/Contents/MacOS/Blender}"
+ENTRIES=(
+  "4.2|FAILSAFE_BLENDER_4_2|$CERT/4.2/Blender.app/Contents/MacOS/Blender"
+  "4.5|FAILSAFE_BLENDER_4_5|$CERT/4.5/Blender.app/Contents/MacOS/Blender"
+  "5.0|FAILSAFE_BLENDER_5_0|$CERT/5.0/Blender.app/Contents/MacOS/Blender"
+  "5.2|FAILSAFE_BLENDER_5_2|/Applications/Blender.app/Contents/MacOS/Blender"
 )
-REQUIRED=("4.2" "4.5" "5.0" "5.2")
 
 overall=0
 missing=0
-for ver in "${REQUIRED[@]}"; do
-  b="${BINS[$ver]}"
+REQUIRED=()
+for entry in "${ENTRIES[@]}"; do
+  IFS='|' read -r ver envvar default <<<"$entry"
+  REQUIRED+=("$ver")
+  b="${!envvar:-$default}"
   echo "======================================================================"
   if [[ ! -x "$b" ]]; then
     echo ">> MISSING required Blender $ver at: $b"

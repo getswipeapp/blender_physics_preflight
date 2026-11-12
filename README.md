@@ -1,4 +1,4 @@
-# Physics Preflight
+# Failsafe
 
 A read-only Blender add-on (extension) that catches physics and
 simulation-cache problems **before you render** — in one click.
@@ -6,7 +6,7 @@ simulation-cache problems **before you render** — in one click.
 > **Why it exists:** Blender itself will tell you a simulation is "baked" when
 > the cache files have been deleted. For Cloth, Soft Body and Fluid, the
 > `is_baked` / `has_cache_baked_*` flags stay `True` after the files are gone
-> (verified on Blender 4.2.23 / 4.5.15 / 5.0.1 / 5.2.3). Physics Preflight does
+> (verified on Blender 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3). Failsafe does
 > **not** trust those flags — it checks the actual files on disk, frame by
 > frame, and says **UNKNOWN** wherever Blender genuinely cannot prove the
 > answer. No false "all good".
@@ -18,10 +18,10 @@ simulation-cache problems **before you render** — in one click.
 
 ## Install
 
-1. Download `physics_preflight-<version>.zip` (or build it yourself, below).
+1. Download `failsafe-<version>.zip` (or build it yourself, below).
 2. Blender → **Edit → Preferences → Get Extensions / Add-ons → Install from
    Disk…** → pick the zip.
-3. Open the **Physics Preflight** tab in the 3D Viewport sidebar (press `N`).
+3. Open the **Failsafe** tab in the 3D Viewport sidebar (press `N`).
 4. Press **Scan Scene**.
 
 Requires **Blender 4.2 LTS or newer** (4.2, 4.5, 5.0, 5.2 are the supported
@@ -91,7 +91,7 @@ collider not marked "Animated") are **FAIL**.
 Source layout:
 
 ```
-physics_preflight/        the extension (this folder is what gets zipped)
+failsafe/        the extension (this folder is what gets zipped)
   blender_manifest.toml
   __init__.py             register / unregister
   engine.py               Result model, check registry, scan driver
@@ -128,7 +128,7 @@ checks headless, and asserts the expected status — including the headline
 ### Build the install zip
 
 ```bash
-blender --command extension build --source-dir ./physics_preflight --output-dir ./dist
+blender --command extension build --source-dir ./failsafe --output-dir ./dist
 ```
 
 ## License

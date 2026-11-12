@@ -1,7 +1,7 @@
-# Physics Preflight — Honest Limitations
+# Failsafe — Honest Limitations
 
 This is the truthful "what it can and can't do" list. The product's reputation
-rests on **not giving a false "all good."** When Physics Preflight can't be sure,
+rests on **not giving a false "all good."** When Failsafe can't be sure,
 it reports **UNKNOWN** — it is designed never to report a confident PASS it can't
 back up. (That's the design goal and how the checks are written; no software is
 provably perfect, which is exactly why UNKNOWN exists.)
@@ -18,7 +18,7 @@ your computer.
 
 ## What "the file is there" does and doesn't prove
 
-Physics Preflight verifies that the expected cache files **exist on disk and are
+Failsafe verifies that the expected cache files **exist on disk and are
 non-empty, across the whole required frame range**. That catches the big real-
 world failures: deleted caches, partial bakes, missing first/last frames, 0-byte
 corrupt frames. It does **not** parse the inside of every cache file, so a file
@@ -45,7 +45,7 @@ level verification is the right and sufficient check.
 
 Some checks flag things that *can* be intentional, so they warn rather than fail:
 mass vs size (#2), collision-shape choice (#4), real-world size (#9), origin
-offset (#10), collision margin (#11). Physics Preflight points them out; you decide.
+offset (#10), collision margin (#11). Failsafe points them out; you decide.
 
 Two checks were corrected after the code review and now behave honestly:
 - **#1** also checks unapplied **rotation** (on cloth/soft-body/collision objects).

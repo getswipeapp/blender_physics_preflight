@@ -146,12 +146,16 @@ class FAILSAFE_PT_panel(Panel):
             banner = getattr(wm, "failsafe_render_banner", "")
             if banner:
                 bad = getattr(wm, "failsafe_render_had_problem", False)
+                # A green tick is reserved for a genuinely clean banner. Anything
+                # that reports warnings or unverified checks gets a neutral mark,
+                # never a checkmark (V08): turning off warning *alerts* mustn't
+                # dress a warning-bearing result up as all-clear.
                 if bad:
                     icon = "ERROR"
-                elif "unverified" in banner:
-                    icon = "QUESTION"      # unknowns -> not a clean tick
-                else:
+                elif banner.rstrip().endswith("all clear"):
                     icon = "CHECKMARK"
+                else:
+                    icon = "QUESTION"      # warnings/unknowns -> not a clean tick
                 layout.box().label(text=banner, icon=icon)
 
         if not wm.failsafe_has_run:

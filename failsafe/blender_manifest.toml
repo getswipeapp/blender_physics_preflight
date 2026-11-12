@@ -7,7 +7,7 @@ tagline = "Catch physics & simulation problems before you render"
 maintainer = "getswipeapp <nocaholdings@gmail.com>"
 type = "add-on"
 
-website = "https://github.com/getswipeapp/blender_failsafe"
+website = "https://github.com/getswipeapp/blender_physics_preflight"
 
 tags = ["Physics", "Pipeline"]
 

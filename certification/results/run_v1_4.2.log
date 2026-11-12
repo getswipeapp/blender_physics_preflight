@@ -21,7 +21,7 @@ bake: frame 7 :: 10
 bake: frame 8 :: 10
 bake: frame 9 :: 10
 bake: frame 10 :: 10
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_38/cloth.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_38/cloth.blend"
 Info: Total files 0 | Changed 0 | Failed 0
 bake: frame 1 :: 5
 bake: frame 2 :: 5
@@ -39,7 +39,7 @@ bake: frame 7 :: 10
 bake: frame 8 :: 10
 bake: frame 9 :: 10
 bake: frame 10 :: 10
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_40/cloth.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_40/cloth.blend"
 Info: Total files 2 | Changed 0 | Failed 0
 Info: Total files 1 | Changed 1 | Failed 0
 Info: Total files 0 | Changed 0 | Failed 0
@@ -71,7 +71,7 @@ bake: frame 5 :: 8
 bake: frame 6 :: 8
 bake: frame 7 :: 8
 bake: frame 8 :: 8
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_45/soft.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_45/soft.blend"
 Info: Total files 0 | Changed 0 | Failed 0
 bake: frame 1 :: 8
 bake: frame 2 :: 8
@@ -90,28 +90,28 @@ bake: frame 5 :: 8
 bake: frame 6 :: 8
 bake: frame 7 :: 8
 bake: frame 8 :: 8
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_47/parts.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_47/parts.blend"
+Info: Total files 1 | Changed 0 | Failed 0
+Info: Fluid: Bake All complete! (0.05)
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_48/fluid.blend"
+Info: Total files 1 | Changed 0 | Failed 0
+Info: Fluid: Bake All complete! (0.06)
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_49/fluid.blend"
+Info: Total files 1 | Changed 0 | Failed 0
+Info: Fluid: Bake All complete! (0.05)
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_50/fluid.blend"
 Info: Total files 1 | Changed 0 | Failed 0
 Info: Fluid: Bake All complete! (0.04)
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_48/fluid.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_51/fluid.blend"
 Info: Total files 1 | Changed 0 | Failed 0
-Info: Fluid: Bake All complete! (0.04)
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_49/fluid.blend"
+Info: Fluid: Bake All complete! (0.05)
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_52/fluid.blend"
 Info: Total files 1 | Changed 0 | Failed 0
-Info: Fluid: Bake All complete! (0.04)
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_50/fluid.blend"
+Info: Fluid: Bake All complete! (0.05)
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_53/fluid.blend"
 Info: Total files 1 | Changed 0 | Failed 0
-Info: Fluid: Bake All complete! (0.04)
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_51/fluid.blend"
-Info: Total files 1 | Changed 0 | Failed 0
-Info: Fluid: Bake All complete! (0.04)
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_52/fluid.blend"
-Info: Total files 1 | Changed 0 | Failed 0
-Info: Fluid: Bake All complete! (0.04)
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_53/fluid.blend"
-Info: Total files 1 | Changed 0 | Failed 0
-Info: Fluid: Bake All complete! (0.12)
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/case_54/fluid_guide.blend"
+Info: Fluid: Bake All complete! (0.23)
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/case_54/fluid_guide.blend"
 Info: Total files 0 | Changed 0 | Failed 0
 bake: frame 1 :: 10
 bake: frame 2 :: 10
@@ -123,7 +123,7 @@ bake: frame 7 :: 10
 bake: frame 8 :: 10
 bake: frame 9 :: 10
 bake: frame 10 :: 10
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/regr_00/cloth.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/regr_00/cloth.blend"
 Info: Total files 0 | Changed 0 | Failed 0
 bake: frame 1 :: 10
 bake: frame 2 :: 10
@@ -135,7 +135,7 @@ bake: frame 7 :: 10
 bake: frame 8 :: 10
 bake: frame 9 :: 10
 bake: frame 10 :: 10
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/regr_01/cloth.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/regr_01/cloth.blend"
 Info: Total files 0 | Changed 0 | Failed 0
 bake: frame 1 :: 10
 bake: frame 2 :: 10
@@ -147,7 +147,7 @@ bake: frame 7 :: 10
 bake: frame 8 :: 10
 bake: frame 9 :: 10
 bake: frame 10 :: 10
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_j_n596xd/regr_02/cloth.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_irduv25a/regr_02/cloth.blend"
 Info: Total files 0 | Changed 0 | Failed 0
 bake: frame 1 :: 8
 bake: frame 2 :: 8
@@ -350,7 +350,7 @@ bake: frame 7 :: 10
 bake: frame 8 :: 10
 bake: frame 9 :: 10
 bake: frame 10 :: 10
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_x5kgtlk5/cloth.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_0eslvuua/cloth.blend"
 Info: Total files 0 | Changed 0 | Failed 0
 bake: frame 1 :: 8
 bake: frame 2 :: 8
@@ -380,7 +380,7 @@ bake: frame 7 :: 10
 bake: frame 8 :: 10
 bake: frame 9 :: 10
 bake: frame 10 :: 10
-Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_yelwymes/cloth.blend"
+Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_r2qvblin/cloth.blend"
   PASS  unit: read-only fs: no files removed by a scan  -> []
   PASS  unit: read-only fs: no file contents/mtime changed  -> []
   PASS  unit: roundtrip 1/3 baked+present -> #18 PASS  -> PASS
@@ -393,11 +393,15 @@ Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fa
   PASS  unit: render check: read-only (scene unchanged)  -> (['Cloth'], 1, 0, 1, 1)
   PASS  unit: render check: warn-only scene has no hard fail  -> 0
   PASS  unit: render check: warn-only scene has a warning  -> 2
-  PASS  unit: render check: include_warnings=True -> problem  -> True
-  PASS  unit: render check: include_warnings=False -> no problem  -> False
+  PASS  unit: render check: include_warnings=True -> problem (escalates)  -> True
+  PASS  unit: render check: include_warnings=False -> not escalated  -> False
+  PASS  unit: V08: warn-only + include_warnings=False is NOT 'all clear'  -> Last render check: 0 fail, 2 warning, 2 unknown
+  PASS  unit: V08: warn-only banner identical with alerts on vs off  -> ('Last render check: 0 fail, 2 warning, 2 unknown', 'Last render check: 0 fail, 2 warning, 2 unknown')
   PASS  unit: render banner: unknown-only is not a clean result  -> Last render check: no confirmed problems, 3 unverified
   PASS  unit: render banner: truly clean says all clear  -> Last render check: all clear
   PASS  unit: render banner: confirmed problems show counts  -> Last render check: 2 fail, 1 warning, 1 unknown
+  PASS  unit: V08 banner: warning-only shows counts, not clear  -> Last render check: 0 fail, 2 warning, 0 unknown
+  PASS  unit: V08 banner: warning+unknown is not clear  -> Last render check: 0 fail, 1 warning, 2 unknown
   PASS  unit: title #3 UNKNOWN is explicit, not the positive name  -> Start overlap couldn't be checked
   PASS  unit: title #4 UNKNOWN is explicit, not the positive name  -> Collision shape couldn't be checked
   PASS  unit: title #5 UNKNOWN is explicit, not the positive name  -> Collider couldn't be fully checked
@@ -421,4 +425,4 @@ Info: Saved "cloth.blend"
 Info: Saved "cloth.blend"
 
 ============================================================
-Blender 4.2.9 LTS  |  158 passed, 0 failed, 158 total
+Blender 4.2.9 LTS  |  162 passed, 0 failed, 162 total

@@ -5,26 +5,38 @@ older references below predate the rename.)*
 
 ---
 
-## 0. v1 feature round — re-certification (2026-11-11)
+## 0. v1 feature round + review-response — re-certification (2026-11-12)
 
 After the UI correctness fix and the v1 features (status-aware titles,
-check-before-render, guided-fix jump, Explain mode) and the independent-review
-corrections, the suite was re-run. **Previous version certification does not
-automatically certify new features — so this is a fresh matrix.**
+check-before-render, guided-fix jump, Explain mode), the first independent-review
+corrections (V01–V07), **and** the second-review fix (V08, below), the suite was
+re-run. **Previous version certification does not automatically certify new
+features — so this is a fresh matrix.**
 
-**Headless suite (now 158 tests) — full matrix, all green:**
+**Headless suite (now 162 tests) — full matrix, all green:**
 
 | Blender build | Result | Tests |
 |---------------|--------|-------|
-| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 158 / 0 |
-| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 158 / 0 |
-| Blender 5.0.1 | ✅ PASS (rc=0) | 158 / 0 |
-| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 158 / 0 |
+| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 162 / 0 |
+| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 162 / 0 |
+| Blender 5.0.1 | ✅ PASS (rc=0) | 162 / 0 |
+| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 162 / 0 |
 
-Logs: `results/run_v1_{4.2,4.5,5.0,5.2}.log`. New in this round: title
-truthfulness (UNKNOWN/N-A never borrow the positive statement), render-banner
-honesty (UNKNOWN-only is never "no problems"), and the render-check read-only +
-warn-toggle behaviour.
+Logs: `results/run_v1_{4.2,4.5,5.0,5.2}.log`. Coverage added across the rounds:
+title truthfulness (UNKNOWN/N-A never borrow the positive statement), render-banner
+honesty (UNKNOWN-only is never "no problems"), the render-check read-only +
+warn-toggle behaviour, and — new this round — **V08**: turning off warning
+*alerts* (`include_warnings=False`) must never relabel a warning-bearing scene as
+"all clear." Four regression tests now assert the banner reflects the real counts
+regardless of the alert preference (warning-only and warning+UNKNOWN cases).
+
+**Packaging fixes this round (for the buyer ZIP):** the GPL `LICENSE` is now
+inside the `failsafe/` package (so it ships in the ZIP, per GPL + Superhive); the
+manifest `website` points to the real repo
+(`github.com/getswipeapp/blender_physics_preflight`, was a 404); the release-gate
+script `tests/run_all_versions.sh` no longer uses a Bash-4 associative array, so
+it runs on macOS's default Bash 3.2; and the buyer-facing docs (README +
+`launch/*`) were reconciled to the **Failsafe** name with the tested versions.
 
 **Render handler — headless/background proof (Blender 5.2.3):**
 - `blender -b -P …` with the extension **enabled** registers the `render_init`
@@ -43,7 +55,11 @@ verified in the real panel.
 
 **Still UNKNOWN (not claimed):** handler registration on 4.2/4.5/5.0 was not
 separately exercised in background (logic is version-agnostic and the 5.2 proof
-stands); a live Geometry-Nodes *disk* bake; and **Windows**.
+stands); the headless proof drives `bpy.ops.render.render()` under `blender -b` —
+the CLI `-f` (single frame) and `-a` (animation) entry points are **not
+separately captured** (they trigger the same `render_init` handler, so they are
+expected to fire identically, but that is not proven here); a live
+Geometry-Nodes *disk* bake; and **Windows**.
 
 ---
 
