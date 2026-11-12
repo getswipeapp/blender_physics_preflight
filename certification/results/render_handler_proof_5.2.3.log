@@ -1,0 +1,28 @@
+# Failsafe — headless render-handler proof (Blender 5.2.3 LTS)
+# Captured: 2026-11-12T06:46:10Z
+# Host: Darwin 25.0.0 arm64
+# Run WITHOUT --factory-startup so the installed extension loads and its
+# render_init handler fires during a real background render.
+
+================ CLEAN SCENE (handler fires, all clear) ================
+HANDLER_HOOKED=['failsafe_render_init']
+FAILSAFE render check: 0 FAIL, 0 WARNING, 0 UNKNOWN — all clear
+BG_RENDER_DONE
+
+================ BROKEN-CACHE SCENE (missing interior frame) ================
+00:00.512  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_bg_broken_zcru2112/cloth.blend"
+HANDLER_HOOKED=['failsafe_render_init']
+FAILSAFE render check: 3 FAIL, 1 WARNING, 1 UNKNOWN
+  - Cache files are missing from disk [Cloth]: Cloth is missing 1 of 10 required cache frame(s) on disk: 5. The render will freeze or re-simulate there.
+  - Some frames are missing from the cache [Cloth]: Cloth is missing 1 cached frame(s) across its 1–10 range: 5. Each gap is a freeze/pop in the render.
+BG_BROKEN_DONE
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
