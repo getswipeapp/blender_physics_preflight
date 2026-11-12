@@ -66,4 +66,19 @@ HELP = {
     23: ("Changing scene timing or simulation speed after baking can make the "
          "existing cache play back wrong. Blender doesn't always record enough "
          "to confirm the original bake settings."),
+    24: ("A cache inside a cloud-synced folder (Dropbox, Google Drive, OneDrive, "
+         "iCloud and the like) can be locked, only partly uploaded, or replaced "
+         "with an offline placeholder while a render reads it — any of which can "
+         "corrupt frames. Keep caches in a plain local project folder for a bake "
+         "or farm job."),
+    25: ("When you rename or delete a simulated object, its old cache files can "
+         "stay behind in the blendcache folder, quietly taking up disk space. "
+         "They're harmless but wasteful; it's safe to remove ones no simulation "
+         "owns once you're sure no other .blend shares the folder."),
+    26: ("Changing a simulation's settings after you bake can make the existing "
+         "cache no longer match what you'd get now. This compares your current "
+         "settings against a baseline you chose to save (an external file, never "
+         "written into your .blend). It can only tell you settings changed since "
+         "that baseline was saved — not since the bake — so save the baseline "
+         "right after baking for it to mean the most."),
 }

@@ -73,9 +73,10 @@ def render_banner(f, w, u):
     ``include_warnings``: turning off warning *alerts* must never erase warnings
     from the summary."""
     if f > 0 or w > 0:
-        return "Last render check: %d fail, %d warning, %d unknown" % (f, w, u)
+        return ("Last render check: %d fail, %d warning, %d couldn't verify"
+                % (f, w, u))
     if u > 0:
-        return "Last render check: no confirmed problems, %d unverified" % u
+        return "Last render check: no confirmed problems, %d couldn't verify" % u
     return "Last render check: all clear"
 
 
@@ -141,15 +142,15 @@ def failsafe_render_init(scene, depsgraph=None):
         # Always print a one-line summary so the UNKNOWN (and WARNING) counts are
         # visible in the terminal and farm logs, even when nothing escalates.
         f, w, u = info["fail"], info["warning"], info["unknown"]
-        head = ("FAILSAFE render check: %d FAIL, %d WARNING, %d UNKNOWN"
+        head = ("FAILSAFE render check: %d FAIL, %d WARNING, %d COULDN'T VERIFY"
                 % (f, w, u))
         if not info["problem"]:
             # Not escalated — but the tail must still be truthful (V08): never
-            # print "all clear" when warnings or unknowns were found.
+            # print "all clear" when warnings or unverified checks were found.
             if f == 0 and w == 0 and u == 0:
                 tail = " — all clear"
             elif f == 0 and w == 0:
-                tail = " — no confirmed problems (%d unverified)" % u
+                tail = " — no confirmed problems (%d couldn't verify)" % u
             else:
                 tail = (" — warnings present; 'Also warn on warnings' is off, "
                         "so this was not alerted")

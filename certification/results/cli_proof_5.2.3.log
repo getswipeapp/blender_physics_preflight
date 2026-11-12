@@ -1,0 +1,73 @@
+# Failsafe headless CLI proof — Blender 5.2.3 LTS — captured 2026-11-12T21:16:42Z
+
+## --text on empty factory scene (expect exit 0 clean, 'Couldn't verify' wording):
+Failsafe report
+Blender 5.2.3 LTS
+File: (unsaved file)
+====================================================================
+Summary: 0 Fail  0 Warning  0 Couldn't verify  0 Pass  26 N/A
+("Couldn't verify" = not enough evidence to confirm — NOT a confirmed problem. Each one says why and what to do.)
+
+Physics Setup
+-------------
+[ -- ] Scale and rotation are applied
+[ -- ] Rigid body mass fits the object
+[ -- ] Objects don't overlap at the start
+[ -- ] Collision shape fits the object
+[ -- ] Colliders are clean, not too heavy
+[ -- ] Rigid Body World is enabled
+[ -- ] Cloth/soft body has a collider
+[ -- ] No negative or inherited scale
+[ -- ] Object sizes look realistic
+[ -- ] Object origin sits on its shape
+[ -- ] Collision margin fits the object
+[ -- ] Moving colliders marked 'Animated'
+[ -- ] Rigid body constraints are intact
+[ -- ] Collision modifier order is correct
+[ -- ] Cloth pin group is valid
+[ -- ] Fluid flow is inside the domain
+
+Simulation Caches
+-----------------
+[ -- ] Simulation is baked
+[ -- ] No disk cache to verify
+[ -- ] Baked frames cover the render
+[ -- ] Every frame is cached (no gaps)
+[ -- ] Each sim has its own cache folder
+[ -- ] Cache is saved inside the project
+[ -- ] Frame rate/speed unchanged since bake
+[ -- ] Caches aren't in a cloud-synced folder
+[ -- ] No orphaned cache files on disk
+[ -- ] Settings unchanged since the baseline
+
+====================================================================
+Read-only tool. For disk-backed caches we verify the actual files frame by frame rather than trusting Blender's 'baked' flag. Memory caches, packed Geometry Nodes bakes and unsaved files can't be proven from disk and are reported "Couldn't verify" / N/A, never a false Pass.
+
+exit=0 (expected 0)
+
+## --json (machine contract: token stays UNKNOWN, never 'Couldn't verify'):
+{
+  "tool": "failsafe",
+  "schema": 1,
+  "blender": "5.2.3 LTS",
+  "file": null,
+  "summary": {
+    "FAIL": 0,
+    "WARNING": 0,
+    "UNKNOWN": 0,
+    "PASS": 0,
+    "NOT APPLICABLE": 26
+  },
+  "overall": "PASS",
+  "checks": [
+    {
+      "id": 1,
+      "name": "Scale and rotation are applied",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Scale and rotation are applied",
+
+## --help (expect exit 3 usage):
+exit=3 (expected 3)
+## bad argument (expect exit 3 usage):
+exit=3 (expected 3)

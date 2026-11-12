@@ -259,3 +259,67 @@ These remain **UNKNOWN**, not claimed as passing:
 
 *Generated as part of the v1 review-response handoff. No feature changes were made
 beyond the items above; nothing has been published.*
+
+---
+
+## Addendum — Expanded release for independent re-review (2026-11-12)
+
+After the V01–V08 fixes above were certified, a **feature round** was added to
+reach (and pass) competitor parity. This is new scope, not a review response, and
+is listed here so the package under review is self-describing. **The V01–V08
+certified baseline in §0 of `RUNTIME_CERTIFICATION.md` is preserved unchanged;** a
+new section (−1) certifies the expanded build.
+
+**What was added**
+- **3 new checks:** #24 cloud-synced cache folder, #25 orphaned cache files,
+  #26 opt-in settings-baseline drift.
+- **Headless CLI** (`failsafe/cli.py`): exit codes `0/1/2/3`, `--json`/`--text`.
+- **Crash/hang-isolated batch** (`failsafe/batch.py`): `--batch <folder>` runs
+  **each file in its own Blender subprocess with a per-file timeout** (`--timeout`),
+  so a corrupt or hanging `.blend` is isolated to itself and the batch continues
+  with every good file's result preserved. `--in-process` keeps the fast path.
+- **JSON export** button and **per-sim cache disk-usage** in reports.
+- **"Couldn't verify"** as the user-facing word for `UNKNOWN` (display-only; the
+  JSON/CLI machine token stays `UNKNOWN`, asserted by the suite).
+- **Save Baseline** (`failsafe/baseline.py`): the **only** write action, and it
+  writes only an **external** `<blend>.failsafe-baseline.json` — never the `.blend`.
+
+**Hardening in response to the review direction (items 2–5)**
+- **Save Baseline — no auto-write, no silent overwrite.** It only ever writes on an
+  explicit click; `save_baseline` raises unless `overwrite=True`, and the operator
+  shows a confirm dialog before replacing an existing baseline (tested).
+- **#26 false-PASS audit.** Changed object identity, missing settings, corrupt
+  JSON, an **unknown schema**, and a baseline saved for a **different file** all
+  report "Couldn't verify", never PASS (tested, incl. pure-helper guards).
+- **Batch isolation (item 4).** Each file runs in its own subprocess with a
+  timeout; crash / hang / corrupt / launch-failure are each isolated and recorded
+  as a per-file error while clean files keep their results (tested with a fake
+  subprocess runner so the failure modes are deterministic).
+- **"Couldn't verify" always actionable.** Every UNKNOWN carries a reason and a
+  next action (asserted across #26's branches), while JSON/CLI keep `UNKNOWN`.
+
+**Trust rules held**
+- Scans remain 100% read-only (asserted on all four versions). The baseline
+  sidecar is the single opt-in write and never touches the `.blend`.
+- No status was turned into a false PASS. #26 with no/corrupt/mismatched/foreign
+  baseline reports "Couldn't verify"; a "settings unchanged" result is stated as
+  *not* proof the bake itself is good. Packed-GN / memory cases stay
+  "Couldn't verify"/N-A and are labelled a **Blender limitation, not the user's
+  fault**, with no implication that saving or re-baking fixes them.
+
+**Evidence**
+- Headless suite **264/264 on 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** (rc=0 each);
+  logs `certification/results/run_v3_{4.2,4.5,5.0,5.2}.log`.
+- CLI proof `certification/results/cli_proof_5.2.3.log` (exit 0 clean / 3 usage;
+  JSON keeps `UNKNOWN`; text shows "Couldn't verify").
+- Package `dist/failsafe-<commit>.zip`; SHA-256 in `certification/RELEASE_SHA256SUMS.txt`.
+- Feature matrix: `strategy/FEATURE_MATRIX.md` (consumer vs pipeline; vs competitors).
+
+**Batch-isolation caveat (stated plainly):** the subprocess orchestration is proven
+with a fake runner (deterministic crash/hang/timeout), not yet with a live
+multi-process run on a folder of large `.blend`s — that real farm smoke test is a
+recommended pre-GA step.
+
+**Still open (owner's call / not claimed):** live-GUI re-test of the new Save
+Baseline (incl. overwrite dialog) / Export JSON buttons; a real multi-process batch
+run; the separate first-time-user usability test; Windows; a live GN *disk* bake.

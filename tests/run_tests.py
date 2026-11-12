@@ -617,7 +617,8 @@ def render_check_tests():
     # result is "all clear".
     rb = handlers.render_banner
     out.append(("render banner: unknown-only is not a clean result",
-                "unverified" in rb(0, 0, 3), rb(0, 0, 3), "...unverified..."))
+                "couldn't verify" in rb(0, 0, 3), rb(0, 0, 3),
+                "...couldn't verify..."))
     out.append(("render banner: truly clean says all clear",
                 rb(0, 0, 0) == "Last render check: all clear",
                 rb(0, 0, 0), "all clear"))
@@ -626,8 +627,8 @@ def render_check_tests():
     # V08 regressions on the pure banner: warning-only and warning+unknown must
     # show the counts and never read as clean, with no escalation flag in play.
     out.append(("V08 banner: warning-only shows counts, not clear",
-                rb(0, 2, 0) == "Last render check: 0 fail, 2 warning, 0 unknown",
-                rb(0, 2, 0), "0 fail, 2 warning, 0 unknown"))
+                rb(0, 2, 0) == "Last render check: 0 fail, 2 warning, 0 couldn't verify",
+                rb(0, 2, 0), "0 fail, 2 warning, 0 couldn't verify"))
     out.append(("V08 banner: warning+unknown is not clear",
                 "all clear" not in rb(0, 1, 2) and "warning" in rb(0, 1, 2),
                 rb(0, 1, 2), "not all clear, shows warning"))
@@ -672,6 +673,623 @@ def title_tests():
     out.append(("title PASS shows positive name",
                 display_name(by_id[18], Status.PASS) == by_id[18].name,
                 display_name(by_id[18], Status.PASS), by_id[18].name))
+    return out
+
+
+def new_feature_tests():
+    """A1-A7: the new competitor-parity features. Cloud-path warning (#24),
+    orphan-file detection (#25), cache-size reporting (A4), JSON report (A7),
+    and the headless CLI exit codes (A6)."""
+    import json as _json
+    from failsafe import cache_inspect as ci, engine, report, cli
+    out = []
+
+    # --- A2 cloud_sync_marker: pure string classifier -----------------------
+    cloud_cases = [
+        ("/Users/x/Dropbox/proj/blendcache_a", "Dropbox"),
+        ("/Users/x/OneDrive/proj", "OneDrive"),
+        ("/Users/x/Google Drive/proj", "Google Drive"),
+        ("/Users/x/Library/Mobile Documents/com~apple~CloudDocs/p", "iCloud Drive"),
+        ("/Users/x/Projects/local/blendcache_a", None),
+        ("", None),
+    ]
+    for path, expect in cloud_cases:
+        got = ci.cloud_sync_marker(path)
+        out.append(("A2 cloud marker %r -> %s" % (path, expect),
+                    got == expect, got, expect))
+
+    # --- A2 #24 check against constructed entries ---------------------------
+    def disk_entry(cloud=None):
+        e = ci.CacheEntry("Obj", "Cloth", "point")
+        e.memory = False
+        e.cache_dir = "/some/dir"
+        e.cloud_marker = cloud
+        return e
+    got = _run_check_entries(24, [disk_entry(cloud="Dropbox")])
+    out.append(("A2 #24 cloud cache -> WARNING", got == Status.WARNING, got,
+                Status.WARNING))
+    got = _run_check_entries(24, [disk_entry(cloud=None)])
+    out.append(("A2 #24 local cache -> PASS", got == Status.PASS, got, Status.PASS))
+
+    # --- A4 human_bytes -----------------------------------------------------
+    for n, expect in ((0, "0 B"), (512, "512 B"), (1536, "1.5 KB"),
+                      (5 * 1024 * 1024, "5.0 MB"), (None, "unknown size")):
+        got = ci.human_bytes(n)
+        out.append(("A4 human_bytes(%r)=%s" % (n, expect), got == expect, got,
+                    expect))
+
+    # --- A3 orphan filename regex -------------------------------------------
+    rx = ci._BPHYS_RE
+    g1 = bool(rx.match("506C616E65_000010_00.bphys"))
+    out.append(("A3 bphys regex accepts real name", g1 is True, g1, True))
+    g2 = bool(rx.match("notacache.txt"))
+    out.append(("A3 bphys regex rejects junk", g2 is False, g2, False))
+
+    # --- A3 orphan scan: pure dir logic -------------------------------------
+    odir = tempfile.mkdtemp(prefix="failsafe_orphan_")
+    owned_pfx = "506C616E65"          # "Plane"
+    orphan_pfx = "4F6C64"             # "Old"
+    for fr in (1, 2, 3):
+        with open(os.path.join(odir, "%s_%06d_00.bphys" % (owned_pfx, fr)), "wb") as fh:
+            fh.write(b"x" * 100)
+    for fr in (1, 2):
+        with open(os.path.join(odir, "%s_%06d_00.bphys" % (orphan_pfx, fr)), "wb") as fh:
+            fh.write(b"y" * 50)
+    orphans = ci.scan_orphans_in_dir(odir, {owned_pfx})
+    out.append(("A3 orphan scan finds 1 unowned prefix",
+                len(orphans) == 1, len(orphans), 1))
+    if orphans:
+        out.append(("A3 orphan scan counts 2 files",
+                    orphans[0]["files"] == 2, orphans[0]["files"], 2))
+        out.append(("A3 orphan scan sums 100 bytes",
+                    orphans[0]["bytes"] == 100, orphans[0]["bytes"], 100))
+    out.append(("A3 orphan scan: all owned -> none",
+                ci.scan_orphans_in_dir(odir, {owned_pfx, orphan_pfx}) == [],
+                "(list)", "[]"))
+
+    # --- A7 build_json_report: valid JSON, stable shape ---------------------
+    results = engine.run_all(bpy.context)
+    blob = report.build_json_report(results)
+    try:
+        data = _json.loads(blob)
+        parsed = True
+    except Exception:
+        data = {}
+        parsed = False
+    out.append(("A7 JSON report parses", parsed, parsed, True))
+    out.append(("A7 JSON has tool=failsafe", data.get("tool") == "failsafe",
+                data.get("tool"), "failsafe"))
+    for key in ("summary", "overall", "checks", "cache_disk_usage"):
+        out.append(("A7 JSON has %r" % key, key in data, key in data, True))
+    ids = {c["id"] for c in data.get("checks", [])}
+    out.append(("A7 JSON includes new checks 24 & 25",
+                {24, 25} <= ids, sorted(ids)[-3:] if ids else [], "24,25 present"))
+
+    # --- A6 CLI exit codes --------------------------------------------------
+    def R(status, cid=1):
+        m = next(mm for mm in engine.CHECKS if mm.id == cid)
+        return engine.Result(cid, m.name, m.group, status, "x")
+    out.append(("A6 FAIL -> exit 1",
+                cli.verdict_exit_code([R(Status.FAIL)]) == 1,
+                cli.verdict_exit_code([R(Status.FAIL)]), 1))
+    out.append(("A6 UNKNOWN -> exit 2",
+                cli.verdict_exit_code([R(Status.UNKNOWN)]) == 2,
+                cli.verdict_exit_code([R(Status.UNKNOWN)]), 2))
+    out.append(("A6 WARNING (lax) -> exit 0",
+                cli.verdict_exit_code([R(Status.WARNING)]) == 0,
+                cli.verdict_exit_code([R(Status.WARNING)]), 0))
+    out.append(("A6 WARNING (strict) -> exit 1",
+                cli.verdict_exit_code([R(Status.WARNING)], strict=True) == 1,
+                cli.verdict_exit_code([R(Status.WARNING)], strict=True), 1))
+    out.append(("A6 FAIL beats UNKNOWN -> exit 1",
+                cli.verdict_exit_code([R(Status.FAIL), R(Status.UNKNOWN, 2)]) == 1,
+                cli.verdict_exit_code([R(Status.FAIL), R(Status.UNKNOWN, 2)]), 1))
+    # bad args -> usage code 3, with help text
+    code, txt = cli.run(argv=["--bogus"])
+    out.append(("A6 bad arg -> exit 3", code == 3, code, 3))
+    # real run returns a defined code and non-empty output
+    code, txt = cli.run(argv=["--json"])
+    out.append(("A6 --json run returns defined code",
+                code in (0, 1, 2), code, "0/1/2"))
+    out.append(("A6 --json run emits JSON", txt.strip().startswith("{"),
+                txt[:1], "{"))
+
+    # --- A8 batch: aggregate exit + file discovery -------------------------
+    out.append(("A8 aggregate [] -> clean", cli.aggregate_exit([]) == 0,
+                cli.aggregate_exit([]), 0))
+    out.append(("A8 aggregate blocking wins",
+                cli.aggregate_exit([0, 2, 1]) == 1,
+                cli.aggregate_exit([0, 2, 1]), 1))
+    out.append(("A8 aggregate usage beats unverified",
+                cli.aggregate_exit([2, 3]) == 3,
+                cli.aggregate_exit([2, 3]), 3))
+    out.append(("A8 aggregate unverified over clean",
+                cli.aggregate_exit([0, 2]) == 2,
+                cli.aggregate_exit([0, 2]), 2))
+    bdir = tempfile.mkdtemp(prefix="failsafe_batch_")
+    for fn in ("a.blend", "b.blend", "notes.txt"):
+        with open(os.path.join(bdir, fn), "wb") as fh:
+            fh.write(b"")
+    found = cli._list_blend_files(bdir)
+    out.append(("A8 _list_blend_files finds 2 .blend", len(found) == 2,
+                len(found), 2))
+    code, _ = cli.run(argv=["--batch", "/no/such/failsafe/dir"])
+    out.append(("A8 batch missing folder -> exit 3", code == 3, code, 3))
+
+    # --- Status rename: user word changes, machine contract does NOT --------
+    out.append(("label UNKNOWN -> Couldn't verify",
+                engine.label(Status.UNKNOWN) == "Couldn't verify",
+                engine.label(Status.UNKNOWN), "Couldn't verify"))
+    out.append(("internal status stays UNKNOWN",
+                Status.UNKNOWN == "UNKNOWN", Status.UNKNOWN, "UNKNOWN"))
+    out.append(("JSON summary keeps machine key UNKNOWN",
+                "UNKNOWN" in data.get("summary", {}),
+                sorted(data.get("summary", {}).keys()), "UNKNOWN present"))
+    out.append(("JSON never emits the display word",
+                "Couldn't verify" not in blob, "display word absent", True))
+    return out
+
+
+def baseline_tests():
+    """The opt-in settings-baseline feature: pure helpers plus the #26 check's
+    five outcomes (no baseline / match / drift / identity mismatch / corrupt),
+    driven with monkeypatched baseline data so no real bake is needed."""
+    import json as _json
+    from failsafe import baseline as bl, engine
+    out = []
+
+    # --- diff_fingerprint ---------------------------------------------------
+    a = {"settings": {"mass": 1.0, "quality": 5}, "cache_range": [1, 10]}
+    b = {"settings": {"mass": 1.0, "quality": 5}, "cache_range": [1, 10]}
+    out.append(("baseline diff identical -> none",
+                bl.diff_fingerprint(a, b) == [], bl.diff_fingerprint(a, b), []))
+    c = {"settings": {"mass": 2.0, "quality": 5}, "cache_range": [1, 10]}
+    out.append(("baseline diff finds changed setting",
+                bl.diff_fingerprint(a, c) == ["mass"],
+                bl.diff_fingerprint(a, c), ["mass"]))
+    d = {"settings": {"mass": 1.0, "quality": 5}, "cache_range": [1, 20]}
+    out.append(("baseline diff finds range change",
+                "cache frame range" in bl.diff_fingerprint(a, d),
+                bl.diff_fingerprint(a, d), "cache frame range"))
+
+    # --- load_baseline adversarial cases ------------------------------------
+    d0 = tempfile.mkdtemp(prefix="failsafe_bl_")
+    missing = os.path.join(d0, "nope.json")
+    try:
+        bl.load_baseline(missing)
+        ok, got = False, "no raise"
+    except ValueError as e:
+        ok, got = (str(e) == "no baseline file"), str(e)
+    out.append(("baseline load missing -> ValueError", ok, got, "no baseline file"))
+
+    corrupt = os.path.join(d0, "bad.json")
+    with open(corrupt, "w") as fh:
+        fh.write("{not valid json")
+    try:
+        bl.load_baseline(corrupt)
+        ok = False
+    except ValueError:
+        ok = True
+    out.append(("baseline load corrupt -> ValueError", ok, ok, True))
+
+    wrong = os.path.join(d0, "wrong.json")
+    with open(wrong, "w") as fh:
+        _json.dump({"hello": "world"}, fh)
+    try:
+        bl.load_baseline(wrong)
+        ok = False
+    except ValueError:
+        ok = True
+    out.append(("baseline load wrong-shape -> ValueError", ok, ok, True))
+
+    # --- save + round-trip --------------------------------------------------
+    spath = os.path.join(d0, "x.failsafe-baseline.json")
+    bl.save_baseline(bpy.context.scene, spath)
+    loaded = bl.load_baseline(spath)
+    out.append(("baseline save+load round-trip",
+                loaded.get("kind") == "baseline"
+                and loaded.get("schema") == bl.BASELINE_SCHEMA,
+                loaded.get("kind"), "baseline"))
+    out.append(("baseline file has fingerprints dict",
+                isinstance(loaded.get("fingerprints"), dict),
+                type(loaded.get("fingerprints")).__name__, "dict"))
+
+    # --- never auto-overwrites an existing baseline -------------------------
+    # spath already exists from the round-trip above.
+    raised = False
+    try:
+        bl.save_baseline(bpy.context.scene, spath)          # no overwrite flag
+    except FileExistsError:
+        raised = True
+    out.append(("baseline save refuses to overwrite silently", raised, raised,
+                True))
+    before = open(spath).read()
+    out.append(("baseline file untouched after refused overwrite",
+                open(spath).read() == before, "unchanged", "unchanged"))
+    # explicit overwrite is allowed
+    wrote = False
+    try:
+        bl.save_baseline(bpy.context.scene, spath, overwrite=True)
+        wrote = True
+    except Exception:
+        wrote = False
+    out.append(("baseline save overwrites when asked explicitly", wrote, wrote,
+                True))
+    # a fresh path writes with no flag needed
+    fresh = os.path.join(d0, "fresh.failsafe-baseline.json")
+    bl.save_baseline(bpy.context.scene, fresh)
+    out.append(("baseline save writes a brand-new file", os.path.isfile(fresh),
+                os.path.isfile(fresh), True))
+
+    # --- schema + foreign-file guards (pure helpers) ------------------------
+    out.append(("schema_ok accepts current schema",
+                bl.schema_ok({"schema": bl.BASELINE_SCHEMA}), True, True))
+    out.append(("schema_ok rejects a newer/unknown schema",
+                not bl.schema_ok({"schema": 999}), False, False))
+    out.append(("schema_ok rejects a baseline with no schema",
+                not bl.schema_ok({"kind": "baseline"}), False, False))
+    out.append(("foreign file: different .blend name is flagged",
+                bl.foreign_file_name({"file": "/a/other.blend"},
+                                     "/b/mine.blend") == "other.blend",
+                "flagged", "other.blend"))
+    out.append(("foreign file: same name (moved project) is NOT flagged",
+                bl.foreign_file_name({"file": "/a/mine.blend"},
+                                     "/b/mine.blend") is None, None, None))
+    out.append(("foreign file: unknown current file -> not flagged",
+                bl.foreign_file_name({"file": "/a/other.blend"}, "") is None,
+                None, None))
+
+    # --- #26 check: five outcomes via monkeypatch ---------------------------
+    meta = next(m for m in engine.CHECKS if m.id == 26)
+    mk = engine._mk(meta)
+
+    class Ctx:
+        pass
+    ctx = Ctx()
+    ctx.scene = bpy.context.scene
+
+    one = {"Cube::Cloth": {"system": "Cloth", "kind": "point",
+                           "settings": {"mass": 1.0}, "cache_range": [1, 10]}}
+    orig_cap, orig_path, orig_load = (bl.capture_fingerprints,
+                                      bl.default_baseline_path, bl.load_baseline)
+    try:
+        bl.capture_fingerprints = lambda scene: dict(one)
+        bl.default_baseline_path = lambda: os.path.join(d0, "missing.json")
+        bl.load_baseline = orig_load  # real: file missing -> UNKNOWN
+        w = worst_for_check(meta.func(ctx, mk), 26)
+        out.append(("#26 sims + no baseline -> Couldn't verify",
+                    w == Status.UNKNOWN, w, Status.UNKNOWN))
+
+        saved = {"kind": "baseline", "schema": bl.BASELINE_SCHEMA,
+                 "fingerprints": dict(one)}
+        bl.default_baseline_path = lambda: spath
+        bl.load_baseline = lambda p: saved
+        w = worst_for_check(meta.func(ctx, mk), 26)
+        out.append(("#26 matching baseline -> Pass", w == Status.PASS, w,
+                    Status.PASS))
+
+        bl.capture_fingerprints = lambda scene: {
+            "Cube::Cloth": {"system": "Cloth", "kind": "point",
+                            "settings": {"mass": 2.0}, "cache_range": [1, 10]}}
+        w = worst_for_check(meta.func(ctx, mk), 26)
+        out.append(("#26 changed settings -> Warning", w == Status.WARNING, w,
+                    Status.WARNING))
+
+        bl.capture_fingerprints = lambda scene: {
+            "Renamed::Cloth": {"system": "Cloth", "kind": "point",
+                               "settings": {"mass": 1.0}, "cache_range": [1, 10]}}
+        w = worst_for_check(meta.func(ctx, mk), 26)
+        out.append(("#26 identity mismatch -> Couldn't verify",
+                    w == Status.UNKNOWN, w, Status.UNKNOWN))
+
+        bl.capture_fingerprints = lambda scene: dict(one)
+
+        def _boom(p):
+            raise ValueError("baseline unreadable: boom")
+        bl.load_baseline = _boom
+        w = worst_for_check(meta.func(ctx, mk), 26)
+        out.append(("#26 corrupt baseline -> Couldn't verify",
+                    w == Status.UNKNOWN, w, Status.UNKNOWN))
+
+        # a baseline from a newer/unknown schema must not produce a PASS even if
+        # the fingerprints happen to match
+        bl.load_baseline = lambda p: {"kind": "baseline", "schema": 999,
+                                      "fingerprints": dict(one)}
+        w = worst_for_check(meta.func(ctx, mk), 26)
+        out.append(("#26 unknown-schema baseline -> Couldn't verify",
+                    w == Status.UNKNOWN, w, Status.UNKNOWN))
+
+        # never claims "since bake"; PASS wording says "since it was saved"
+        bl.capture_fingerprints = lambda scene: dict(one)
+        bl.load_baseline = lambda p: {"kind": "baseline",
+                                      "schema": bl.BASELINE_SCHEMA,
+                                      "fingerprints": dict(one)}
+        res = meta.func(ctx, mk)
+        pass_msgs = " ".join(r.message for r in res if r.status == Status.PASS)
+        out.append(("#26 never claims 'since bake'",
+                    "since bake" not in pass_msgs.lower(), pass_msgs[:40],
+                    "no 'since bake'"))
+    finally:
+        bl.capture_fingerprints = orig_cap
+        bl.default_baseline_path = orig_path
+        bl.load_baseline = orig_load
+    return out
+
+
+def batch_adversarial_tests():
+    """The IN-PROCESS batch scanner (--in-process) must survive bad input: a
+    corrupt/non-blend file must become a per-file error (not a crash, not a silent
+    mis-scan), and a mixed folder must still scan the good files and report the
+    worst exit. (In-process is the fast path; the crash-isolated default path is
+    covered by batch_isolation_tests below.)"""
+    import json as _json
+    from failsafe import cli
+    out = []
+
+    # Corrupt / non-blend file -> graceful per-file error, defined exit.
+    bad_dir = tempfile.mkdtemp(prefix="failsafe_badbatch_")
+    with open(os.path.join(bad_dir, "garbage.blend"), "wb") as fh:
+        fh.write(b"this is definitely not a blend file" * 20)
+    code, txt = cli.run(argv=["--batch", bad_dir, "--in-process", "--json"])
+    try:
+        data = _json.loads(txt)
+        parsed = True
+    except Exception:
+        data = {}
+        parsed = False
+    out.append(("batch garbage: JSON still parses", parsed, parsed, True))
+    files = data.get("files", [])
+    out.append(("batch garbage: recorded as a per-file error",
+                len(files) == 1 and "error" in files[0],
+                [list(f.keys()) for f in files], "1 error entry"))
+    out.append(("batch garbage: defined exit 3 (no crash)", code == 3, code, 3))
+
+    # Partial failure: one good file + one bad file.
+    mixed = tempfile.mkdtemp(prefix="failsafe_mixedbatch_")
+    bpy.ops.wm.read_factory_settings(use_empty=True)   # clean, sim-free scene
+    good = os.path.join(mixed, "good.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=good)
+    with open(os.path.join(mixed, "bad.blend"), "wb") as fh:
+        fh.write(b"nope not a blend")
+    code, txt = cli.run(argv=["--batch", mixed, "--in-process", "--json"])
+    data = _json.loads(txt)
+    fls = data.get("files", [])
+    exits = sorted(f.get("exit") for f in fls)
+    out.append(("batch partial: both files reported", len(fls) == 2, len(fls), 2))
+    out.append(("batch partial: good scanned (0) + bad errored (3)",
+                0 in exits and 3 in exits, exits, "[0, 3]"))
+    out.append(("batch partial: overall exit = worst (3)",
+                data.get("overall_exit") == 3, data.get("overall_exit"), 3))
+    out.append(("batch partial: good file has no error key",
+                any("error" not in f for f in fls), exits, "a clean file present"))
+    return out
+
+
+def batch_isolation_tests():
+    """The DEFAULT crash-isolated batch path (failsafe.batch): each file runs in
+    its own Blender subprocess with a timeout. A crash or a hang in one file must
+    not take the batch down, and the results of files that scanned cleanly must be
+    preserved. Driven with a FAKE runner so crashes/hangs/timeouts are simulated
+    deterministically — no real Blender is spawned and nothing actually crashes."""
+    import json as _json
+    import subprocess as _sp
+    from failsafe import batch, cli
+    out = []
+
+    S, E = batch._MARK_START, batch._MARK_END
+
+    def good_stdout(fail=0, warn=0, unknown=0, exit_code=0):
+        payload = {"overall": "PASS", "exit": exit_code,
+                   "summary": {"FAIL": fail, "WARNING": warn, "UNKNOWN": unknown,
+                               "PASS": 0, "NOT APPLICABLE": 0},
+                   "cache_disk_usage": []}
+        return "Blender banner line\n" + S + _json.dumps(payload) + E + "\nquit"
+
+    # A fake runner keyed by the .blend path in the child argv, so one folder can
+    # mix clean / crashing / hanging / corrupt files.
+    def make_runner(behaviour):
+        def runner(argv, timeout):
+            blend = argv[2]  # [bin, "-b", blend, ...]
+            how = behaviour.get(os.path.basename(blend), "good")
+            if how == "hang":
+                raise _sp.TimeoutExpired(cmd=argv, timeout=timeout)
+            if how == "crash":
+                return (-11, "", "Segmentation fault")      # killed, no JSON
+            if how == "corrupt":
+                return (1, "Error: not a blend\n", "")       # opened, no markers
+            if how == "launchfail":
+                raise OSError("blender binary missing")
+            if how == "fail":
+                return (0, good_stdout(fail=2, exit_code=cli.EXIT_BLOCKING), "")
+            return (0, good_stdout(), "")                    # clean
+        return runner
+
+    # --- single-file outcomes ------------------------------------------------
+    pf = batch.scan_file_isolated("clean.blend", "blender", timeout=5,
+                                  runner=make_runner({}))
+    out.append(("isolated clean -> exit 0, no error",
+                pf["exit"] == 0 and "error" not in pf, pf.get("exit"), 0))
+
+    pf = batch.scan_file_isolated("hang.blend", "blender", timeout=5,
+                                  runner=make_runner({"hang.blend": "hang"}))
+    out.append(("isolated hang -> timeout error, exit 3",
+                pf["exit"] == 3 and "timed out" in pf.get("error", ""),
+                pf.get("error"), "timed out"))
+
+    pf = batch.scan_file_isolated("crash.blend", "blender", timeout=5,
+                                  runner=make_runner({"crash.blend": "crash"}))
+    out.append(("isolated crash -> error, exit 3 (never a pass)",
+                pf["exit"] == 3 and "error" in pf, pf.get("exit"), 3))
+
+    pf = batch.scan_file_isolated("corrupt.blend", "blender", timeout=5,
+                                  runner=make_runner({"corrupt.blend": "corrupt"}))
+    out.append(("isolated corrupt -> no-result error, exit 3",
+                pf["exit"] == 3 and "error" in pf, pf.get("exit"), 3))
+
+    pf = batch.scan_file_isolated("nolaunch.blend", "blender", timeout=5,
+                                  runner=make_runner({"nolaunch.blend": "launchfail"}))
+    out.append(("isolated launch failure -> error, exit 3",
+                pf["exit"] == 3 and "could not run Blender" in pf.get("error", ""),
+                pf.get("error"), "could not run Blender"))
+
+    # --- partial-failure batch: clean + crash + hang + fail together ---------
+    folder = tempfile.mkdtemp(prefix="failsafe_isobatch_")
+    for n in ("a_clean.blend", "b_crash.blend", "c_hang.blend", "d_fail.blend"):
+        open(os.path.join(folder, n), "wb").close()
+    behaviour = {"b_crash.blend": "crash", "c_hang.blend": "hang",
+                 "d_fail.blend": "fail"}
+    agg, txt = batch.run_isolated_batch(
+        folder, {"format": "json", "strict": False}, blender_bin="blender",
+        timeout=5, runner=make_runner(behaviour))
+    data = _json.loads(txt)
+    fls = {os.path.basename(f["file"]): f for f in data["files"]}
+    out.append(("iso batch: all 4 files reported", len(fls) == 4, len(fls), 4))
+    out.append(("iso batch: clean file preserved (exit 0, no error)",
+                fls["a_clean.blend"]["exit"] == 0
+                and "error" not in fls["a_clean.blend"],
+                fls["a_clean.blend"].get("exit"), 0))
+    out.append(("iso batch: crash isolated to its file",
+                "error" in fls["b_crash.blend"], list(fls["b_crash.blend"]),
+                "error key"))
+    out.append(("iso batch: hang isolated (timeout)",
+                "timed out" in fls["c_hang.blend"].get("error", ""),
+                fls["c_hang.blend"].get("error"), "timed out"))
+    out.append(("iso batch: real FAIL still seen (exit 1)",
+                fls["d_fail.blend"]["exit"] == 1,
+                fls["d_fail.blend"].get("exit"), 1))
+    out.append(("iso batch: marked isolated in JSON",
+                data.get("isolated") is True, data.get("isolated"), True))
+    # Aggregation priority (same as the in-process scanner): a blocking FAIL
+    # outranks a usage/error, so this mixed batch exits 1 — the actionable FAIL.
+    out.append(("iso batch: FAIL outranks errors in aggregate (exit 1)",
+                agg == 1, agg, 1))
+
+    # An error must still beat clean files (never hidden): clean + crash -> 3.
+    folder_e = tempfile.mkdtemp(prefix="failsafe_isoerr_")
+    for n in ("ok1.blend", "ok2.blend", "boom.blend"):
+        open(os.path.join(folder_e, n), "wb").close()
+    agg_e, _ = batch.run_isolated_batch(
+        folder_e, {"format": "json"}, blender_bin="blender", timeout=5,
+        runner=make_runner({"boom.blend": "crash"}))
+    out.append(("iso batch: an error beats clean files (exit 3)",
+                agg_e == 3, agg_e, 3))
+
+    # worst-wins without any error: clean + a blocking FAIL -> exit 1
+    folder2 = tempfile.mkdtemp(prefix="failsafe_isobatch2_")
+    for n in ("ok.blend", "bad.blend"):
+        open(os.path.join(folder2, n), "wb").close()
+    agg2, _ = batch.run_isolated_batch(
+        folder2, {"format": "json"}, blender_bin="blender", timeout=5,
+        runner=make_runner({"bad.blend": "fail"}))
+    out.append(("iso batch: FAIL beats clean (exit 1)", agg2 == 1, agg2, 1))
+
+    # not-a-folder -> defined usage error
+    agg3, txt3 = batch.run_isolated_batch(
+        "/no/such/folder/xyz", {"format": "text"}, blender_bin="blender",
+        runner=make_runner({}))
+    out.append(("iso batch: missing folder -> exit 3", agg3 == 3, agg3, 3))
+
+    # child argv shape: isolated, reads the file, no --factory-startup for farm
+    argv = batch.build_child_argv("blenderbin", "/shots/x.blend")
+    out.append(("iso child argv: background + file + python-expr",
+                argv[:3] == ["blenderbin", "-b", "/shots/x.blend"]
+                and "--python-expr" in argv, argv[:3], "bin -b file"))
+    argv_src = batch.build_child_argv("b", "/x.blend", source_root="/src")
+    out.append(("iso child argv: source mode adds --factory-startup",
+                "--factory-startup" in argv_src, "--factory-startup" in argv_src,
+                True))
+
+    # _extract_json tolerates banner noise and rejects junk
+    out.append(("iso extract: finds JSON amid noise",
+                batch._extract_json("x\n" + S + '{"a":1}' + E + "\ny")
+                == {"a": 1}, "parsed", {"a": 1}))
+    out.append(("iso extract: no markers -> None",
+                batch._extract_json("just blender output") is None, "None", None))
+    return out
+
+
+def couldnt_verify_tests():
+    """Every 'Couldn't verify' a user sees must carry a plain reason (message) AND
+    a next action (hint). And the contract must hold: the displayed word is
+    'Couldn't verify' while JSON/CLI keep the machine token UNKNOWN."""
+    from failsafe import engine, baseline as bl, report
+    out = []
+
+    # Display/machine label contract.
+    out.append(("label(UNKNOWN) -> 'Couldn't verify'",
+                engine.label(engine.Status.UNKNOWN) == "Couldn't verify",
+                engine.label(engine.Status.UNKNOWN), "Couldn't verify"))
+    out.append(("label keeps the plain words for the others",
+                engine.label(engine.Status.FAIL) == "Fail"
+                and engine.label(engine.Status.PASS) == "Pass",
+                "Fail/Pass", "Fail/Pass"))
+
+    # Collect UNKNOWNs from every #26 branch and require reason + action on each.
+    meta = next(m for m in engine.CHECKS if m.id == 26)
+    mk = engine._mk(meta)
+
+    class Ctx:
+        pass
+    ctx = Ctx()
+    ctx.scene = bpy.context.scene
+    d = tempfile.mkdtemp(prefix="failsafe_cv_")
+    one = {"Cube::Cloth": {"system": "Cloth", "kind": "point",
+                           "settings": {"mass": 1.0}, "cache_range": [1, 10]}}
+    orig = (bl.capture_fingerprints, bl.default_baseline_path, bl.load_baseline)
+    unknowns = []
+    try:
+        bl.capture_fingerprints = lambda s: dict(one)
+        # unsaved (no path)
+        bl.default_baseline_path = lambda: None
+        unknowns += [r for r in meta.func(ctx, mk)
+                     if r.status == engine.Status.UNKNOWN]
+        # no baseline file
+        bl.default_baseline_path = lambda: os.path.join(d, "missing.json")
+        bl.load_baseline = orig[2]
+        unknowns += [r for r in meta.func(ctx, mk)
+                     if r.status == engine.Status.UNKNOWN]
+        # corrupt
+        def _boom(p):
+            raise ValueError("baseline unreadable: boom")
+        bl.load_baseline = _boom
+        unknowns += [r for r in meta.func(ctx, mk)
+                     if r.status == engine.Status.UNKNOWN]
+        # unknown schema
+        bl.load_baseline = lambda p: {"kind": "baseline", "schema": 999,
+                                      "fingerprints": dict(one)}
+        unknowns += [r for r in meta.func(ctx, mk)
+                     if r.status == engine.Status.UNKNOWN]
+        # identity mismatch
+        bl.load_baseline = lambda p: {"kind": "baseline",
+                                      "schema": bl.BASELINE_SCHEMA,
+                                      "fingerprints": dict(one)}
+        bl.capture_fingerprints = lambda s: {
+            "Renamed::Cloth": one["Cube::Cloth"]}
+        unknowns += [r for r in meta.func(ctx, mk)
+                     if r.status == engine.Status.UNKNOWN]
+    finally:
+        bl.capture_fingerprints, bl.default_baseline_path, bl.load_baseline = orig
+
+    out.append(("collected several 'Couldn't verify' branches",
+                len(unknowns) >= 5, len(unknowns), ">=5"))
+    out.append(("every 'Couldn't verify' states a reason",
+                all((r.message or "").strip() for r in unknowns),
+                sum(1 for r in unknowns if not (r.message or "").strip()),
+                "0 missing reasons"))
+    out.append(("every 'Couldn't verify' states a next action",
+                all((r.hint or "").strip() for r in unknowns),
+                sum(1 for r in unknowns if not (r.hint or "").strip()),
+                "0 missing actions"))
+
+    # Report wording: text shows the display word, JSON keeps the machine token.
+    sample = [mk(engine.Status.UNKNOWN, "a plain reason here", hint="do this next")]
+    txt = report.build_text_report(sample)
+    out.append(("text report uses 'Couldn't verify'",
+                "Couldn't verify" in txt, "Couldn't verify" in txt, True))
+    jsn = report.build_json_report(sample)
+    out.append(("json keeps UNKNOWN, never the display word",
+                '"UNKNOWN"' in jsn and "Couldn't verify" not in jsn,
+                '"UNKNOWN"' in jsn and "Couldn't verify" not in jsn, True))
     return out
 
 
@@ -746,7 +1364,11 @@ def main():
                                    + stage_flag_state_tests() + readonly_tests()
                                    + readonly_filesystem_tests()
                                    + roundtrip_fix_tests()
-                                   + render_check_tests() + title_tests()):
+                                   + render_check_tests() + title_tests()
+                                   + new_feature_tests() + baseline_tests()
+                                   + batch_adversarial_tests()
+                                   + batch_isolation_tests()
+                                   + couldnt_verify_tests()):
         if ok:
             passed += 1
             print("  PASS  unit: %s  -> %s" % (label, got))
@@ -761,7 +1383,9 @@ def main():
              + len(memory_reliability_tests()) + len(stage_flag_state_tests())
              + len(readonly_tests()) + len(readonly_filesystem_tests())
              + len(roundtrip_fix_tests()) + len(render_check_tests())
-             + len(title_tests()))
+             + len(title_tests()) + len(new_feature_tests())
+             + len(baseline_tests()) + len(batch_adversarial_tests())
+             + len(batch_isolation_tests()) + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

@@ -13,7 +13,8 @@ import bpy
 import bpy.utils.previews
 from bpy.types import Panel
 
-from .engine import (CHECKS, Status, GROUP_SETUP, GROUP_CACHE, display_name)
+from .engine import (CHECKS, Status, GROUP_SETUP, GROUP_CACHE, display_name,
+                     label)
 from .help_text import HELP
 
 # Fallback monochrome icons if the coloured previews fail to load.
@@ -119,6 +120,19 @@ def _worst_for_check(items, check_id):
     return best
 
 
+def _first_reason(items, check_id):
+    """The message of the worst finding for a check — the one-line 'why' shown
+    on a collapsed problem row. Prefers FAIL, then WARNING, then UNKNOWN."""
+    sevs = {Status.FAIL: 4, Status.WARNING: 3, Status.UNKNOWN: 2,
+            Status.NA: 1, Status.PASS: 0}
+    best = None
+    for it in items:
+        if it.check_id == check_id and it.status in sevs:
+            if best is None or sevs[it.status] > sevs[best.status]:
+                best = it
+    return best.message if best else ""
+
+
 class FAILSAFE_PT_panel(Panel):
     bl_label = "Failsafe"
     bl_idname = "FAILSAFE_PT_panel"
@@ -136,8 +150,13 @@ class FAILSAFE_PT_panel(Panel):
 
         row = layout.row(align=True)
         row.operator("failsafe.export_report", icon="TEXT")
+        row.operator("failsafe.export_json", text="", icon="FILE_SCRIPT")
         row.prop(wm, "failsafe_show_passed", text="", icon="HIDE_OFF", toggle=True)
         row.prop(wm, "failsafe_explain", text="", icon="QUESTION", toggle=True)
+
+        # Opt-in settings baseline: the one action that writes a (external) file.
+        row = layout.row(align=True)
+        row.operator("failsafe.save_baseline", icon="FILE_TICK")
 
         # Opt-in: check automatically at the start of each render.
         prefs = _get_prefs(context)
@@ -181,8 +200,8 @@ class FAILSAFE_PT_panel(Panel):
         self._filter_button(s, c[Status.UNKNOWN], Status.UNKNOWN, active_filter)
         if active_filter:
             fr = layout.row()
-            fr.label(text="Showing %s only — click its icon again to clear."
-                     % active_filter.lower(), icon="FILTER")
+            fr.label(text='Showing "%s" only — click its icon again to clear.'
+                     % label(active_filter), icon="FILTER")
 
         collapsed = set(wm.failsafe_collapsed.split()) if wm.failsafe_collapsed else set()
         show_passed = wm.failsafe_show_passed
@@ -236,6 +255,14 @@ class FAILSAFE_PT_panel(Panel):
                 emboss=False)
             op.key = str(m.id)
             if is_collapsed:
+                # Even collapsed, a problem row shows a one-line reason, so a
+                # "Couldn't verify" (or fail/warning) never hides WHY behind a
+                # click. Full detail + fix button appear on expand.
+                if worst in (Status.FAIL, Status.WARNING, Status.UNKNOWN):
+                    reason = _first_reason(items, m.id)
+                    if reason:
+                        rc = box.column(align=True)
+                        _wrap_label(rc, context, reason, status=None, indent=1.6)
                 continue
 
             # Optional "why it matters" line (Explain mode), once per check.
@@ -278,7 +305,7 @@ class FAILSAFE_PT_panel(Panel):
                                 indent=1.6)
         if not drew_any:
             if active_filter:
-                box.label(text="No %s items in this group." % active_filter.lower(),
+                box.label(text='No "%s" items in this group.' % label(active_filter),
                           icon="BLANK1")
             else:
                 box.label(

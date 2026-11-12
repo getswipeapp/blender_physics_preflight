@@ -10,8 +10,13 @@ that compares the files on disk against the entire required frame range, so they
 can never contradict each other — a missing first, middle or last frame fails
 every one of them, not none.
 """
+import os
+
+import bpy
+
 from .engine import check, Status, GROUP_CACHE
 from . import cache_inspect as ci
+from . import baseline as bl
 
 
 def _caches(ctx):
@@ -198,8 +203,14 @@ def c18_files_present(ctx, mk):
         elif s == ci.V_UNVERIFIABLE:
             if not e.baked_determinable:
                 out.append(mk(Status.UNKNOWN,
-                              "Packed Geometry Nodes bake — no files to verify.",
-                              object_name=name))
+                              "Packed Geometry Nodes bake: Blender keeps it "
+                              "inside the .blend where its files can't be seen "
+                              "from outside, so it can't be verified. This is a "
+                              "Blender limitation, not a problem with your scene.",
+                              object_name=name,
+                              hint="Check it in the Geometry Nodes bake panel. "
+                                   "Baking to a Disk cache instead would let "
+                                   "Failsafe verify the files."))
             elif not e.file_check_applicable or e.cache_dir is None:
                 out.append(mk(Status.UNKNOWN,
                               "%s cache location could not be resolved." % e.system,
@@ -472,4 +483,164 @@ def c23_fps_timescale(ctx, mk):
                   "scene FPS is %.3g — if you changed FPS or time scale after "
                   "baking, re-bake so the timing matches." % fps,
                   hint="When in doubt, delete the cache and re-bake."))
+    return out
+
+
+# -------------------------------------------------------------------- 24 ----
+@check(24, "Caches aren't in a cloud-synced folder", GROUP_CACHE,
+       name_warn="A cache sits in a cloud-synced folder",
+       name_bad="A cache sits in a cloud-synced folder")
+def c24_cloud_path(ctx, mk):
+    """Warn when a disk cache lives inside Dropbox/Google Drive/OneDrive/iCloud/
+    etc. These clients can lock, partially upload, or swap in an offline
+    placeholder for a frame file mid-render. Read-only: we only inspect paths."""
+    entries = _caches(ctx)
+    out = []
+    checked = False
+    for e in entries:
+        if e.kind == "rbw" or e.memory:
+            continue
+        if e.cache_dir:
+            checked = True
+        if e.cloud_marker:
+            out.append(mk(Status.WARNING,
+                          "%s cache is inside a %s folder. Cloud clients can "
+                          "lock or only partially sync a frame while the farm "
+                          "reads it, which can corrupt a render."
+                          % (e.system, e.cloud_marker),
+                          object_name=e.obj_name,
+                          hint="Move the cache to a local project folder before "
+                               "baking for a render or farm submission."))
+    if out:
+        return out
+    if checked:
+        return [mk(Status.PASS,
+                   "No simulation cache is inside a known cloud-synced folder.")]
+    return []
+
+
+# -------------------------------------------------------------------- 25 ----
+@check(25, "No orphaned cache files on disk", GROUP_CACHE,
+       name_warn="Orphaned cache files are taking up space",
+       name_bad="Orphaned cache files are taking up space")
+def c25_orphan_files(ctx, mk):
+    """Report .bphys files in the project's blendcache folder that no current
+    simulation owns — usually left behind after renaming or deleting an object.
+    Read-only: we report and size them; we never delete anything (that stays the
+    user's call)."""
+    entries = _caches(ctx)
+    cache_dir = ci.default_blendcache_dir()
+    if not cache_dir or not os.path.isdir(cache_dir):
+        # No saved file / no default cache folder: nothing to assert.
+        return []
+    orphans = ci.find_orphan_point_caches(ctx.scene, entries)
+    if not orphans:
+        return [mk(Status.PASS,
+                   "Every cache file in the project's blendcache folder belongs "
+                   "to a simulation in the scene.")]
+    files = sum(o["files"] for o in orphans)
+    total = sum(o["bytes"] for o in orphans)
+    return [mk(Status.WARNING,
+               "%d cache file%s (%s) in the blendcache folder aren't owned by "
+               "any simulation in this scene — likely left over from a renamed "
+               "or deleted object."
+               % (files, "" if files == 1 else "s", ci.human_bytes(total)),
+               hint="Safe to delete to reclaim space once you're sure no other "
+                    ".blend shares this folder. Failsafe never deletes them for "
+                    "you.")]
+
+
+# -------------------------------------------------------------------- 26 ----
+@check(26, "Settings unchanged since the baseline", GROUP_CACHE,
+       name_warn="Settings changed since the baseline",
+       name_bad="Settings changed since the baseline",
+       name_unknown="No settings baseline to compare against")
+def c26_settings_baseline(ctx, mk):
+    """Compare current simulation settings to a user-saved baseline (the external
+    ``.failsafe-baseline.json`` written by the Save Baseline button). Read-only:
+    it only reads that file, and never claims 'unchanged since bake' — only
+    'unchanged since the baseline was saved'. No/unreadable/mismatched baseline
+    is 'Couldn't verify', never Pass."""
+    scene = ctx.scene
+    current = bl.capture_fingerprints(scene)
+    if not current:
+        return []  # no simulations: nothing to baseline
+    path = bl.default_baseline_path()
+    if not path:
+        return [mk(Status.UNKNOWN,
+                   "The file isn't saved, so there's no baseline to compare "
+                   "against yet.",
+                   hint="Save your .blend, bake, then click Save Baseline to "
+                        "record the settings. Future scans will flag changes.")]
+    try:
+        data = bl.load_baseline(path)
+    except ValueError as exc:
+        reason = str(exc)
+        if reason == "no baseline file":
+            return [mk(Status.UNKNOWN,
+                       "No settings baseline has been saved yet, so changes to "
+                       "the simulation settings can't be detected.",
+                       hint="Right after you bake, click Save Baseline. It writes "
+                            "a small .failsafe-baseline.json next to your .blend "
+                            "(it never changes the .blend itself).")]
+        return [mk(Status.UNKNOWN,
+                   "The settings baseline file couldn't be read (%s)." % reason,
+                   hint="Re-save it with Save Baseline, or delete the file.")]
+
+    # Guard against comparing to a baseline that isn't this scene's: a newer/
+    # unknown schema, or a baseline file copied in from a different .blend. Either
+    # way we can't trust an identity match, so it's "Couldn't verify", not Pass.
+    if not bl.schema_ok(data):
+        return [mk(Status.UNKNOWN,
+                   "The baseline was written by a different version of Failsafe "
+                   "(schema %s), so it can't be compared safely."
+                   % data.get("schema"),
+                   hint="Click Save Baseline again to write a fresh one.")]
+    foreign = bl.foreign_file_name(data, bpy.data.filepath)
+    if foreign:
+        return [mk(Status.UNKNOWN,
+                   "This baseline was saved for a different file ('%s'), so its "
+                   "settings don't necessarily describe this scene." % foreign,
+                   hint="Click Save Baseline to record a baseline for this file.")]
+
+    saved = data.get("fingerprints", {})
+    out = []
+    matched = 0
+    for ident, cur in current.items():
+        nice = ident.replace("::", " — ")
+        obj_name = None if cur.get("kind") == "rbw" else ident.split("::")[0]
+        if ident not in saved:
+            out.append(mk(Status.UNKNOWN,
+                          "%s isn't in the baseline (added or renamed after it "
+                          "was saved), so its settings can't be compared." % nice,
+                          object_name=obj_name,
+                          hint="Click Save Baseline again after baking to "
+                               "include it."))
+            continue
+        changed = bl.diff_fingerprint(saved[ident], cur)
+        if changed:
+            preview = ", ".join(changed[:6])
+            if len(changed) > 6:
+                preview += ", …"
+            out.append(mk(Status.WARNING,
+                          "%s: settings changed since the baseline (%s). If you "
+                          "changed these after baking, the cache may no longer "
+                          "match — re-bake." % (nice, preview),
+                          object_name=obj_name,
+                          hint="Re-bake, then click Save Baseline to update the "
+                               "reference."))
+        else:
+            matched += 1
+    for ident in saved:
+        if ident not in current:
+            out.append(mk(Status.UNKNOWN,
+                          "%s is in the baseline but not in the scene now."
+                          % ident.replace("::", " — "),
+                          hint="Update the baseline if you meant to remove it."))
+    if not out and matched:
+        return [mk(Status.PASS,
+                   "All %d simulation%s match the saved settings baseline "
+                   "(unchanged since it was saved — this is not proof the bake "
+                   "itself is good)."
+                   % (matched, "" if matched == 1 else "s"))]
     return out

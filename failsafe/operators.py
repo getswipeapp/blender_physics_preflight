@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Operators: run a scan, jump to an affected object, export the report."""
+"""Operators: run a scan, jump to an affected object, export the report, and the
+one user-initiated write action — Save Baseline."""
+import os
+
 import bpy
 from bpy.props import StringProperty, CollectionProperty, BoolProperty, IntProperty
 from bpy.types import Operator, PropertyGroup
 
 from . import engine
 from . import report as report_mod
+from . import baseline as baseline_mod
 
 
 class FAILSAFE_ResultItem(PropertyGroup):
@@ -46,7 +50,7 @@ class FAILSAFE_OT_scan(Operator):
         counts = engine.summary_counts(results)
         self.report(
             {"INFO"},
-            "Failsafe: %d fail, %d warning, %d unknown"
+            "Failsafe: %d fail, %d warning, %d couldn't verify"
             % (counts[engine.Status.FAIL], counts[engine.Status.WARNING],
                counts[engine.Status.UNKNOWN]))
         return {"FINISHED"}
@@ -183,6 +187,93 @@ class FAILSAFE_OT_export_report(Operator):
         return {"FINISHED"}
 
 
+class FAILSAFE_OT_export_json(Operator):
+    bl_idname = "failsafe.export_json"
+    bl_label = "Export JSON Report"
+    bl_description = ("Write a machine-readable JSON report to a Text datablock "
+                      "inside this .blend and copy it to the clipboard (for "
+                      "pipelines and render-farm tooling)")
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        results = engine.run_all(context)
+        _store_results(context.window_manager, results)
+        text = report_mod.build_json_report(results)
+        txt = bpy.data.texts.new("failsafe_report.json")
+        txt.write(text)
+        try:
+            context.window_manager.clipboard = text
+        except Exception:
+            pass
+        self.report({"INFO"},
+                    "JSON report written to new Text '%s' (inside the .blend) "
+                    "and copied to the clipboard" % txt.name)
+        return {"FINISHED"}
+
+
+class FAILSAFE_OT_save_baseline(Operator):
+    bl_idname = "failsafe.save_baseline"
+    bl_label = "Save Settings Baseline"
+    bl_description = ("Record the current simulation settings to an external "
+                      ".failsafe-baseline.json file next to your .blend, so later "
+                      "scans can tell you whether the settings changed. This is "
+                      "the ONLY action that writes a file, and it writes only "
+                      "that sidecar — it never changes your .blend. Click it "
+                      "right after you bake.")
+    bl_options = {"REGISTER"}
+
+    overwrite: BoolProperty(
+        name="Overwrite the existing baseline",
+        description="Replace the baseline already saved for this file",
+        default=False,
+    )
+
+    def invoke(self, context, event):
+        # Never silently replace an existing baseline: if one is already there and
+        # the user hasn't opted in, pop a dialog asking before overwriting.
+        path = baseline_mod.default_baseline_path()
+        if path and os.path.isfile(path) and not self.overwrite:
+            return context.window_manager.invoke_props_dialog(self)
+        return self.execute(context)
+
+    def draw(self, context):
+        col = self.layout.column()
+        col.label(text="A settings baseline already exists for this file.",
+                  icon="ERROR")
+        col.label(text="Saving again will replace it.")
+        col.prop(self, "overwrite")
+
+    def execute(self, context):
+        path = baseline_mod.default_baseline_path()
+        if not path:
+            self.report({"ERROR"},
+                        "Save your .blend first — the baseline is written next "
+                        "to it.")
+            return {"CANCELLED"}
+        existed = os.path.isfile(path)
+        if existed and not self.overwrite:
+            # Reached execute without confirming (e.g. OK'd the dialog without
+            # ticking Overwrite): do not replace it silently.
+            self.report({"WARNING"},
+                        "A baseline already exists. Tick 'Overwrite' to replace "
+                        "it — nothing was written.")
+            return {"CANCELLED"}
+        try:
+            baseline_mod.save_baseline(context.scene, path,
+                                       overwrite=self.overwrite)
+        except Exception as exc:
+            self.report({"ERROR"}, "Couldn't write the baseline: %s" % exc)
+            return {"CANCELLED"}
+        # Reset the opt-in so the next click starts safe again.
+        self.overwrite = False
+        self.report(
+            {"INFO"},
+            "Settings baseline %s next to your .blend as '%s'. Your .blend was "
+            "not modified." % ("updated" if existed else "saved",
+                               os.path.basename(path)))
+        return {"FINISHED"}
+
+
 class FAILSAFE_OT_toggle_detail(Operator):
     bl_idname = "failsafe.toggle_detail"
     bl_label = "Toggle Finding Detail"
@@ -224,6 +315,8 @@ classes = (
     FAILSAFE_OT_select_object,
     FAILSAFE_OT_show_physics,
     FAILSAFE_OT_export_report,
+    FAILSAFE_OT_export_json,
+    FAILSAFE_OT_save_baseline,
     FAILSAFE_OT_toggle_detail,
     FAILSAFE_OT_set_filter,
 )

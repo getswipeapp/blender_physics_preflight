@@ -21,6 +21,25 @@ class Status:
     NA = "NOT APPLICABLE"
 
 
+# User-facing wording. The INTERNAL status values above are the machine contract
+# (JSON, CLI exit logic, tests) and never change. Only the words shown to a
+# person are mapped here — "UNKNOWN" reads like the tool shrugged, so people see
+# "Couldn't verify" instead (it means "not enough evidence to confirm", NOT
+# "something is wrong"). Keep JSON/CLI on the raw Status strings.
+DISPLAY_LABEL = {
+    Status.PASS: "Pass",
+    Status.WARNING: "Warning",
+    Status.FAIL: "Fail",
+    Status.UNKNOWN: "Couldn't verify",
+    Status.NA: "Not applicable",
+}
+
+
+def label(status):
+    """The user-facing word for a status (never used in JSON/CLI machine output)."""
+    return DISPLAY_LABEL.get(status, status)
+
+
 # Higher = more important. Used to roll per-object results up to a per-check
 # status and to sort the report.
 SEVERITY = {

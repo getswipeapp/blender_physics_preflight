@@ -1,5 +1,7 @@
 # Failsafe — Quick Start (for beginners)
 
+> **DRAFT — pending independent review. Not published.**
+
 This takes about two minutes. No account, no internet, nothing to configure.
 
 ## 1. Install
@@ -33,31 +35,33 @@ This takes about two minutes. No account, no internet, nothing to configure.
 
 | Status | Means |
 |--------|-------|
-| **PASS** | Checked, and it's fine. |
-| **WARNING** | Worth a look — might be intentional, might be a mistake. |
-| **FAIL** | A real problem that will likely hurt your render. |
-| **UNKNOWN** | Blender can't confirm this — treat it as "not verified," not a pass. |
-| **NOT APPLICABLE** | This check doesn't apply to your scene. |
+| **Pass** | Checked, and it's fine. |
+| **Warning** | Worth a look — might be intentional, might be a mistake. |
+| **Fail** | A real problem that will likely hurt your render. |
+| **Couldn't verify** | Blender couldn't give enough to confirm this — treat it as "not verified," not a pass. Each one shows why and what to do. |
+| **Not applicable** | This check doesn't apply to your scene. |
 
 - Click **Select Object** on any result to jump straight to the object it's about.
 - Click **Export Report** to save the report **as a text block inside your
-  `.blend`** and copy it to your clipboard. (It does **not** write a separate
-  `.txt` file to your computer — open it in Blender's Text Editor, or paste it
-  from the clipboard into any document.)
+  `.blend`** (or as a `.json` file you choose) and copy it to your clipboard.
+- Click **Save Baseline** to snapshot your current simulation settings to an
+  external file next to your `.blend` — later scans can then warn you if those
+  settings drift (check #26). It never changes your `.blend`.
 
-## Why "UNKNOWN" is a feature, not a bug
+## Why "Couldn't verify" is a feature, not a bug
 
 Other tools will cheerfully say "all good" when they actually can't tell. Failsafe
 won't. If Blender genuinely can't confirm something — a packed
-geometry-nodes bake, an in-memory cache, an unsaved file — it says **UNKNOWN** so
-you know to check it yourself, instead of trusting a green light that was never real.
+geometry-nodes bake, an in-memory cache, an unsaved file — it says **Couldn't
+verify** (with the reason and a next step) so you know to check it yourself,
+instead of trusting a green light that was never real.
 
 ## Troubleshooting
 
 - **No "Failsafe" tab?** Enable the add-on in **Preferences → Add-ons**
   (search its name; the checkbox should be ticked).
-- **Cache checks all say UNKNOWN?** Save your `.blend` and scan again.
-- **Overlap check says UNKNOWN?** Move the timeline to the first frame and
-  re-scan — it checks overlaps at the start frame.
+- **Cache checks all say "Couldn't verify"?** Save your `.blend` and scan again.
+- **Overlap check says "Couldn't verify"?** Move the timeline to the first frame
+  and re-scan — it checks overlaps at the start frame.
 - **Nothing to scan?** The scene may have no physics — that's a clean bill of
   health, not an error.

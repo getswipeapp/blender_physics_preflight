@@ -107,6 +107,157 @@ def _portability(raw):
     return (True, "")
 
 
+# Folders a consumer cloud client continuously syncs. A live sim cache inside one
+# is risky: the client can lock, partially upload, or re-download a frame file
+# mid-render, or an offline-only placeholder can sit where a real frame should be.
+# Match is on a whole path component, case-insensitively (A2, matches Cache
+# Guardian's cloud-path warning).
+_CLOUD_MARKERS = (
+    ("dropbox", "Dropbox"),
+    ("onedrive", "OneDrive"),
+    ("google drive", "Google Drive"),
+    ("googledrive", "Google Drive"),
+    ("my drive", "Google Drive"),
+    (".shortcut-targets-by-id", "Google Drive"),
+    ("com~apple~clouddocs", "iCloud Drive"),
+    ("mobile documents", "iCloud Drive"),
+    ("icloud drive", "iCloud Drive"),
+    ("pcloud", "pCloud"),
+    ("nextcloud", "Nextcloud"),
+    ("owncloud", "ownCloud"),
+    ("sync.com", "Sync.com"),
+    ("megasync", "MEGA"),
+    ("box sync", "Box"),
+)
+
+
+def cloud_sync_marker(path):
+    """Return the display name of a cloud-sync folder on ``path`` (a resolved
+    absolute path), or None. Read-only — just inspects the string."""
+    if not path:
+        return None
+    parts = [p.strip().lower() for p in os.path.normpath(path).split(os.sep)]
+    whole = os.path.normpath(path).lower()
+    for needle, label in _CLOUD_MARKERS:
+        if needle in parts:
+            return label
+        # Some markers (e.g. "google drive", "com~apple~clouddocs") appear as a
+        # component but may contain spaces/tildes the split keeps intact; also
+        # allow a substring match for those multi-token names.
+        if " " in needle or "~" in needle or "." in needle:
+            if needle in whole:
+                return label
+    return None
+
+
+def _dir_size(path):
+    """Best-effort total size in bytes of files directly in ``path`` (one level).
+    Read-only. Returns None if the directory can't be read."""
+    if not path or not os.path.isdir(path):
+        return None
+    total = 0
+    try:
+        with os.scandir(path) as it:
+            for de in it:
+                try:
+                    if de.is_file(follow_symlinks=False):
+                        total += de.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    return total
+
+
+def _point_cache_bytes(cache_dir, prefix, index, frames_present):
+    """Sum the on-disk size of the present point-cache frame files (A4)."""
+    if not cache_dir or not os.path.isdir(cache_dir) or not frames_present:
+        return None
+    total = 0
+    for fr in frames_present:
+        fn = "%s_%06d_%02d.bphys" % (prefix, fr, index)
+        p = os.path.join(cache_dir, fn)
+        try:
+            total += os.path.getsize(p)
+        except OSError:
+            continue
+    return total
+
+
+_BPHYS_RE = re.compile(r"^([0-9A-Fa-f]+)_(\d{6})_(\d{2})\.bphys$")
+
+
+def default_blendcache_dir():
+    """The ``blendcache_<file>`` folder next to a saved .blend, or None."""
+    base = blend_basename()
+    bdir = blend_dir()
+    if not base or not bdir:
+        return None
+    return os.path.join(bdir, "blendcache_" + base)
+
+
+def find_orphan_point_caches(scene, entries):
+    """Find .bphys files in the project's ``blendcache_<file>`` folder that no
+    point cache in the scene owns (A3, read-only — reports, never deletes).
+
+    Returns a list of dicts: {prefix, files, bytes}. Only runs for a saved file
+    with a default blendcache folder; external/custom cache dirs are skipped
+    (we can't know what else legitimately writes there)."""
+    base = blend_basename()
+    bdir = blend_dir()
+    if not base or not bdir:
+        return []
+    cache_dir = os.path.join(bdir, "blendcache_" + base)
+    # Prefixes the scene legitimately owns (default-location disk point caches).
+    owned = set()
+    for e in entries:
+        if e.kind == "point" and e.file_prefix and not e.external:
+            owned.add(e.file_prefix.upper())
+    return scan_orphans_in_dir(cache_dir, owned)
+
+
+def scan_orphans_in_dir(cache_dir, owned_prefixes):
+    """Pure scan: .bphys files in ``cache_dir`` whose prefix isn't in
+    ``owned_prefixes``. Returns [{prefix, files, bytes}]. Read-only."""
+    if not cache_dir or not os.path.isdir(cache_dir):
+        return []
+    owned = {p.upper() for p in owned_prefixes}
+    found = {}
+    try:
+        with os.scandir(cache_dir) as it:
+            for de in it:
+                m = _BPHYS_RE.match(de.name)
+                if not m:
+                    continue
+                pfx = m.group(1).upper()
+                if pfx in owned:
+                    continue
+                rec = found.setdefault(pfx, {"prefix": pfx, "files": 0, "bytes": 0})
+                rec["files"] += 1
+                try:
+                    rec["bytes"] += de.stat(follow_symlinks=False).st_size
+                except OSError:
+                    pass
+    except OSError:
+        return []
+    return list(found.values())
+
+
+def human_bytes(n):
+    """Compact human size, e.g. 1.5 GB. Read-only formatting helper."""
+    if n is None:
+        return "unknown size"
+    if n < 1024:
+        return "%d B" % n
+    units = ("KB", "MB", "GB", "TB")
+    f = float(n)
+    for u in units:
+        f /= 1024.0
+        if f < 1024.0:
+            return "%.1f %s" % (f, u)
+    return "%.1f PB" % (f / 1024.0)
+
+
 # ------------------------------------------------------------ data model ----
 
 class CacheEntry:
@@ -146,6 +297,10 @@ class CacheEntry:
         self.frame_skip = None            # point cache is_frame_skip (R15)
         self.baking_in_progress = False   # a bake is mid-flight (R16 test #4)
         self.uncertain_note = None        # specific reason a cache is UNKNOWN (R18)
+        self.file_prefix = None           # point-cache filename prefix (hex name)
+        self.cache_index = 0              # point-cache index (for filename)
+        self.disk_bytes = None            # total bytes of present cache files (A4)
+        self.cloud_marker = None          # name of a cloud-sync folder on the path (A2)
 
 
 # The single authoritative verdict every cache check reads from.
@@ -320,6 +475,8 @@ def inspect_point_cache(obj, system, pc, scene):
     cache_dir, prefix, raw = _point_cache_dir_and_prefix(obj, pc, e.external)
     e.cache_dir = cache_dir
     e.raw_path = raw
+    e.file_prefix = prefix
+    e.cache_index = int(getattr(pc, "index", 0))
     e.identity = ("point", cache_dir, prefix, int(getattr(pc, "index", 0)))
 
     # portability
@@ -346,6 +503,9 @@ def inspect_point_cache(obj, system, pc, scene):
     e.frames_expected = list(range(cs, ce + 1, step))
     e.frames_present, e.frames_empty, e.frames_unreadable = _scan_point_cache_files(
         cache_dir, prefix, int(getattr(pc, "index", 0)), e.frames_expected)
+    e.disk_bytes = _point_cache_bytes(cache_dir, prefix, e.cache_index,
+                                      e.frames_present)
+    e.cloud_marker = cloud_sync_marker(cache_dir)
     return e
 
 
@@ -463,6 +623,7 @@ def inspect_fluid_domain(obj, mod, scene):
     raw = getattr(ds, "cache_directory", "") or ""
     e.raw_path = raw
     e.cache_dir = _abspath(raw) if raw else None
+    e.cloud_marker = cloud_sync_marker(e.cache_dir)
     e.identity = ("fluid", e.cache_dir)
     e.uses_disk = True
     e.file_check_applicable = blend_is_saved() and bool(e.cache_dir)
@@ -526,6 +687,17 @@ def inspect_fluid_domain(obj, mod, scene):
             # a 0-byte/unreadable sub-cache frame is also a defect
             e.frames_empty |= (ce_empty & data_present)
             e.frames_unreadable |= (cu & data_present)
+
+    # total on-disk size across all fluid sub-caches (A4), best-effort
+    if e.cache_dir and os.path.isdir(e.cache_dir):
+        total = 0
+        got = False
+        for sub in ("data", "config", "mesh", "noise", "particles", "guiding"):
+            sz = _dir_size(os.path.join(e.cache_dir, sub))
+            if sz is not None:
+                total += sz
+                got = True
+        e.disk_bytes = total if got else None
     return e
 
 

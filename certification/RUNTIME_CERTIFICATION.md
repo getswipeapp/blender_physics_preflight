@@ -5,6 +5,93 @@ older references below predate the rename.)*
 
 ---
 
+## −1. Expanded release — hardening round (26 checks + isolated batch + baseline) — re-certification (2026-11-12)
+
+Adds the competitor-parity features **and** the render-farm hardening on top of the
+certified v1 build (§0 below, **preserved unchanged** as the prior certified
+baseline). New in this round:
+
+- **3 new checks** — #24 cloud-synced cache folder, #25 orphaned cache files,
+  #26 opt-in settings-baseline drift.
+- **Headless CLI** (`failsafe/cli.py`) — exit codes `0/1/2/3`, `--json` / `--text`.
+- **Crash/hang-isolated batch** (`failsafe/batch.py`) — `--batch <folder>` runs
+  **each file in its own Blender subprocess with a per-file timeout**
+  (`--timeout`, default 300 s). A corrupt or hanging `.blend` is isolated to
+  itself (recorded as an error, exit 3) while every other file still scans and the
+  worst exit wins. `--in-process` keeps the old single-process path for speed.
+- **JSON export** and **per-sim cache disk-usage** reporting.
+- **"Couldn't verify"** — the user-facing word for the internal `UNKNOWN` status.
+  Display-only: JSON/CLI/tests still emit the machine token `UNKNOWN`
+  (asserted by the suite), so automation keeps a stable contract. Every one carries
+  a reason + a next action (asserted).
+- **Save Baseline** — the one and only write action; writes only an **external**
+  `<blend>.failsafe-baseline.json` sidecar, never the `.blend`. It never writes
+  automatically and **never silently overwrites** an existing baseline (confirm
+  dialog + an explicit `overwrite` flag). #26 reports "Couldn't verify" for a
+  baseline with an unknown schema or one saved for a **different file**, so a
+  copied/foreign baseline can't yield a false result.
+
+**Package under test:** `dist/failsafe-<commit>.zip` (built with
+`blender --command extension build`). SHA-256 recorded in `certification/RELEASE_SHA256SUMS.txt`
+and in the review package; contents verified: 21 files incl. `LICENSE`,
+`baseline.py`, `cli.py`, `batch.py`; no test files.
+
+**Headless suite (now 264 tests, up from 162) — full matrix, all green:**
+
+| Blender build | Result | Tests | Evidence log |
+|---------------|--------|-------|--------------|
+| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 264 / 0 | `results/run_v3_4.2.log` |
+| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 264 / 0 | `results/run_v3_4.5.log` |
+| Blender 5.0.1 | ✅ PASS (rc=0) | 264 / 0 | `results/run_v3_5.0.log` |
+| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 264 / 0 | `results/run_v3_5.2.log` |
+
+All four are the same official arm64 builds used in §0/§1 (4.2.9/4.5.9/5.0.1 from
+isolated copies under `…/blender_runtime_certification/apps/`; 5.2.3 is the user's
+installed copy). The **102 new tests** over §0's 162 cover:
+
+- the cloud-folder / orphan-file / settings-baseline checks;
+- the **display-label** layer (and its assertion that JSON never emits
+  "Couldn't verify"), and that every "Couldn't verify" has a reason + next action;
+- the **baseline** audit — no auto-write, no silent overwrite (explicit flag),
+  fresh-path write, and #26 false-PASS guards: changed identity, missing settings,
+  corrupt JSON, unknown schema, and a baseline from a **different file** → all
+  "Couldn't verify", never PASS;
+- the **CLI** exit codes, timeout parsing, and aggregation;
+- **batch isolation** with a fake subprocess runner — a crash, a hang (timeout),
+  a corrupt file, and a launch failure are each isolated to their file; clean
+  files' results are preserved; worst exit wins; and an error beats clean files
+  while a blocking FAIL outranks an error (documented aggregation priority);
+- the **in-process** batch adversarial cases (garbage file, partial failure).
+
+**Headless CLI — captured proof (Blender 5.2.3):** `results/cli_proof_5.2.3.log`.
+`--text` on an empty scene → the 26-check report with "Couldn't verify" wording and
+**exit 0**; `--json` → the machine token stays `UNKNOWN` (never "Couldn't verify");
+`--help` and a bad argument → **exit 3** (usage). (Run with the source package on
+`sys.path`; the installed-extension entry point
+`bl_ext.user_default.failsafe.cli` is the same code path.)
+
+**Read-only safety:** unchanged from §0 and still asserted by the suite — a scan
+adds/removes/changes zero files. Save Baseline is the only writer and targets the
+external sidecar only.
+
+**Note on batch isolation evidence:** the subprocess *orchestration* (timeout,
+crash/hang handling, partial-result preservation, aggregation) is proven
+deterministically with a fake runner, so crashes/hangs are simulated without
+actually crashing Blender. The real end-to-end subprocess spawn is thin
+(`subprocess.run` with a timeout on `bpy.app.binary_path`); a live multi-process
+farm run on real hardware is the recommended pre-GA smoke test.
+
+**Open items (not claimed as done):**
+- **Live GUI** has not re-exercised the new **Save Baseline** (incl. the overwrite
+  dialog) / **Export JSON** buttons in a real window (their logic is covered
+  headless). Same remaining gaps as §0: Windows, a live Geometry-Nodes *disk* bake,
+  and the CLI `-f`/`-a` render entry points.
+- A **real** multi-process `--batch` run on a folder of large `.blend`s (vs. the
+  fake-runner unit proof) is the recommended pre-GA farm smoke test.
+- A **separate** first-time-user usability test is still outstanding.
+
+---
+
 ## 0. v1 feature round + review-response — re-certification (2026-11-12)
 
 After the UI correctness fix and the v1 features (status-aware titles,
@@ -93,7 +180,7 @@ Geometry-Nodes *disk* bake; and **Windows**.
 Each cell is the result of `blender -b --factory-startup -P tests/run_tests.py`
 run against an **official Blender build** (downloaded from download.blender.org,
 de-quarantined, run from an isolated copy — the user's installed 5.2.3 was used
-as-is). The suite covers: all 23 checks on crafted scenes, real heavy-sim bakes
+as-is). The suite covers: all 26 checks on crafted scenes, real heavy-sim bakes
 (cloth, soft body, particles, fluid incl. mesh/noise/particles/guiding/config),
 adversarial damaged caches, the single-source-of-truth verdict engine, the
 reliability guards (R14–R18), and read-only / filesystem-safety assertions.

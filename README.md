@@ -1,5 +1,8 @@
 # Failsafe
 
+> **DRAFT — not yet published.** This build is pending independent review. Nothing
+> here is final until that review passes and the owner approves.
+
 A read-only Blender add-on (extension) that catches physics and
 simulation-cache problems **before you render** — in one click.
 
@@ -8,8 +11,8 @@ simulation-cache problems **before you render** — in one click.
 > `is_baked` / `has_cache_baked_*` flags stay `True` after the files are gone
 > (verified on Blender 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3). Failsafe does
 > **not** trust those flags — it checks the actual files on disk, frame by
-> frame, and says **UNKNOWN** wherever Blender genuinely cannot prove the
-> answer. No false "all good".
+> frame, and says **Couldn't verify** wherever Blender genuinely cannot prove
+> the answer. No false "all good".
 
 - **Read-only.** It never edits your scene, writes cache files, or auto-fixes.
 - **Offline.** No network access, no telemetry, no licensing server.
@@ -27,7 +30,27 @@ simulation-cache problems **before you render** — in one click.
 Requires **Blender 4.2 LTS or newer** (4.2, 4.5, 5.0, 5.2 are the supported
 targets).
 
-## The 23 checks
+### Also runs headless (render farms / pipelines)
+
+No window, no person — just an exit code a build system can read:
+
+```bash
+blender -b shot.blend \
+  --python-expr "import bl_ext.user_default.failsafe.cli as c; c.main()" -- --json --strict
+```
+
+Exit codes: `0` clean · `1` blocking (a FAIL) · `2` unverified (a "Couldn't
+verify") · `3` usage/internal. `--batch <folder>` scans every `.blend` in a
+folder (worst result wins). Output is `--text` (default) or `--json`. Everything
+headless is read-only too — it only reads each file and prints a report.
+
+**Crash-isolated batch (render farms).** `--batch` runs **each file in its own
+Blender subprocess with a per-file timeout** (`--timeout <secs>`, default 300), so
+one corrupt or hanging `.blend` can't take the whole run down — it's recorded as
+an error and the batch keeps going, preserving every good file's result. Use
+`--in-process` for the faster single-process scan when you don't need isolation.
+
+## The 26 checks
 
 ### Physics Setup
 | # | Check |
@@ -52,20 +75,32 @@ targets).
 ### Simulation Caches
 | # | Check |
 |---|---|
-| 17 | Is the simulation baked? (UNKNOWN where Blender can't tell) |
+| 17 | Is the simulation baked? ("Couldn't verify" where Blender can't tell) |
 | 18 | **Every expected cache file present and non-empty** — not just the "baked" flag |
 | 19 | Baked range covers the render range |
 | 20 | **Frame gaps**: every frame cached, not a sample |
 | 21 | Two simulations writing to the same cache location |
 | 22 | Non-portable caches (absolute paths, outside the project) |
 | 23 | FPS / time-scale changed after baking |
+| 24 | Cache sitting in a cloud-synced folder (Dropbox, OneDrive, Google Drive, iCloud…) — can be locked or only partly downloaded at render time |
+| 25 | Orphaned cache files from renamed/deleted sims, wasting disk (safe to remove) |
+| 26 | Simulation settings changed since you saved a **baseline** (opt-in; compares against an external sidecar file, never written into your `.blend`) |
 
 Covered cache systems: Cloth, Soft Body, Rigid Body World, Particles, Fluid
 (Mantaflow), and Geometry Nodes simulation zones with **disk** bakes.
 
+Reports also show **total cache disk usage** per simulation, so you can see at a
+glance how much space a scene's bakes take.
+
 ## Statuses
 
-`PASS` · `WARNING` · `FAIL` · `UNKNOWN` · `NOT APPLICABLE`.
+`Pass` · `Warning` · `Fail` · `Couldn't verify` · `Not applicable`.
+
+"Couldn't verify" means Failsafe didn't have enough evidence to confirm the
+answer — **not** that something is wrong. Every one shows a plain reason and a
+next step. (Internally, and in `--json` / CLI output, this status is still the
+machine-readable token `UNKNOWN`, so automation keeps a stable contract; only the
+word shown to people changed.)
 
 Judgement calls (mass, size, origin, margin, intersections) are **WARNING**, not
 FAIL, to avoid false alarms. Structural mistakes that will certainly misbehave
@@ -75,16 +110,20 @@ collider not marked "Animated") are **FAIL**.
 ## Known limits (honest, by design)
 
 - **Geometry Nodes *packed* bakes (4.3+)** leave no Python-visible trace, so
-  "baked?" and "range" report **UNKNOWN** for them — never a false PASS.
+  "baked?" and "range" report **Couldn't verify** for them — never a false PASS.
+  (This is a Blender limitation, not a problem with your scene.)
 - **Rigid Body World** caches live inside the `.blend` (memory only), so the
-  on-disk file check is **NOT APPLICABLE** for them.
+  on-disk file check is **Not applicable** for them.
 - **Fluid "Replay"** is a playback cache, not a bake. It is reported as a
-  **WARNING**, never PASS.
-- **FPS at bake time is not recorded by Blender**, so check #23 is UNKNOWN by
-  nature (it flags a non-default time scale, and reminds you to re-bake).
+  **Warning**, never PASS.
+- **FPS at bake time is not recorded by Blender**, so check #23 is "Couldn't
+  verify" by nature (it flags a non-default time scale, and reminds you to re-bake).
+- The **baseline** check (#26) can only tell you settings changed since you saved
+  the baseline — not since the bake itself. Save the baseline right after baking
+  for it to mean the most; with no baseline saved it reports "Couldn't verify".
 - Dynamic Paint and hair dynamics are out of scope for v1.
 - Memory (non-disk) point caches can't be verified file-by-file — reported as
-  NOT APPLICABLE with a note.
+  Not applicable with a note.
 
 ## Development
 
@@ -97,9 +136,12 @@ failsafe/        the extension (this folder is what gets zipped)
   engine.py               Result model, check registry, scan driver
   util.py                 read-only scene / geometry helpers
   cache_inspect.py        file-level cache verification (the differentiator)
+  baseline.py             opt-in external settings-baseline (the one write action)
+  cli.py                  headless entry point (exit codes, --json, --batch)
+  batch.py                crash/hang-isolated batch (one subprocess per file)
   checks_setup.py         checks 1–16
-  checks_cache.py         checks 17–23
-  operators.py / ui.py / report.py
+  checks_cache.py         checks 17–26
+  operators.py / ui.py / report.py / handlers.py / help_text.py
 tests/
   fixtures.py             pass/fail scene builders
   run_tests.py            headless assertion harness

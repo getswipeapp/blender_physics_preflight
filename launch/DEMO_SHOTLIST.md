@@ -1,5 +1,7 @@
 # Failsafe — Screenshots & Demo Shot-List
 
+> **DRAFT — pending independent review. Not published.**
+
 Superhive listings sell on **genuine screenshots** and (optionally) a short demo.
 This is the shot-by-shot plan so you (Keith) can record them on your Mac. Every
 shot must be the real add-on on a real scene — no mockups (a selling rule).
@@ -40,7 +42,7 @@ Use a simple, good-looking scene.
 4. **Select Object in action** — a FAIL result beside the actual problem object
    selected in the viewport.
 5. **The two groups** — results showing the "Physics Setup" and "Simulation
-   Caches" headings, communicating breadth (23 checks).
+   Caches" headings, communicating breadth (26 checks).
 6. *(Optional)* **An honest UNKNOWN** — e.g. a packed geometry-nodes bake reported
    UNKNOWN, to show the product doesn't bluff.
 
@@ -53,7 +55,7 @@ Use a simple, good-looking scene.
 | 0:20–0:42 | Results appear. Pause on the **FAIL** for the single missing cache frame (#18/#20). Card: "Blender said this was baked. One frame is gone." |
 | 0:42–0:55 | Click **Select Object** → viewport jumps to the culprit. |
 | 0:55–1:10 | Scroll the rest: a couple of WARNINGs and an honest UNKNOWN. |
-| 1:10–1:25 | Card: "23 checks. Physics setup + real cache verification. One click." |
+| 1:10–1:25 | Card: "26 checks. Physics setup + real cache verification. One click." |
 | 1:25–1:30 | End card: "Failsafe" + the price. |
 
 ## C. Staging the hero "broken cache" scene (the strong version)
@@ -76,6 +78,6 @@ The best demo shows a **single missing frame**, which the fixed build now catche
 ## D. Before any of this goes public (reminder)
 
 - Independent **re-review PASS** on the fixed build.
-- Headless tests on Blender **4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** — ✅ done (162/162 each).
+- Headless tests on Blender **4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** — ✅ done (264/264 each).
 - Record on the newest Blender so the UI matches what buyers see.
 - Keith's final approval on screenshots, text, price, and publishing.
