@@ -1,5 +1,11 @@
 # Competitor Gap List — everything they do that we don't (yet)
 
+> **⚠️ Superseded for competitor facts (2026-11-13).** This Phase-0 gap list cites
+> unverified competitor data (e.g. "Render Ready $19/49/99", Cache Commander
+> pricing) that the independent review did not confirm. Use `strategy/FEATURE_MATRIX.md`
+> (verification-labelled) for competitor claims; treat the entries here as an
+> internal build-idea backlog, not verified market fact.
+
 Read from the live product pages 2026-11-12. This is the build list. Goal
 (Keith's): **do everything the competitors do, and more, for less money.**
 

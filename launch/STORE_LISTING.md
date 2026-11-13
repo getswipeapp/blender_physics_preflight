@@ -81,7 +81,7 @@ find out when the render looks wrong — or after you've wasted hours.
 22. Non-portable cache paths (absolute, or outside the project folder)
 23. FPS / time-scale reminder *(Blender doesn't record the FPS used at bake time, so this flags the risk and reminds you to re-bake if you changed it — it can't detect the change for you)*
 24. **Cache in a cloud-synced folder** (Dropbox, OneDrive, Google Drive, iCloud…) that can be locked or only partly downloaded while a render reads it
-25. **Orphaned cache files** left behind by renamed or deleted sims — wasted disk, safe to remove
+25. **Potentially unclaimed cache files** — cache files in the project's blendcache folder that no simulation in *this* scene owns (often left by a renamed or deleted object). Flagged as a WARNING to **review before deleting** — if another `.blend` shares the folder, they may belong to it. Failsafe never deletes anything.
 26. **Settings-baseline drift** *(opt-in)* — warns if a simulation's settings changed since you clicked **Save Baseline**. The baseline is an external sidecar file; **nothing is ever written into your `.blend`.** It can only tell you settings changed since the baseline was saved, not since the bake — so save it right after baking.
 
 Every report also shows **total cache disk usage** per simulation.
@@ -91,13 +91,15 @@ Every report also shows **total cache disk usage** per simulation.
 Failsafe covers **both** physics-setup checks **and** real file-level cache
 verification in one scan — and it verifies the actual cache files on disk instead
 of trusting Blender's "baked" flag, which stays on after the files are deleted.
-Most tools do one side or the other; Failsafe does both, and it says **Couldn't
-verify** rather than a false "all good" when Blender genuinely can't confirm
-something. It runs in the GUI **and headless** — one command with a build-readable
-exit code, plus a `--batch` mode for a whole folder — so the same checks guard a
-render farm or a pipeline, not just your desk. In batch mode each file is scanned
-in its **own Blender subprocess with a timeout**, so one corrupt or hanging
-`.blend` can't crash the whole run — it's logged and the batch carries on.
+Its strongest, clearest edge is that **frame-by-frame, required-range cache-file
+verification combined with physics-setup checks in one read-only tool** — and that
+when Blender genuinely can't confirm something, it says **Couldn't verify** instead
+of a false "all good." It runs in the GUI **and headless** — one command with a
+build-readable exit code, plus a `--batch` mode for a whole folder, each file in
+its own Blender subprocess with a timeout so one corrupt or hanging `.blend` can't
+crash the run. (Per-file subprocess batch isolation is useful but **not unique** —
+at least one other cache tool offers a comparable folder/batch mode; see
+`strategy/FEATURE_MATRIX.md` for the honest comparison.)
 
 ## How it works
 
@@ -107,11 +109,17 @@ in its **own Blender subprocess with a timeout**, so one corrupt or hanging
 3. Click **Scan Scene**.
 4. Read the results — plain English, colour-coded, each with a **Select Object**
    button. Treat **Couldn't verify** as "not verified," not as a pass.
-5. Optional: **Export Report** (JSON or a text block inside the `.blend`), and
-   **Save Baseline** — a one-click snapshot of your current sim settings to an
-   external sidecar file so check #26 can later tell you if they drifted. Save
-   Baseline is the *only* thing Failsafe ever writes, and it never touches your
-   `.blend`.
+5. Optional: **Export Text Report** or **Export JSON Report** — each writes the
+   report to a **Blender Text datablock** inside the current file (named
+   `failsafe_report...` / `failsafe_report.json`) and copies it to your clipboard.
+   You can read or save it from Blender's **Text Editor** (e.g. *Text → Save As*).
+   Creating that Text datablock changes the **in-memory** project (so Blender may
+   mark the file unsaved), but it does **not** write to disk on its own and never
+   alters your scene data. There is **no** external file-save dialog for reports.
+6. Optional: **Save Baseline** — a one-click snapshot of your current sim settings,
+   written to an **external** sidecar file (`<blend>.failsafe-baseline.json`) next
+   to your `.blend` so check #26 can later tell you if they drifted. This is the
+   only time Failsafe writes a file to disk, and it never touches your `.blend`.
 
 ## Honest limitations (shown openly in the listing)
 
@@ -134,9 +142,11 @@ in its **own Blender subprocess with a timeout**, so one corrupt or hanging
   5.0.1 and 5.2.3** (292/292 each) — on **macOS and Windows x64** (Windows via
   GitHub Actions `windows-2025`; see `certification/WINDOWS_CERTIFICATION.md`).
 - No internet, no account, no extra downloads. Fully offline, no telemetry.
-- Read-only: a scan never changes your scene or writes any file. The only writes
-  are the ones you click — Export Report, and Save Baseline (an external sidecar
-  file) — and neither modifies your `.blend`.
+- **Scanning is read-only** — a scan never changes your scene and never writes any
+  file. The only changes are ones **you** click: an **Export** adds a Text datablock
+  to the current project in memory (nothing written to disk until *you* save),
+  **Save Baseline** writes an external sidecar file next to your `.blend`. Neither
+  edits your scene data, and neither saves your `.blend` for you.
 
 ## Two ways to run it (artist vs. pipeline)
 
@@ -176,11 +186,20 @@ is perfect or will render identically. When Blender genuinely can't confirm
 something, it says **Couldn't verify** rather than a false "all good."
 
 **Does it change or fix my file?**
-No. **Scanning is read-only** — it never edits your scene and never writes a file.
-The only writes happen when **you** click **Export Report** (a text block inside the
-`.blend`, or a `.json` you choose) or **Save Baseline** (an **external** sidecar file
-next to your `.blend`). Neither modifies your `.blend`, and Save Baseline asks before
-overwriting an existing baseline.
+No. **Scanning is read-only** — it never edits your scene data. The only changes
+happen when **you** click a button. **Export Text Report** / **Export JSON Report**
+each add a Blender **Text datablock** to the current project (in memory) and copy it
+to your clipboard — that marks the project unsaved but writes nothing to disk until
+you save, and there's no external file dialog; you can save the text yourself from
+Blender's Text Editor. **Save Baseline** writes an **external** sidecar file next to
+your `.blend` (and asks before overwriting). Nothing Failsafe does edits your scene
+or saves your `.blend` for you.
+
+**How do I get a JSON file on disk?**
+In the GUI, click **Export JSON Report** and save the resulting Text datablock from
+Blender's Text Editor. For automation, run the **headless CLI with `--json`** — it
+prints the JSON to **standard output**, where your calling script can capture or
+redirect it to a file.
 
 **Is it an auto-fixer?**
 No. It's a diagnostic — it finds problems and points you at the object; you make the
@@ -201,10 +220,28 @@ curated set of key simulation settings **changed since you saved the baseline** 
 since the bake. A "settings unchanged" result means those tracked settings didn't
 move, not that every property is identical or that the bake itself is good.
 
+**Can it check automatically before I render?**
+Yes — there's an **opt-in "check before render"** you enable in the add-on's
+preferences. When it's on, Failsafe runs its scan once at the **start** of a render
+and, if it finds problems, prints a clear warning to the system console (so it also
+lands in render-farm logs) and updates a one-line banner in the panel. It runs
+**synchronously** (on a heavy scene it can add a short delay before rendering
+starts), it **never cancels or alters the render**, and it is **not** a guarantee the
+render will succeed — just an early heads-up. It's off by default.
+
+## Two workflows, one product
+
+The GUI panel and the headless CLI are **two ways to use the same single add-on**,
+not two separately sold editions. There is no "Pro" or "Pipeline" SKU — everything
+described here (panel, Export, Save Baseline, headless CLI, batch) ships together in
+one product.
+
 ## Licensing
 
-GPL-3.0-or-later (standard and required for Blender add-ons on Superhive). Source
-and license notices are distributed to buyers, as normal for GPL add-ons there.
+**GPL-3.0-or-later.** (Superhive permits either GPL or MIT for code products;
+Failsafe is licensed GPL-3.0-or-later — the standard choice for Blender add-ons that
+link Blender's GPL Python API.) Source and license notices are distributed to
+buyers, as normal for GPL add-ons there.
 
 ---
 
@@ -225,9 +262,10 @@ on it.
 ## Notes for Keith (not part of the public listing)
 
 - **Competitor names** are kept out of the public text (your selling rule). The
-  "what makes it different" section now describes Failsafe's own coverage rather
-  than claiming no rival combines both (Phase 0 didn't check every add-on
-  exhaustively). Say the word if you want a named comparison table.
+  "what makes it different" section describes Failsafe's own coverage and explicitly
+  notes the batch-isolation feature is **not unique** (Cache Commander offers a
+  comparable per-file background-process folder mode). The internal
+  `strategy/FEATURE_MATRIX.md` carries the honest, verification-labelled comparison.
 - **Feature accuracy:** checks #1, #3, #16, #18–#20 and #23 are described above to
   match the **fixed** build, not the first draft. #23 is honestly a reminder, not
   a detector. #26 (baseline) tells you settings changed since the baseline was
@@ -235,14 +273,14 @@ on it.
 - **Pre-launch gates (Superhive + your roadmap).** Done: multi-version headless
   tests (4.2/4.5/5.0/5.2, **292/292 each**, including the new cloud/orphan/baseline
   checks, the headless CLI, and adversarial batch cases) on **macOS and Windows x64**;
-  GUI acceptance on 5.2.3 (install, scan, deleted-cache catch, Save Baseline, Export
-  JSON — see `certification/GUI_ACCEPTANCE_933ea17.md`); Windows certification
-  (`certification/WINDOWS_CERTIFICATION.md`). Still open: real screenshots + optional
-  video; a **separate** beginner usability test (a first-time user tries it); and
-  your publishing approval. (The owner GUI
-  test and the beginner test are two different things — the first is done, the
-  second isn't. The GUI smoke-test has not yet re-exercised the new Save Baseline
-  button or the JSON export button in the live window.)
+  the **macOS** live-GUI acceptance (install, scan, deleted-cache catch, **Save
+  Baseline and Export JSON exercised in a real window** — see
+  `certification/GUI_ACCEPTANCE_933ea17.md`); Windows certification
+  (`certification/WINDOWS_CERTIFICATION.md`, headless). Still open: real screenshots +
+  optional video; a **separate** beginner usability test (a genuine first-time user
+  tries it); and your publishing approval. (The owner GUI test is done on macOS; the
+  beginner usability test is a different thing and is not. A Windows *GUI* session is
+  optional — Windows is certified headless.)
 - **Superhive listing requirements** (per ChatGPT citing Superhive's seller docs —
   confirm current specs on the site when you set up the listing): at least **5**
   gallery images at **2:1 ratio, ≥1200 px wide**; written install instructions and

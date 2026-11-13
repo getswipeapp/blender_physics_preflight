@@ -1,5 +1,11 @@
 # Competitor Census — Blender render-preflight / sim-cache checkers
 
+> **⚠️ Superseded for competitor facts (2026-11-13).** Prices/capabilities in this
+> Phase-0 census are unverified and partly stale (e.g. Cache Commander is ~$29 with
+> a background-process batch mode). Use `strategy/FEATURE_MATRIX.md` (verification-
+> labelled) as the source of truth; re-check each live Superhive listing before any
+> public use.
+
 *2026-11-11. Systematic sweep of Superhive (category/tag pages + searches), read
 off live listings. ~80–85% complete for the niche; the tier that matters most
 (tools that verify sim caches **on disk**) is believed fully captured. Prices are

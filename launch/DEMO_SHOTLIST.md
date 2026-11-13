@@ -20,8 +20,11 @@ recorder (macOS **Shift-Cmd-5**).
 Per ChatGPT's reading of Superhive's seller guidelines — double-check when you
 upload, as specs change:
 
-- **At least 5** gallery images.
-- **2:1 aspect ratio**, **minimum 1200 px wide** (PNG or JPG).
+- A **featured image** plus **at least one additional image** is the minimum
+  Superhive currently requires; it **recommends ~4–6 additional images**. (Aim for
+  5–6 strong shots regardless — more good images sell better. Confirm the current
+  minimum/recommended counts on Superhive when you upload.)
+- **2:1 aspect ratio**, **minimum 1200 px wide** (PNG or JPG) — confirm current specs.
 - Written **install instructions and FAQs on the product page itself** — a
   downloadable guide alone isn't enough. (Reuse `INSTALL_GUIDE.md` + a short FAQ.)
 - A demo **video is optional**, not required.
@@ -56,7 +59,7 @@ Use a simple, good-looking scene.
 | 0:42–0:55 | Click **Select Object** → viewport jumps to the culprit. |
 | 0:55–1:10 | Scroll the rest: a couple of WARNINGs and an honest UNKNOWN. |
 | 1:10–1:25 | Card: "26 checks. Physics setup + real cache verification. One click." |
-| 1:25–1:30 | End card: "Failsafe" + the price. |
+| 1:25–1:30 | End card: "Failsafe" (add the price here once it's decided). |
 
 ## C. Staging the hero "broken cache" scene (the strong version)
 

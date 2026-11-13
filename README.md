@@ -14,10 +14,16 @@ simulation-cache problems **before you render** — in one click.
 > frame, and says **Couldn't verify** wherever Blender genuinely cannot prove
 > the answer. No false "all good".
 
-- **Read-only.** It never edits your scene, writes cache files, or auto-fixes.
+- **Read-only scans.** A scan never edits your scene, writes cache files, or
+  auto-fixes. The only opt-in writes are a button-click away: **Export** builds an
+  in-memory Text datablock (nothing on disk until you save); **Save Baseline** writes
+  an external sidecar — never the `.blend`.
 - **Offline.** No network access, no telemetry, no licensing server.
 - **Plain English.** Every finding tells a beginner what is wrong, why it
   matters, and how to fix it, with a one-click "Select affected object".
+- **Optional "check before render".** An opt-in preference runs the scan once at
+  render start and prints a console warning — **synchronous and non-cancelling**; it
+  never stops or alters a render, and isn't a guarantee of render success.
 
 ## Install
 
@@ -40,8 +46,11 @@ blender -b shot.blend \
 ```
 
 Exit codes: `0` clean · `1` blocking (a FAIL) · `2` unverified (a "Couldn't
-verify") · `3` usage/internal. `--batch <folder>` scans every `.blend` in a
-folder (worst result wins). Output is `--text` (default) or `--json`. Everything
+verify") · `3` usage/internal. **`0` means no FAIL and nothing unverified — WARNINGs
+alone still return `0` unless you pass `--strict`** (which makes a WARNING blocking).
+`--batch <folder>` scans every `.blend` in a folder (worst result wins). Output is
+`--text` (default) or `--json`, printed to **stdout** (redirect it to save a file).
+Everything
 headless is read-only too — it only reads each file and prints a report.
 
 **Crash-isolated batch (render farms).** `--batch` runs **each file in its own
@@ -83,7 +92,7 @@ an error and the batch keeps going, preserving every good file's result. Use
 | 22 | Non-portable caches (absolute paths, outside the project) |
 | 23 | FPS / time-scale changed after baking |
 | 24 | Cache sitting in a cloud-synced folder (Dropbox, OneDrive, Google Drive, iCloud…) — can be locked or only partly downloaded at render time |
-| 25 | Orphaned cache files from renamed/deleted sims, wasting disk (safe to remove) |
+| 25 | Potentially unclaimed cache files no simulation in this scene owns (often from renamed/deleted sims) — flagged to review before deleting, since a shared folder may hold another `.blend`'s data |
 | 26 | Simulation settings changed since you saved a **baseline** (opt-in; compares against an external sidecar file, never written into your `.blend`) |
 
 Covered cache systems: Cloth, Soft Body, Rigid Body World, Particles, Fluid
@@ -175,4 +184,6 @@ blender --command extension build --source-dir ./failsafe --output-dir ./dist
 
 ## License
 
-GPL-3.0-or-later (required for Blender Python add-ons). See [LICENSE](LICENSE).
+GPL-3.0-or-later. (Superhive permits GPL or MIT for code products; Failsafe uses
+GPL-3.0-or-later, the standard choice for add-ons that link Blender's GPL Python
+API.) See [LICENSE](LICENSE).

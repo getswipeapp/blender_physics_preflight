@@ -13,25 +13,46 @@ Put a short version in the store listing; keep this full version in the repo.
 ## What it is
 
 A **read-only diagnostic**. A scan inspects your scene and reports problems. It
-does **not** change anything, fix anything, bake anything, or touch the internet.
-The only things it ever writes are ones **you** click, and **neither touches your
-`.blend`**:
+does **not** change your scene data, fix anything, bake anything, or touch the
+internet. The only changes come from a button **you** click:
 
-- **Export Report** — a text block inside the `.blend` (plus a clipboard copy), or
-  a `.json` file you choose.
+- **Export Text Report** / **Export JSON Report** — each builds the report and
+  writes it into a Blender **Text datablock** inside the current project (named
+  `failsafe_report…` / `failsafe_report.json`), then copies it to the clipboard.
+  There is **no external file-save dialog**. Note the honest nuance: creating a Text
+  datablock **does change the in-memory `.blend`** (Blender may mark the project
+  unsaved), even though it does **not** save the `.blend` to disk on its own and
+  never edits your scene/object data. To get a file, save the text yourself from
+  Blender's **Text Editor** (*Text → Save As*). For automation, use the headless
+  CLI below.
 - **Save Baseline** — a one-click snapshot of the current simulation settings,
   written to an **external sidecar file** (`<blend>.failsafe-baseline.json`) next
   to your `.blend`, so check #26 can later tell you if the settings drifted. This
-  is the only feature that writes a file to your computer, and only on your click.
+  is the only feature that writes a file to disk, only on your click, and it asks
+  before overwriting an existing baseline. It never touches your `.blend`.
+
+So: **scanning writes nothing**; an **Export** changes only the in-memory project
+(a new Text datablock, nothing on disk until you save); **Save Baseline** is the one
+action that writes a file to disk, and it's an external sidecar, never the `.blend`.
 
 The same checks also run **headless** (`failsafe/cli.py`) for render farms and
-pipelines — exit codes `0/1/2/3`, `--json`, and a `--batch <folder>` mode. The
-headless path is read-only too: it only opens and reads each `.blend`. In batch
-mode each file runs in its **own Blender subprocess with a per-file timeout**
+pipelines. With `--json` it prints a machine-readable report to **standard output**
+(where a calling script can capture or redirect it to a file — the CLI itself does
+not write report files). Exit codes:
+
+- `0` **clean** — no FAIL and nothing unverified. **Important:** WARNINGs alone
+  still return `0` unless you pass `--strict`, which makes a WARNING blocking (`1`).
+  So a `0` means "no failures," not "no warnings" — inspect the report or use
+  `--strict` if warnings should gate your pipeline.
+- `1` **blocking** — at least one FAIL (or, with `--strict`, a WARNING).
+- `2` **unverified** — no FAIL, but something is "Couldn't verify."
+- `3` **usage/open error** — bad arguments, or a file that couldn't be opened or
+  scanned (including a batch file that crashed or timed out).
+
+The headless path is read-only: it only opens and reads each `.blend`. In batch mode
+each file runs in its **own Blender subprocess with a per-file timeout**
 (`--timeout`), so a corrupt or hanging file is isolated to itself — recorded as an
-error while every other file still scans. (`--in-process` opts out for speed when
-isolation isn't needed.) The baseline's **Save Baseline** never overwrites an
-existing baseline without asking first, and never writes automatically.
+error while every other file still scans (`--in-process` opts out for speed).
 
 ## What "the file is there" does and doesn't prove
 
@@ -72,10 +93,11 @@ level verification is the right and sufficient check.
   sync-folder names (Dropbox, OneDrive, Google Drive, iCloud, etc.). It warns you
   the cache could be locked or only partly downloaded at render time; it can't see
   a given file's live sync state, so this is a heads-up, not a guarantee of trouble.
-- **Orphaned cache files (check #25)** are reported as *safe to remove* only for the
-  current `.blend`'s own cache folder. If another `.blend` shares that folder, files
-  this scene doesn't own may belong to it — Failsafe never deletes anything, so the
-  call to remove them stays yours.
+- **Potentially unclaimed cache files (check #25)** are cache files in the project's
+  blendcache folder that **no simulation in this scene owns**. They're flagged as a
+  WARNING to **review before deleting** — never as categorically safe to delete. If
+  another `.blend` shares that folder, files this scene doesn't own may belong to it.
+  Failsafe never deletes anything; the call stays yours.
 
 ## Checks that are judgement calls (WARNING, not FAIL)
 
@@ -112,3 +134,7 @@ Two checks were corrected after the code review and now behave honestly:
 - Not an auto-fixer (safe one-click fixes are a possible future update, not a v1
   promise, and not promised in the listing).
 - Not a simulation baker. It checks your bakes; it doesn't create them.
+- Not a render-blocker. The opt-in "check before render" (enabled in add-on
+  preferences) runs the scan once at render start and prints a console warning, but
+  it is **synchronous and non-cancelling** — it never stops or alters a render, and
+  it's not a guarantee the render will succeed.

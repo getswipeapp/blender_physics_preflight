@@ -28,6 +28,26 @@
 7. **Scans read-only; saving a baseline or exporting creates an external file** → stated in the short description, "How it works," FAQ, Requirements, and LIMITATIONS; baseline writes an **external** sidecar, never the `.blend`.
 8. **No overclaims** (no guaranteed render success, universal cache verification, Windows GUI certification, or commercial render-farm integrations) → FAQ answers each explicitly; the pipeline section says "a command-line capability … **not** a bundled integration with any render-farm product."
 
+## Commercial-review corrections (review of ebfd65e → this revision)
+
+The independent commercial review (2026-11-13) blocked the **copy** (not the
+engineering) and raised C01–C10 + polish. All are documentation-only fixes; code
+claims were re-verified against the source before editing:
+
+| ID | Correction made |
+|---|---|
+| **C01** | Batch isolation is **no longer called unique.** Cache Commander (verified on its live Superhive docs) offers a comparable per-file background-process folder mode; `FEATURE_MATRIX.md` now says so and records its **$29** reported price (reseller mirror). Lead differentiator is now frame-level cache verification + physics-setup + honest "Couldn't verify." |
+| **C02** | **GUI exports corrected everywhere.** `Export Text Report` / `Export JSON Report` write a Blender **Text datablock** + clipboard — **no file-save dialog.** Docs now say you save it yourself from the Text Editor, that this changes the **in-memory** project (not the `.blend` on disk, never scene data), and that **headless `--json` prints to stdout.** Real button names used. |
+| **C03** | Check #25 is now "**potentially unclaimed** cache files — review before deleting," never "safe to remove" (STORE_LISTING, LIMITATIONS, README). Matches the code's own cautious message. |
+| **C04** | `FEATURE_MATRIX.md` replaces unsupported "— no" cells with **? not verified**; only Cache Commander was re-verified. |
+| **C05** | Everywhere exit codes appear (LIMITATIONS, FEATURE_MATRIX, README): **exit `0` can include WARNINGs unless `--strict`** is now stated explicitly. (Verified in `cli.py` `verdict_exit_code`.) |
+| **C06** | Licensing corrected: **Superhive permits GPL or MIT** for code products; Failsafe uses GPL-3.0-or-later (STORE_LISTING, README). |
+| **C07** | Gallery requirement corrected in `DEMO_SHOTLIST.md`: **featured image + ≥1 additional** (Superhive recommends ~4–6), confirm on site. |
+| **C08** | Removed the unsupported "other tools bluff / say all-good" generalization from `INSTALL_GUIDE.md`; reworded to describe Failsafe's own behaviour only. |
+| **C09** | Removed the contradictory internal note; the macOS live-GUI acceptance **did** exercise Save Baseline + Export JSON (`GUI_ACCEPTANCE_933ea17.md`). |
+| **C10** | Removed the unverified "Render Ready $19+" comparator from the matrix. |
+| Polish | Real export button names in the guide; added the **opt-in non-cancelling "check before render"** feature (verified in `handlers.py`) to STORE_LISTING FAQ, LIMITATIONS, README; clarified GUI + CLI are **one product, two workflows** (no separate SKU); pricing stays UNDECIDED with observed prices recorded and provenance-labelled. |
+
 ## Independently verified (real execution evidence)
 
 - Code review findings **R19–R27 all PASS** (two review rounds).

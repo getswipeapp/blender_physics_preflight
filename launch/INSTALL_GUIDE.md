@@ -42,19 +42,25 @@ This takes about two minutes. No account, no internet, nothing to configure.
 | **Not applicable** | This check doesn't apply to your scene. |
 
 - Click **Select Object** on any result to jump straight to the object it's about.
-- Click **Export Report** to save the report **as a text block inside your
-  `.blend`** (or as a `.json` file you choose) and copy it to your clipboard.
+- Click **Export Text Report** or **Export JSON Report** to put the report into a
+  **Blender Text datablock** (named `failsafe_report…`) and copy it to your
+  clipboard. There's no "save file" dialog — to keep it as a file, open Blender's
+  **Text Editor**, pick that text, and use **Text → Save As**. (Creating the text
+  marks the project unsaved, but nothing is written to disk until you save, and your
+  scene isn't changed.) For automation, the **headless CLI `--json`** prints the
+  JSON to standard output instead.
 - Click **Save Baseline** to snapshot your current simulation settings to an
   external file next to your `.blend` — later scans can then warn you if those
-  settings drift (check #26). It never changes your `.blend`.
+  settings drift (check #26). It asks before overwriting, and never changes your
+  scene or your `.blend`.
 
 ## Why "Couldn't verify" is a feature, not a bug
 
-Other tools will cheerfully say "all good" when they actually can't tell. Failsafe
-won't. If Blender genuinely can't confirm something — a packed
-geometry-nodes bake, an in-memory cache, an unsaved file — it says **Couldn't
-verify** (with the reason and a next step) so you know to check it yourself,
-instead of trusting a green light that was never real.
+A green "all good" is only trustworthy if the tool actually checked. Failsafe is
+built so it won't claim a pass it can't back up: if Blender genuinely can't confirm
+something — a packed geometry-nodes bake, an in-memory cache, an unsaved file — it
+says **Couldn't verify** (with the reason and a next step) so you know to check it
+yourself, rather than showing a green light that was never real.
 
 ## Troubleshooting
 
@@ -63,5 +69,6 @@ instead of trusting a green light that was never real.
 - **Cache checks all say "Couldn't verify"?** Save your `.blend` and scan again.
 - **Overlap check says "Couldn't verify"?** Move the timeline to the first frame
   and re-scan — it checks overlaps at the start frame.
-- **Nothing to scan?** The scene may have no physics — that's a clean bill of
-  health, not an error.
+- **Nothing to scan?** The scene may have no physics or simulations for Failsafe to
+  check — that means there was nothing in its scope to flag, not that the whole scene
+  is render-ready. It's not an error.
