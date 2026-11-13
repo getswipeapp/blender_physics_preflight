@@ -1,0 +1,325 @@
+{
+  "tool": "failsafe",
+  "schema": 1,
+  "blender": "5.2.3 LTS",
+  "file": "/Users/ralph/Downloads/failsafe ui test.blend",
+  "summary": {
+    "FAIL": 3,
+    "WARNING": 1,
+    "UNKNOWN": 1,
+    "PASS": 8,
+    "NOT APPLICABLE": 13
+  },
+  "overall": "FAIL",
+  "checks": [
+    {
+      "id": 1,
+      "name": "Scale and rotation are applied",
+      "group": "Physics Setup",
+      "status": "PASS",
+      "display": "Scale and rotation are applied",
+      "findings": [
+        {
+          "status": "PASS",
+          "object": null,
+          "message": "Physics objects have scale applied (and rotation where it matters).",
+          "hint": ""
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Rigid body mass fits the object",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Rigid body mass fits the object",
+      "findings": []
+    },
+    {
+      "id": 3,
+      "name": "Objects don't overlap at the start",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Objects don't overlap at the start",
+      "findings": []
+    },
+    {
+      "id": 4,
+      "name": "Collision shape fits the object",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Collision shape fits the object",
+      "findings": []
+    },
+    {
+      "id": 5,
+      "name": "Colliders are clean, not too heavy",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Colliders are clean, not too heavy",
+      "findings": []
+    },
+    {
+      "id": 6,
+      "name": "Rigid Body World is enabled",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Rigid Body World is enabled",
+      "findings": []
+    },
+    {
+      "id": 7,
+      "name": "Cloth/soft body has a collider",
+      "group": "Physics Setup",
+      "status": "WARNING",
+      "display": "Cloth/soft body has no collider",
+      "findings": [
+        {
+          "status": "WARNING",
+          "object": "Cube",
+          "message": "Cloth collision is on, but no object in the scene has a Collision modifier to collide with.",
+          "hint": "Add a Collision modifier to the floor / collider object."
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "No negative or inherited scale",
+      "group": "Physics Setup",
+      "status": "PASS",
+      "display": "No negative or inherited scale",
+      "findings": [
+        {
+          "status": "PASS",
+          "object": null,
+          "message": "No negative scale or scaled parents on physics objects.",
+          "hint": ""
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Object sizes look realistic",
+      "group": "Physics Setup",
+      "status": "PASS",
+      "display": "Object sizes look realistic",
+      "findings": [
+        {
+          "status": "PASS",
+          "object": null,
+          "message": "Physics objects are a sensible real-world size.",
+          "hint": ""
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Object origin sits on its shape",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Object origin sits on its shape",
+      "findings": []
+    },
+    {
+      "id": 11,
+      "name": "Collision margin fits the object",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Collision margin fits the object",
+      "findings": []
+    },
+    {
+      "id": 12,
+      "name": "Moving colliders marked 'Animated'",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Moving colliders marked 'Animated'",
+      "findings": []
+    },
+    {
+      "id": 13,
+      "name": "Rigid body constraints are intact",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Rigid body constraints are intact",
+      "findings": []
+    },
+    {
+      "id": 14,
+      "name": "Collision modifier order is correct",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Collision modifier order is correct",
+      "findings": []
+    },
+    {
+      "id": 15,
+      "name": "Cloth pin group is valid",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Cloth pin group is valid",
+      "findings": []
+    },
+    {
+      "id": 16,
+      "name": "Fluid flow is inside the domain",
+      "group": "Physics Setup",
+      "status": "NOT APPLICABLE",
+      "display": "Fluid flow is inside the domain",
+      "findings": []
+    },
+    {
+      "id": 17,
+      "name": "Simulation is baked",
+      "group": "Simulation Caches",
+      "status": "FAIL",
+      "display": "Simulation isn't properly baked",
+      "findings": [
+        {
+          "status": "FAIL",
+          "object": "Cube",
+          "message": "Cloth is marked baked, but its cache on disk is incomplete.",
+          "hint": "Delete the cache and re-bake."
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "Cache files are really on disk",
+      "group": "Simulation Caches",
+      "status": "FAIL",
+      "display": "Cache files are missing from disk",
+      "findings": [
+        {
+          "status": "FAIL",
+          "object": "Cube",
+          "message": "Cloth is missing 1 of 250 required cache frame(s) on disk: 247. The render will freeze or re-simulate there.",
+          "hint": "Delete the cache and re-bake the full range."
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "name": "Baked frames cover the render",
+      "group": "Simulation Caches",
+      "status": "NOT APPLICABLE",
+      "display": "Baked frames cover the render",
+      "findings": []
+    },
+    {
+      "id": 20,
+      "name": "Every frame is cached (no gaps)",
+      "group": "Simulation Caches",
+      "status": "FAIL",
+      "display": "Some frames are missing from the cache",
+      "findings": [
+        {
+          "status": "FAIL",
+          "object": "Cube",
+          "message": "Cloth is missing 1 cached frame(s) across its 1\u2013250 range: 247. Each gap is a freeze/pop in the render.",
+          "hint": "Delete the cache and re-bake the full range."
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "name": "Each sim has its own cache folder",
+      "group": "Simulation Caches",
+      "status": "PASS",
+      "display": "Each sim has its own cache folder",
+      "findings": [
+        {
+          "status": "PASS",
+          "object": null,
+          "message": "Each simulation uses its own cache location.",
+          "hint": ""
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "name": "Cache is saved inside the project",
+      "group": "Simulation Caches",
+      "status": "PASS",
+      "display": "Cache is saved inside the project",
+      "findings": [
+        {
+          "status": "PASS",
+          "object": null,
+          "message": "All cache paths are relative and inside the project folder.",
+          "hint": ""
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "name": "Frame rate/speed unchanged since bake",
+      "group": "Simulation Caches",
+      "status": "UNKNOWN",
+      "display": "Bake timing couldn't be confirmed",
+      "findings": [
+        {
+          "status": "UNKNOWN",
+          "object": null,
+          "message": "Blender doesn't store the FPS used at bake time. Current scene FPS is 24 \u2014 if you changed FPS or time scale after baking, re-bake so the timing matches.",
+          "hint": "When in doubt, delete the cache and re-bake."
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "name": "Caches aren't in a cloud-synced folder",
+      "group": "Simulation Caches",
+      "status": "PASS",
+      "display": "Caches aren't in a cloud-synced folder",
+      "findings": [
+        {
+          "status": "PASS",
+          "object": null,
+          "message": "No simulation cache is inside a known cloud-synced folder.",
+          "hint": ""
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "name": "No orphaned cache files on disk",
+      "group": "Simulation Caches",
+      "status": "PASS",
+      "display": "No orphaned cache files on disk",
+      "findings": [
+        {
+          "status": "PASS",
+          "object": null,
+          "message": "Every cache file in the project's blendcache folder belongs to a simulation in this .blend.",
+          "hint": ""
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "name": "Tracked settings unchanged since baseline",
+      "group": "Simulation Caches",
+      "status": "PASS",
+      "display": "Tracked settings unchanged since baseline",
+      "findings": [
+        {
+          "status": "PASS",
+          "object": null,
+          "message": "The tracked settings of all 1 simulation are unchanged since the baseline was saved. (Failsafe compares a curated set of key settings, not every property, and this is not proof the bake itself is good.)",
+          "hint": ""
+        }
+      ]
+    }
+  ],
+  "cache_disk_usage": {
+    "total_bytes": 67605,
+    "items": [
+      {
+        "object": "Cube",
+        "system": "Cloth",
+        "bytes": 67605
+      }
+    ]
+  }
+}

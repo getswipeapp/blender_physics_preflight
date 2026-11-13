@@ -133,11 +133,17 @@ subprocess isolation — these are real OS processes, failed/killed for real. Th
 fake-runner unit tests additionally cover the decision logic deterministically.
 (Captured on 5.2.3; the subprocess code is version-agnostic.)
 
+**Live GUI acceptance — DONE (Blender 5.2.3):** `GUI_ACCEPTANCE_933ea17.md` (9/9
+PASS) exercised the new **Save Baseline** (incl. the overwrite preserve/replace
+outcomes) and **Export JSON** buttons in the real window on a disposable
+`.blend`, with before/after `.blend` hashes, the exported JSON
+(`results/gui_export_933ea17.json`) and a panel screenshot
+(`results/gui_acceptance_933ea17_panel.png`). Save Baseline left the `.blend`
+byte-identical; an ordinary scan wrote no files and changed no scene state.
+
 **Open items (not claimed as done):**
-- **Live GUI** has not re-exercised the new **Save Baseline** (incl. the overwrite
-  dialog) / **Export JSON** buttons in a real window (their logic is covered
-  headless). Same remaining gaps as §0: Windows, a live Geometry-Nodes *disk* bake,
-  and the CLI `-f`/`-a` render entry points.
+- Same remaining gaps as §0: Windows, a live Geometry-Nodes *disk* bake, and the
+  CLI `-f`/`-a` render entry points.
 - A **separate** first-time-user usability test is still outstanding.
 
 ---
