@@ -129,19 +129,33 @@ def scan_file_isolated(blend_file, blender_bin, timeout=DEFAULT_TIMEOUT,
         return {"file": blend_file, "exit": cli.EXIT_USAGE,
                 "error": "could not run Blender on this file: %s" % exc}
 
+    if rc != 0:
+        # A nonzero exit means the worker crashed or aborted. Do NOT trust a
+        # report it may have printed just before dying — a child can print clean
+        # JSON and then segfault. Record an error, never a pass. (R19)
+        tail = (err or out or "").strip().splitlines()
+        detail = tail[-1] if tail else "exit code %s" % rc
+        return {"file": blend_file, "exit": cli.EXIT_USAGE,
+                "error": "worker exited abnormally (rc=%s): %s" % (rc, detail)}
+
     data = _extract_json(out)
     if data is None:
-        # Child crashed, was killed, or produced no parseable report. Treat as an
-        # error for this file — never as a pass.
+        # Exited 0 but produced no parseable report. Treat as an error for this
+        # file — never as a pass.
         tail = (err or out or "").strip().splitlines()
         detail = tail[-1] if tail else "no report produced (rc=%s)" % rc
         return {"file": blend_file, "exit": cli.EXIT_USAGE,
                 "error": "scan produced no result (%s)" % detail}
 
     code = data.get("exit", cli.EXIT_USAGE)
+    # Preserve the actionable per-check findings (incl. exact missing frames) so a
+    # farm integration keeps them, not just the summary counts. (R25)
+    findings = [c for c in (data.get("checks") or [])
+                if c.get("status") not in ("PASS", "NOT APPLICABLE")]
     return {"file": blend_file, "exit": code,
             "overall": data.get("overall"),
             "summary": data.get("summary"),
+            "findings": findings,
             "cache_disk_usage": data.get("cache_disk_usage")}
 
 
@@ -187,6 +201,17 @@ def run_isolated_batch(folder, opts, blender_bin=None, timeout=DEFAULT_TIMEOUT,
         return cli.EXIT_USAGE, "Failsafe: not a folder: %s\n" % folder
 
     files = list_blend_files(folder)
+    if not files:
+        # Scanning zero files is NOT a clean result — an empty or wrong folder
+        # must never report success. (R20)
+        msg = "Failsafe: no .blend files found in %s\n" % folder
+        if opts.get("format") == "json":
+            msg = json.dumps({"tool": "failsafe", "schema": 1, "batch": True,
+                              "isolated": True, "folder": folder,
+                              "overall_exit": cli.EXIT_USAGE, "files": [],
+                              "error": "no .blend files found"}, indent=2)
+        return cli.EXIT_USAGE, msg
+
     per_file = []
     codes = []
     for f in files:

@@ -5,9 +5,10 @@ older references below predate the rename.)*
 
 ---
 
-## −1. Expanded release — hardening round (26 checks + isolated batch + baseline) — re-certification (2026-11-12)
+## −1. Expanded release — hardening + independent-review fixes (R19–R25) — re-certification (2026-11-12)
 
-Adds the competitor-parity features **and** the render-farm hardening on top of the
+Adds the competitor-parity features, the render-farm hardening, **and** the fixes
+for the independent review of commit `f148524` (blockers R19–R25), on top of the
 certified v1 build (§0 below, **preserved unchanged** as the prior certified
 baseline). New in this round:
 
@@ -31,23 +32,46 @@ baseline). New in this round:
   baseline with an unknown schema or one saved for a **different file**, so a
   copied/foreign baseline can't yield a false result.
 
-**Package under test:** `dist/failsafe-599463b.zip` (commit `599463b`, built with
-`blender --command extension build`). SHA-256 recorded in `certification/RELEASE_SHA256SUMS.txt`
-and in the review package; contents verified: 21 files incl. `LICENSE`,
-`baseline.py`, `cli.py`, `batch.py`; no test files.
+### Independent-review blockers fixed (review of `f148524`)
 
-**Headless suite (now 264 tests, up from 162) — full matrix, all green:**
+- **R19** — isolated batch now **rejects a nonzero subprocess exit even when the
+  child printed JSON** (a worker can print a clean report then segfault); recorded
+  as an error, never a pass.
+- **R20** — an empty / no-`.blend` batch folder now returns **exit 3 with "no
+  .blend files found"**, never a clean result (both isolated and `--in-process`).
+- **R21** — baseline identities are now `Object::System::SubName` (the modifier /
+  particle-system name), so two particle systems on one object no longer collide;
+  any residual identity collision is recorded and makes #26 report "Couldn't
+  verify", never PASS.
+- **R22** — the orphan check matches the **full `(prefix, index)` cache identity**
+  (a stale file sharing a live prefix but an unowned index is now caught), and a
+  directory that can't be read raises → #25 reports "Couldn't verify" instead of a
+  false clean.
+- **R23** — `display_name` no longer falls back to the positive title for UNKNOWN
+  (exception path included); #24/#25/#26 carry truthful `name_unknown` headlines.
+- **R24** — orphan ownership is gathered across **all scenes** in the `.blend`, so
+  a cache owned by another scene isn't flagged as an orphan.
+- **R25** — isolated batch JSON now preserves each file's **per-check findings
+  (incl. exact missing-frame messages)**, not just the summary counts.
+
+**Package under test:** `dist/failsafe-<commit>.zip` (built with
+`blender --command extension build`). SHA-256 recorded in
+`certification/RELEASE_SHA256SUMS.txt` and in the review package; contents
+verified: 22 files incl. `LICENSE`, `baseline.py`, `cli.py`, `batch.py`; no test
+files.
+
+**Headless suite (now 282 tests, up from 162) — full matrix, all green:**
 
 | Blender build | Result | Tests | Evidence log |
 |---------------|--------|-------|--------------|
-| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 264 / 0 | `results/run_v3_4.2.log` |
-| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 264 / 0 | `results/run_v3_4.5.log` |
-| Blender 5.0.1 | ✅ PASS (rc=0) | 264 / 0 | `results/run_v3_5.0.log` |
-| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 264 / 0 | `results/run_v3_5.2.log` |
+| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 282 / 0 | `results/run_v4_4.2.log` |
+| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 282 / 0 | `results/run_v4_4.5.log` |
+| Blender 5.0.1 | ✅ PASS (rc=0) | 282 / 0 | `results/run_v4_5.0.log` |
+| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 282 / 0 | `results/run_v4_5.2.log` |
 
 All four are the same official arm64 builds used in §0/§1 (4.2.9/4.5.9/5.0.1 from
 isolated copies under `…/blender_runtime_certification/apps/`; 5.2.3 is the user's
-installed copy). The **102 new tests** over §0's 162 cover:
+installed copy). The **120 new tests** over §0's 162 cover:
 
 - the cloud-folder / orphan-file / settings-baseline checks;
 - the **display-label** layer (and its assertion that JSON never emits
@@ -61,7 +85,11 @@ installed copy). The **102 new tests** over §0's 162 cover:
   a corrupt file, and a launch failure are each isolated to their file; clean
   files' results are preserved; worst exit wins; and an error beats clean files
   while a blocking FAIL outranks an error (documented aggregation priority);
-- the **in-process** batch adversarial cases (garbage file, partial failure).
+- the **in-process** batch adversarial cases (garbage file, partial failure);
+- **regression tests for every review blocker R19–R25** (abnormal-exit-with-JSON,
+  empty folder, particle-identity collision + ambiguity, full-identity orphan
+  match + unreadable-dir, UNKNOWN titles, multi-scene ownership, preserved
+  findings).
 
 **Headless CLI — captured proof (Blender 5.2.3):** `results/cli_proof_5.2.3.log`.
 `--text` on an empty scene → the 26-check report with "Couldn't verify" wording and
@@ -74,20 +102,24 @@ installed copy). The **102 new tests** over §0's 162 cover:
 adds/removes/changes zero files. Save Baseline is the only writer and targets the
 external sidecar only.
 
-**Note on batch isolation evidence:** the subprocess *orchestration* (timeout,
-crash/hang handling, partial-result preservation, aggregation) is proven
-deterministically with a fake runner, so crashes/hangs are simulated without
-actually crashing Blender. The real end-to-end subprocess spawn is thin
-(`subprocess.run` with a timeout on `bpy.app.binary_path`); a live multi-process
-farm run on real hardware is the recommended pre-GA smoke test.
+**Batch isolation — REAL multi-process proof (Blender 5.2.3):**
+`results/real_batch_proof_5.2.3.log` (script `render_proof/real_batch_proof.py`).
+Blender is the parent and spawns **actual child Blender processes**:
+- a real `good.blend` scanned clean in its own process (exit 0);
+- a real `corrupt.blend` → an **actual failed worker**, isolated as a per-file
+  error, with the good file's result preserved (partial recovery; overall exit 3);
+- a genuinely hanging child (`time.sleep(60)`) **killed at a 3 s timeout** and
+  recorded as a timeout (overall exit 3).
+This answers the reviewer's point that simulated failures don't prove real
+subprocess isolation — these are real OS processes, failed/killed for real. The
+fake-runner unit tests additionally cover the decision logic deterministically.
+(Captured on 5.2.3; the subprocess code is version-agnostic.)
 
 **Open items (not claimed as done):**
 - **Live GUI** has not re-exercised the new **Save Baseline** (incl. the overwrite
   dialog) / **Export JSON** buttons in a real window (their logic is covered
   headless). Same remaining gaps as §0: Windows, a live Geometry-Nodes *disk* bake,
   and the CLI `-f`/`-a` render entry points.
-- A **real** multi-process `--batch` run on a folder of large `.blend`s (vs. the
-  fake-runner unit proof) is the recommended pre-GA farm smoke test.
 - A **separate** first-time-user usability test is still outstanding.
 
 ---

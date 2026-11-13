@@ -196,50 +196,89 @@ def default_blendcache_dir():
     return os.path.join(bdir, "blendcache_" + base)
 
 
-def find_orphan_point_caches(scene, entries):
-    """Find .bphys files in the project's ``blendcache_<file>`` folder that no
-    point cache in the scene owns (A3, read-only — reports, never deletes).
+def _point_cache_identity_for(obj, pc):
+    """``(prefix.upper(), index)`` for a DEFAULT-location disk point cache, or
+    None for a memory cache (no files) or an external/custom-dir cache (we don't
+    police other folders)."""
+    external = bool(getattr(pc, "use_external", False))
+    use_disk = bool(getattr(pc, "use_disk_cache", False))
+    if external or not use_disk:
+        return None
+    _, prefix, _ = _point_cache_dir_and_prefix(obj, pc, False)
+    if not prefix:
+        return None
+    return (prefix.upper(), int(getattr(pc, "index", 0)))
 
-    Returns a list of dicts: {prefix, files, bytes}. Only runs for a saved file
-    with a default blendcache folder; external/custom cache dirs are skipped
-    (we can't know what else legitimately writes there)."""
-    base = blend_basename()
-    bdir = blend_dir()
-    if not base or not bdir:
-        return []
-    cache_dir = os.path.join(bdir, "blendcache_" + base)
-    # Prefixes the scene legitimately owns (default-location disk point caches).
+
+def owned_point_cache_identities(scenes):
+    """The ``(prefix, index)`` identity of every default-location disk point cache
+    across ALL the given scenes. Using every scene (not just the active one) means
+    a cache owned by another scene in the same .blend is never mistaken for an
+    orphan. (R24)"""
     owned = set()
-    for e in entries:
-        if e.kind == "point" and e.file_prefix and not e.external:
-            owned.add(e.file_prefix.upper())
+    for scene in scenes:
+        for obj in scene.objects:
+            pcs = []
+            for mod in obj.modifiers:
+                if mod.type in ("CLOTH", "SOFT_BODY"):
+                    pc = getattr(mod, "point_cache", None)
+                    if pc is not None:
+                        pcs.append(pc)
+            if obj.type == "MESH":
+                for psys in obj.particle_systems:
+                    pc = getattr(psys, "point_cache", None)
+                    if pc is not None:
+                        pcs.append(pc)
+            for pc in pcs:
+                ident = _point_cache_identity_for(obj, pc)
+                if ident is not None:
+                    owned.add(ident)
+    return owned
+
+
+def find_orphan_point_caches(scene, entries=None):
+    """Find .bphys files in the project's ``blendcache_<file>`` folder that no
+    point cache in **any scene of this .blend** owns (read-only — reports, never
+    deletes).
+
+    Returns a list of dicts: {prefix, index, files, bytes}. Ownership is matched
+    on the full ``(prefix, index)`` identity, not the prefix alone, so a stale
+    file sharing a live prefix but an unowned index is still caught (R22).
+
+    Raises ``OSError`` if the cache folder exists but can't be read, so the caller
+    can report "Couldn't verify" instead of a false clean."""
+    cache_dir = default_blendcache_dir()
+    if not cache_dir:
+        return []
+    owned = owned_point_cache_identities(bpy.data.scenes)
     return scan_orphans_in_dir(cache_dir, owned)
 
 
-def scan_orphans_in_dir(cache_dir, owned_prefixes):
-    """Pure scan: .bphys files in ``cache_dir`` whose prefix isn't in
-    ``owned_prefixes``. Returns [{prefix, files, bytes}]. Read-only."""
+def scan_orphans_in_dir(cache_dir, owned_identities):
+    """Pure scan: .bphys files in ``cache_dir`` whose ``(prefix, index)`` isn't in
+    ``owned_identities``. Returns [{prefix, index, files, bytes}]. Read-only.
+
+    Raises ``OSError`` if the directory can't be enumerated — a read failure must
+    surface as "Couldn't verify", never be silently treated as "no orphans". (R22)"""
     if not cache_dir or not os.path.isdir(cache_dir):
         return []
-    owned = {p.upper() for p in owned_prefixes}
+    owned = {(str(p).upper(), int(i)) for (p, i) in owned_identities}
     found = {}
-    try:
-        with os.scandir(cache_dir) as it:
-            for de in it:
-                m = _BPHYS_RE.match(de.name)
-                if not m:
-                    continue
-                pfx = m.group(1).upper()
-                if pfx in owned:
-                    continue
-                rec = found.setdefault(pfx, {"prefix": pfx, "files": 0, "bytes": 0})
-                rec["files"] += 1
-                try:
-                    rec["bytes"] += de.stat(follow_symlinks=False).st_size
-                except OSError:
-                    pass
-    except OSError:
-        return []
+    with os.scandir(cache_dir) as it:   # OSError here propagates by design
+        for de in it:
+            m = _BPHYS_RE.match(de.name)
+            if not m:
+                continue
+            key = (m.group(1).upper(), int(m.group(3)))
+            if key in owned:
+                continue
+            rec = found.setdefault(key, {"prefix": key[0], "index": key[1],
+                                         "files": 0, "bytes": 0})
+            rec["files"] += 1
+            try:
+                rec["bytes"] += de.stat(follow_symlinks=False).st_size
+            except OSError:
+                pass
     return list(found.values())
 
 

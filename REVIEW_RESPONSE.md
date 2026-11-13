@@ -307,19 +307,40 @@ new section (−1) certifies the expanded build.
   "Couldn't verify"/N-A and are labelled a **Blender limitation, not the user's
   fault**, with no implication that saving or re-baking fixes them.
 
+### Independent review of `f148524` — blockers R19–R25 resolved
+
+Each was reproduced with a regression test, then fixed, without weakening the
+read-only rule:
+
+- **R19** — isolated batch rejects a nonzero subprocess exit **even when the child
+  printed JSON** (print-then-segfault → error, never clean).
+- **R20** — empty / no-`.blend` folder returns **exit 3** ("no .blend files
+  found"), isolated and `--in-process`; never clean.
+- **R21** — baseline identity is now `Object::System::SubName`; two particle
+  systems on one object no longer collide, and any residual collision forces #26
+  to "Couldn't verify", never PASS.
+- **R22** — orphan match uses the full `(prefix, index)` identity, and an
+  unreadable blendcache folder → #25 "Couldn't verify" (not a false clean).
+- **R23** — `display_name` never borrows the positive title for UNKNOWN (exception
+  path too); #24/#25/#26 carry truthful `name_unknown` headlines.
+- **R24** — orphan ownership is gathered across **all scenes** in the `.blend`.
+- **R25** — isolated batch JSON preserves per-file **findings incl. exact
+  missing-frame messages**, not just summary counts.
+
 **Evidence**
-- Headless suite **264/264 on 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** (rc=0 each);
-  logs `certification/results/run_v3_{4.2,4.5,5.0,5.2}.log`.
+- Headless suite **282/282 on 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** (rc=0 each);
+  logs `certification/results/run_v4_{4.2,4.5,5.0,5.2}.log`. Includes a regression
+  test for every blocker R19–R25.
+- **Real multi-process batch proof** (Blender 5.2.3):
+  `certification/results/real_batch_proof_5.2.3.log` — actual child processes: a
+  good file scanned clean, a corrupt file isolated as an error with the good one
+  preserved, and a genuinely hanging child **killed at a 3 s timeout**. This is the
+  real end-to-end test the review asked for, not a simulation.
 - CLI proof `certification/results/cli_proof_5.2.3.log` (exit 0 clean / 3 usage;
   JSON keeps `UNKNOWN`; text shows "Couldn't verify").
-- Package `dist/failsafe-599463b.zip` (commit `599463b`); SHA-256 in `certification/RELEASE_SHA256SUMS.txt`.
+- Package `dist/failsafe-<commit>.zip`; SHA-256 in `certification/RELEASE_SHA256SUMS.txt`.
 - Feature matrix: `strategy/FEATURE_MATRIX.md` (consumer vs pipeline; vs competitors).
 
-**Batch-isolation caveat (stated plainly):** the subprocess orchestration is proven
-with a fake runner (deterministic crash/hang/timeout), not yet with a live
-multi-process run on a folder of large `.blend`s — that real farm smoke test is a
-recommended pre-GA step.
-
 **Still open (owner's call / not claimed):** live-GUI re-test of the new Save
-Baseline (incl. overwrite dialog) / Export JSON buttons; a real multi-process batch
-run; the separate first-time-user usability test; Windows; a live GN *disk* bake.
+Baseline (incl. overwrite dialog) / Export JSON buttons; the separate
+first-time-user usability test; Windows; a live GN *disk* bake.

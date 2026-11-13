@@ -175,6 +175,14 @@ def run_batch(folder, opts):
     if not os.path.isdir(folder):
         return EXIT_USAGE, "Failsafe: not a folder: %s\n" % folder
     files = _list_blend_files(folder)
+    if not files:
+        # Zero files scanned is never a clean result. (R20)
+        if opts["format"] == "json":
+            return EXIT_USAGE, _json.dumps(
+                {"tool": "failsafe", "schema": 1, "batch": True, "folder": folder,
+                 "overall_exit": EXIT_USAGE, "files": [],
+                 "error": "no .blend files found"}, indent=2)
+        return EXIT_USAGE, "Failsafe: no .blend files found in %s\n" % folder
     per_file = []
     codes = []
     for f in files:

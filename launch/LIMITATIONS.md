@@ -86,7 +86,7 @@ Two checks were corrected after the code review and now behave honestly:
 ## Platform / version coverage
 
 - **Minimum Blender: 4.2 LTS.**
-- The automated test suite passes **264/264 on Blender 4.2.9, 4.5.9, 5.0.1 and
+- The automated test suite passes **282/282 on Blender 4.2.9, 4.5.9, 5.0.1 and
   5.2.3** (headless), including real heavy-sim bakes (cloth, soft body, particle,
   fluid), damaged-cache cases, the cloud/orphan/baseline checks, the headless CLI,
   and adversarial batch cases (garbage files, partial-failure folders). See

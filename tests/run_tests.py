@@ -725,7 +725,7 @@ def new_feature_tests():
     g2 = bool(rx.match("notacache.txt"))
     out.append(("A3 bphys regex rejects junk", g2 is False, g2, False))
 
-    # --- A3 orphan scan: pure dir logic -------------------------------------
+    # --- A3 orphan scan: pure dir logic (identity = prefix + index) ---------
     odir = tempfile.mkdtemp(prefix="failsafe_orphan_")
     owned_pfx = "506C616E65"          # "Plane"
     orphan_pfx = "4F6C64"             # "Old"
@@ -735,8 +735,8 @@ def new_feature_tests():
     for fr in (1, 2):
         with open(os.path.join(odir, "%s_%06d_00.bphys" % (orphan_pfx, fr)), "wb") as fh:
             fh.write(b"y" * 50)
-    orphans = ci.scan_orphans_in_dir(odir, {owned_pfx})
-    out.append(("A3 orphan scan finds 1 unowned prefix",
+    orphans = ci.scan_orphans_in_dir(odir, {(owned_pfx, 0)})
+    out.append(("A3 orphan scan finds 1 unowned identity",
                 len(orphans) == 1, len(orphans), 1))
     if orphans:
         out.append(("A3 orphan scan counts 2 files",
@@ -744,8 +744,41 @@ def new_feature_tests():
         out.append(("A3 orphan scan sums 100 bytes",
                     orphans[0]["bytes"] == 100, orphans[0]["bytes"], 100))
     out.append(("A3 orphan scan: all owned -> none",
-                ci.scan_orphans_in_dir(odir, {owned_pfx, orphan_pfx}) == [],
+                ci.scan_orphans_in_dir(odir, {(owned_pfx, 0), (orphan_pfx, 0)}) == [],
                 "(list)", "[]"))
+    # R22: a file with an OWNED prefix but an UNOWNED index is still an orphan.
+    idir = tempfile.mkdtemp(prefix="failsafe_orphanidx_")
+    for fr in (1, 2):
+        with open(os.path.join(idir, "%s_%06d_00.bphys" % (owned_pfx, fr)), "wb") as fh:
+            fh.write(b"z" * 10)   # owned (prefix,0)
+    with open(os.path.join(idir, "%s_%06d_01.bphys" % (owned_pfx, 7)), "wb") as fh:
+        fh.write(b"z" * 10)       # same prefix, index 1 -> NOT owned -> orphan
+    idx_orphans = ci.scan_orphans_in_dir(idir, {(owned_pfx, 0)})
+    out.append(("R22 orphan scan matches full (prefix,index) identity",
+                len(idx_orphans) == 1 and idx_orphans[0]["index"] == 1,
+                idx_orphans, "1 orphan at index 1"))
+    # R22: a non-existent folder is simply "nothing there" -> [] (not an error).
+    out.append(("R22 missing folder -> [] (not an error)",
+                ci.scan_orphans_in_dir(os.path.join(odir, "nope"), set()) == [],
+                "[]", "[]"))
+    # R22: a folder that exists but can't be enumerated RAISES (so the check can
+    # report "Couldn't verify"), rather than silently returning [] = clean. We
+    # prove this by pointing the scanner at a regular file: os.scandir raises.
+    raised_oserr = False
+    try:
+        import failsafe.cache_inspect as _ci2
+        # bypass the isdir() guard by calling os.scandir semantics on a file:
+        _bad = os.path.join(odir, "%s_%06d_00.bphys" % (owned_pfx, 1))
+        orig_isdir = os.path.isdir
+        _ci2.os.path.isdir = lambda p: True       # force past the guard
+        try:
+            _ci2.scan_orphans_in_dir(_bad, set())
+        finally:
+            _ci2.os.path.isdir = orig_isdir
+    except OSError:
+        raised_oserr = True
+    out.append(("R22 unreadable folder raises (not silent clean)",
+                raised_oserr, raised_oserr, True))
 
     # --- A7 build_json_report: valid JSON, stable shape ---------------------
     results = engine.run_all(bpy.context)
@@ -1062,6 +1095,11 @@ def batch_adversarial_tests():
                 data.get("overall_exit") == 3, data.get("overall_exit"), 3))
     out.append(("batch partial: good file has no error key",
                 any("error" not in f for f in fls), exits, "a clean file present"))
+
+    # R20: in-process empty folder must not report clean either.
+    empty = tempfile.mkdtemp(prefix="failsafe_inproc_empty_")
+    code, txt = cli.run(argv=["--batch", empty, "--in-process", "--json"])
+    out.append(("R20 in-process empty folder -> exit 3", code == 3, code, 3))
     return out
 
 
@@ -1078,12 +1116,23 @@ def batch_isolation_tests():
 
     S, E = batch._MARK_START, batch._MARK_END
 
-    def good_stdout(fail=0, warn=0, unknown=0, exit_code=0):
+    def good_stdout(fail=0, warn=0, unknown=0, exit_code=0, checks=None):
         payload = {"overall": "PASS", "exit": exit_code,
                    "summary": {"FAIL": fail, "WARNING": warn, "UNKNOWN": unknown,
                                "PASS": 0, "NOT APPLICABLE": 0},
+                   "checks": checks or [],
                    "cache_disk_usage": []}
         return "Blender banner line\n" + S + _json.dumps(payload) + E + "\nquit"
+
+    # a FAIL report whose finding names a missing frame (for R25)
+    _fail_checks = [
+        {"id": 20, "name": "Every frame is cached (no gaps)", "group": "Simulation Caches",
+         "status": "FAIL", "display": "A cache frame is missing",
+         "findings": [{"status": "FAIL", "object": "Cloth",
+                       "message": "frame 7 is missing from the cache", "hint": "re-bake"}]},
+        {"id": 1, "name": "ok", "group": "Physics Setup", "status": "PASS",
+         "display": "ok", "findings": []},
+    ]
 
     # A fake runner keyed by the .blend path in the child argv, so one folder can
     # mix clean / crashing / hanging / corrupt files.
@@ -1099,8 +1148,12 @@ def batch_isolation_tests():
                 return (1, "Error: not a blend\n", "")       # opened, no markers
             if how == "launchfail":
                 raise OSError("blender binary missing")
+            if how == "jsoncrash":
+                # Printed a clean report, THEN exited abnormally (R19).
+                return (-11, good_stdout(exit_code=cli.EXIT_CLEAN), "late segfault")
             if how == "fail":
-                return (0, good_stdout(fail=2, exit_code=cli.EXIT_BLOCKING), "")
+                return (0, good_stdout(fail=1, exit_code=cli.EXIT_BLOCKING,
+                                       checks=_fail_checks), "")
             return (0, good_stdout(), "")                    # clean
         return runner
 
@@ -1131,6 +1184,26 @@ def batch_isolation_tests():
     out.append(("isolated launch failure -> error, exit 3",
                 pf["exit"] == 3 and "could not run Blender" in pf.get("error", ""),
                 pf.get("error"), "could not run Blender"))
+
+    # R19: a worker that printed CLEAN JSON but then exited abnormally must NOT be
+    # accepted as clean — the nonzero rc wins and it's an error.
+    pf = batch.scan_file_isolated("jc.blend", "blender", timeout=5,
+                                  runner=make_runner({"jc.blend": "jsoncrash"}))
+    out.append(("R19 clean JSON + abnormal exit -> error, not clean",
+                pf["exit"] == 3 and "error" in pf and "overall" not in pf,
+                {k: pf.get(k) for k in ("exit", "overall")}, "exit 3, error"))
+
+    # R25: a FAIL worker's per-file result preserves the findings, incl. the exact
+    # missing frame, not just the summary counts.
+    pf = batch.scan_file_isolated("fr.blend", "blender", timeout=5,
+                                  runner=make_runner({"fr.blend": "fail"}))
+    msgs = " ".join(f.get("message", "") for c in pf.get("findings", [])
+                    for f in c.get("findings", []))
+    out.append(("R25 per-file findings preserved (names missing frame)",
+                "frame 7 is missing" in msgs, msgs[:40], "frame 7 missing"))
+    out.append(("R25 PASS checks are dropped from findings",
+                all(c["status"] != "PASS" for c in pf.get("findings", [])),
+                [c["status"] for c in pf.get("findings", [])], "no PASS"))
 
     # --- partial-failure batch: clean + crash + hang + fail together ---------
     folder = tempfile.mkdtemp(prefix="failsafe_isobatch_")
@@ -1189,6 +1262,22 @@ def batch_isolation_tests():
         runner=make_runner({}))
     out.append(("iso batch: missing folder -> exit 3", agg3 == 3, agg3, 3))
 
+    # R20: an empty folder (zero .blend) must NOT report clean.
+    empty_dir = tempfile.mkdtemp(prefix="failsafe_isoempty_")
+    agg_empty, txt_empty = batch.run_isolated_batch(
+        empty_dir, {"format": "json"}, blender_bin="blender",
+        runner=make_runner({}))
+    out.append(("R20 iso empty folder -> exit 3, not clean",
+                agg_empty == 3, agg_empty, 3))
+    out.append(("R20 iso empty folder -> says no .blend found",
+                "no .blend files found" in txt_empty, "(msg)", "no .blend found"))
+    # a folder with only non-blend files is also "zero .blend" -> not clean
+    nb_dir = tempfile.mkdtemp(prefix="failsafe_isononblend_")
+    open(os.path.join(nb_dir, "notes.txt"), "wb").close()
+    agg_nb, _ = batch.run_isolated_batch(
+        nb_dir, {"format": "text"}, blender_bin="blender", runner=make_runner({}))
+    out.append(("R20 iso only-non-blend -> exit 3", agg_nb == 3, agg_nb, 3))
+
     # child argv shape: isolated, reads the file, no --factory-startup for farm
     argv = batch.build_child_argv("blenderbin", "/shots/x.blend")
     out.append(("iso child argv: background + file + python-expr",
@@ -1205,6 +1294,97 @@ def batch_isolation_tests():
                 == {"a": 1}, "parsed", {"a": 1}))
     out.append(("iso extract: no markers -> None",
                 batch._extract_json("just blender output") is None, "None", None))
+    return out
+
+
+def review_blocker_tests():
+    """Regression tests for independent-review blockers R21, R23, R24.
+    (R19/R20 are in the batch tests; R22/R25 in the orphan and batch tests.)"""
+    from failsafe import baseline as bl, engine, cache_inspect as ci
+    out = []
+
+    # --- R21: multiple particle systems on one object ----------------------
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    me = bpy.data.meshes.new("PM")
+    ob = bpy.data.objects.new("Emitter", me)
+    bpy.context.scene.collection.objects.link(ob)
+    for nm in ("PSysA", "PSysB"):
+        ob.modifiers.new(name=nm, type="PARTICLE_SYSTEM")
+        ob.particle_systems[-1].name = nm
+    fp = bl.capture_fingerprints(bpy.context.scene)
+    part_keys = [k for k, _ in bl.sim_items(fp) if "::Particles" in k]
+    out.append(("R21 two particle systems -> two distinct identities",
+                len(part_keys) == 2 and len(set(part_keys)) == 2,
+                part_keys, "2 distinct"))
+
+    meta26 = next(m for m in engine.CHECKS if m.id == 26)
+    mk = engine._mk(meta26)
+
+    class Ctx:
+        pass
+    ctx = Ctx()
+    ctx.scene = bpy.context.scene
+    ambig_fp = {"Cube::Cloth::Cloth": {"system": "Cloth", "kind": "point",
+                                       "settings": {"mass": 1.0},
+                                       "cache_range": [1, 10]},
+                bl.AMBIG_KEY: ["Cube::Cloth::Cloth"]}
+    orig = (bl.capture_fingerprints, bl.default_baseline_path, bl.load_baseline)
+    try:
+        bl.capture_fingerprints = lambda s: dict(ambig_fp)
+        bl.default_baseline_path = lambda: "/tmp/x.failsafe-baseline.json"
+        bl.load_baseline = lambda p: {"kind": "baseline",
+                                      "schema": bl.BASELINE_SCHEMA,
+                                      "fingerprints": dict(ambig_fp)}
+        w = worst_for_check(meta26.func(ctx, mk), 26)
+        out.append(("R21 ambiguous identity -> Couldn't verify (not PASS)",
+                    w == engine.Status.UNKNOWN, w, engine.Status.UNKNOWN))
+    finally:
+        bl.capture_fingerprints, bl.default_baseline_path, bl.load_baseline = orig
+
+    # --- R23: UNKNOWN titles never borrow the positive name ----------------
+    class FakeMeta:
+        name = "All good and fully verified"
+        name_bad = name_warn = name_unknown = name_na = None
+    dn = engine.display_name(FakeMeta, engine.Status.UNKNOWN)
+    out.append(("R23 UNKNOWN title isn't the positive name",
+                dn != FakeMeta.name and "good" not in dn.lower(), dn, "generic"))
+    for cid in (24, 25, 26):
+        m = next(mm for mm in engine.CHECKS if mm.id == cid)
+        out.append(("R23 check #%d has a truthful name_unknown" % cid,
+                    bool(m.name_unknown)
+                    and "couldn't" in m.name_unknown.lower(),
+                    m.name_unknown, "set + truthful"))
+
+    # --- R24: orphan ownership spans ALL scenes in the .blend --------------
+    # Disk-cache flags don't stick on a bare headless mesh, so stub the per-cache
+    # identity (returns one id per object) and prove ownership aggregates across
+    # every scene passed — the actual R24 fix (was: current scene only).
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scA = bpy.context.scene
+    scB = bpy.data.scenes.new("OtherScene")
+
+    def add_cloth(scene, objname):
+        m = bpy.data.meshes.new(objname + "_m")
+        o = bpy.data.objects.new(objname, m)
+        scene.collection.objects.link(o)
+        o.modifiers.new(name="Cloth", type="CLOTH")
+        return o
+    add_cloth(scA, "ClothA")
+    add_cloth(scB, "ClothB")
+
+    orig_ident = ci._point_cache_identity_for
+    try:
+        # any point cache -> a unique identity keyed by its owning object name
+        ci._point_cache_identity_for = lambda obj, pc: (obj.name.upper(), 0)
+        a_only = ci.owned_point_cache_identities([scA])
+        all_owned = ci.owned_point_cache_identities([scA, scB])
+    finally:
+        ci._point_cache_identity_for = orig_ident
+    out.append(("R24 ownership includes other scenes' caches",
+                ("CLOTHB", 0) in all_owned and ("CLOTHB", 0) not in a_only,
+                (sorted(a_only), sorted(all_owned)), "B included only in all"))
+    out.append(("R24 find_orphan scans all of bpy.data.scenes",
+                scB in list(bpy.data.scenes), True, True))
     return out
 
 
@@ -1368,6 +1548,7 @@ def main():
                                    + new_feature_tests() + baseline_tests()
                                    + batch_adversarial_tests()
                                    + batch_isolation_tests()
+                                   + review_blocker_tests()
                                    + couldnt_verify_tests()):
         if ok:
             passed += 1
@@ -1385,7 +1566,8 @@ def main():
              + len(roundtrip_fix_tests()) + len(render_check_tests())
              + len(title_tests()) + len(new_feature_tests())
              + len(baseline_tests()) + len(batch_adversarial_tests())
-             + len(batch_isolation_tests()) + len(couldnt_verify_tests()))
+             + len(batch_isolation_tests()) + len(review_blocker_tests())
+             + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

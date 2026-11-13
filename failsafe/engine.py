@@ -133,6 +133,13 @@ def check(id, name, group, name_bad=None, name_warn=None, name_unknown=None,
     return deco
 
 
+# Last-resort UNKNOWN headline. A check that lands on UNKNOWN without its own
+# name_unknown (e.g. it threw an exception) must NEVER borrow the positive title —
+# that reads as reassurance for an unverified result (the V01 bug). Fall back to a
+# neutral truthful phrase instead of ``name``. (R23)
+_GENERIC_UNKNOWN = "Couldn't verify this check"
+
+
 def display_name(meta, status):
     """The headline to show for a check given its (worst) status — never a
     stronger assertion than the status justifies."""
@@ -141,7 +148,7 @@ def display_name(meta, status):
     if status == Status.WARNING:
         return meta.name_warn or meta.name_bad or meta.name
     if status == Status.UNKNOWN:
-        return meta.name_unknown or meta.name
+        return meta.name_unknown or _GENERIC_UNKNOWN
     if status == Status.NA:
         return meta.name_na or meta.name
     return meta.name

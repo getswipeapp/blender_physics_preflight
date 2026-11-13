@@ -489,7 +489,8 @@ def c23_fps_timescale(ctx, mk):
 # -------------------------------------------------------------------- 24 ----
 @check(24, "Caches aren't in a cloud-synced folder", GROUP_CACHE,
        name_warn="A cache sits in a cloud-synced folder",
-       name_bad="A cache sits in a cloud-synced folder")
+       name_bad="A cache sits in a cloud-synced folder",
+       name_unknown="Couldn't check the cache folder location")
 def c24_cloud_path(ctx, mk):
     """Warn when a disk cache lives inside Dropbox/Google Drive/OneDrive/iCloud/
     etc. These clients can lock, partially upload, or swap in an offline
@@ -522,7 +523,8 @@ def c24_cloud_path(ctx, mk):
 # -------------------------------------------------------------------- 25 ----
 @check(25, "No orphaned cache files on disk", GROUP_CACHE,
        name_warn="Orphaned cache files are taking up space",
-       name_bad="Orphaned cache files are taking up space")
+       name_bad="Orphaned cache files are taking up space",
+       name_unknown="Couldn't check for orphaned cache files")
 def c25_orphan_files(ctx, mk):
     """Report .bphys files in the project's blendcache folder that no current
     simulation owns — usually left behind after renaming or deleting an object.
@@ -533,11 +535,19 @@ def c25_orphan_files(ctx, mk):
     if not cache_dir or not os.path.isdir(cache_dir):
         # No saved file / no default cache folder: nothing to assert.
         return []
-    orphans = ci.find_orphan_point_caches(ctx.scene, entries)
+    try:
+        orphans = ci.find_orphan_point_caches(ctx.scene, entries)
+    except OSError as exc:
+        # Couldn't read the folder — say so, never report a clean folder we
+        # didn't actually inspect. (R22)
+        return [mk(Status.UNKNOWN,
+                   "The blendcache folder couldn't be read (%s), so orphaned "
+                   "files can't be checked." % exc,
+                   hint="Check the folder's permissions, then scan again.")]
     if not orphans:
         return [mk(Status.PASS,
                    "Every cache file in the project's blendcache folder belongs "
-                   "to a simulation in the scene.")]
+                   "to a simulation in this .blend.")]
     files = sum(o["files"] for o in orphans)
     total = sum(o["bytes"] for o in orphans)
     return [mk(Status.WARNING,
@@ -554,7 +564,7 @@ def c25_orphan_files(ctx, mk):
 @check(26, "Settings unchanged since the baseline", GROUP_CACHE,
        name_warn="Settings changed since the baseline",
        name_bad="Settings changed since the baseline",
-       name_unknown="No settings baseline to compare against")
+       name_unknown="Couldn't compare against a settings baseline")
 def c26_settings_baseline(ctx, mk):
     """Compare current simulation settings to a user-saved baseline (the external
     ``.failsafe-baseline.json`` written by the Save Baseline button). Read-only:
@@ -606,10 +616,23 @@ def c26_settings_baseline(ctx, mk):
     saved = data.get("fingerprints", {})
     out = []
     matched = 0
-    for ident, cur in current.items():
+
+    # If two simulations collided onto one identity (e.g. an ambiguous name),
+    # a complete comparison isn't possible — report "Couldn't verify", never a
+    # PASS that could hide a changed sim. (R21)
+    ambig = set(bl.ambiguities(current)) | set(bl.ambiguities(saved))
+    for ident in sorted(ambig):
+        out.append(mk(Status.UNKNOWN,
+                      "%s matches more than one simulation, so its settings "
+                      "can't be compared reliably." % ident.replace("::", " — "),
+                      hint="Give the simulations distinct names, then click Save "
+                           "Baseline again."))
+
+    saved_sims = dict(bl.sim_items(saved))
+    for ident, cur in bl.sim_items(current):
         nice = ident.replace("::", " — ")
         obj_name = None if cur.get("kind") == "rbw" else ident.split("::")[0]
-        if ident not in saved:
+        if ident not in saved_sims:
             out.append(mk(Status.UNKNOWN,
                           "%s isn't in the baseline (added or renamed after it "
                           "was saved), so its settings can't be compared." % nice,
@@ -617,7 +640,7 @@ def c26_settings_baseline(ctx, mk):
                           hint="Click Save Baseline again after baking to "
                                "include it."))
             continue
-        changed = bl.diff_fingerprint(saved[ident], cur)
+        changed = bl.diff_fingerprint(saved_sims[ident], cur)
         if changed:
             preview = ", ".join(changed[:6])
             if len(changed) > 6:
@@ -631,8 +654,9 @@ def c26_settings_baseline(ctx, mk):
                                "reference."))
         else:
             matched += 1
-    for ident in saved:
-        if ident not in current:
+    current_sims = dict(bl.sim_items(current))
+    for ident in saved_sims:
+        if ident not in current_sims:
             out.append(mk(Status.UNKNOWN,
                           "%s is in the baseline but not in the scene now."
                           % ident.replace("::", " — "),
