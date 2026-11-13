@@ -1477,6 +1477,13 @@ def review_blocker_tests():
     out.append(("R27 PASS says 'tracked', not 'all settings'",
                 "tracked" in pass_msg and "curated" in pass_msg, pass_msg[:50],
                 "tracked + curated"))
+    # The COLLAPSED heading (display_name on PASS) must also say "Tracked", so the
+    # collapsed view carries the same limitation as the detailed message.
+    heading = engine.display_name(meta26b, engine.Status.PASS)
+    out.append(("R27 collapsed PASS heading says 'Tracked'",
+                "tracked" in heading.lower()
+                and "settings unchanged" in heading.lower(), heading,
+                "Tracked settings unchanged"))
     return out
 
 

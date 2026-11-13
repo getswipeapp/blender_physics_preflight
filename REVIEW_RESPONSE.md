@@ -344,8 +344,8 @@ read-only rule:
   compared".
 
 **Evidence**
-- Headless suite **291/291 on 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** (rc=0 each);
-  logs `certification/results/run_v5_{4.2,4.5,5.0,5.2}.log`. Includes a regression
+- Headless suite **292/292 on 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** (rc=0 each);
+  logs `certification/results/run_v6_{4.2,4.5,5.0,5.2}.log`. Includes a regression
   test for every blocker R19–R27.
 - **Real multi-process batch proof** (Blender 5.2.3):
   `certification/results/real_batch_proof_5.2.3.log` — actual child processes: a

@@ -65,6 +65,10 @@ R26–R27 (re-review of `1ac88ba`) — on top of the certified v1 build (§0 bel
   shrink range; float precision tightened from 5 → 10 dp so a small real change
   isn't hidden; and #26's PASS wording now says the **tracked** settings are
   unchanged (a curated subset), never "all settings".
+- **R26/R27 re-review follow-up (non-blocking UI note)** — #26's collapsed PASS
+  **heading** now reads "Tracked settings unchanged since baseline" (was "Settings
+  unchanged…"), so the collapsed view carries the same limitation as the detailed
+  message; a regression test asserts the heading.
 
 **Package under test:** `dist/failsafe-5a78d17.zip` (commit `5a78d17`, built with
 `blender --command extension build`). SHA-256 recorded in
@@ -72,18 +76,18 @@ R26–R27 (re-review of `1ac88ba`) — on top of the certified v1 build (§0 bel
 verified: 21 files incl. `LICENSE`, `baseline.py`, `cli.py`, `batch.py`; no test
 files.
 
-**Headless suite (now 291 tests, up from 162) — full matrix, all green:**
+**Headless suite (now 292 tests, up from 162) — full matrix, all green:**
 
 | Blender build | Result | Tests | Evidence log |
 |---------------|--------|-------|--------------|
-| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 291 / 0 | `results/run_v5_4.2.log` |
-| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 291 / 0 | `results/run_v5_4.5.log` |
-| Blender 5.0.1 | ✅ PASS (rc=0) | 291 / 0 | `results/run_v5_5.0.log` |
-| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 291 / 0 | `results/run_v5_5.2.log` |
+| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 292 / 0 | `results/run_v6_4.2.log` |
+| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 292 / 0 | `results/run_v6_4.5.log` |
+| Blender 5.0.1 | ✅ PASS (rc=0) | 292 / 0 | `results/run_v6_5.0.log` |
+| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 292 / 0 | `results/run_v6_5.2.log` |
 
 All four are the same official arm64 builds used in §0/§1 (4.2.9/4.5.9/5.0.1 from
 isolated copies under `…/blender_runtime_certification/apps/`; 5.2.3 is the user's
-installed copy). The **129 new tests** over §0's 162 cover:
+installed copy). The **130 new tests** over §0's 162 cover:
 
 - the cloud-folder / orphan-file / settings-baseline checks;
 - the **display-label** layer (and its assertion that JSON never emits

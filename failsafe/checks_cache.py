@@ -561,7 +561,7 @@ def c25_orphan_files(ctx, mk):
 
 
 # -------------------------------------------------------------------- 26 ----
-@check(26, "Settings unchanged since the baseline", GROUP_CACHE,
+@check(26, "Tracked settings unchanged since baseline", GROUP_CACHE,
        name_warn="Settings changed since the baseline",
        name_bad="Settings changed since the baseline",
        name_unknown="Couldn't compare against a settings baseline")

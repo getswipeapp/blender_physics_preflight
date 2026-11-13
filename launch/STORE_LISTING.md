@@ -6,7 +6,7 @@
 > build (see `REVIEW_RESPONSE.md`).
 > **Price:** _TBD_ — see "Pricing" at the bottom.
 > **Before publishing:** add real screenshots/video and get Keith's approval.
-> (Multi-version headless tests are **done** — 291/291 on 4.2.9 / 4.5.9 / 5.0.1 /
+> (Multi-version headless tests are **done** — 292/292 on 4.2.9 / 4.5.9 / 5.0.1 /
 > 5.2.3; see `certification/RUNTIME_CERTIFICATION.md`.) See `launch/LIMITATIONS.md`
 > and `launch/DEMO_SHOTLIST.md`.
 
@@ -131,7 +131,7 @@ in its **own Blender subprocess with a timeout**, so one corrupt or hanging
 ## Requirements
 
 - Blender **4.2 LTS or newer**. Automated headless tests pass on **4.2.9, 4.5.9,
-  5.0.1 and 5.2.3** (291/291 each). Windows is not yet tested — see `LIMITATIONS.md`.
+  5.0.1 and 5.2.3** (292/292 each). Windows is not yet tested — see `LIMITATIONS.md`.
 - No internet, no account, no extra downloads. Fully offline, no telemetry.
 - Read-only: a scan never changes your scene or writes any file. The only writes
   are the ones you click — Export Report, and Save Baseline (an external sidecar
@@ -170,7 +170,7 @@ The stack a buyer would otherwise assemble costs **≈ $24–27** (Phase 0). Opt
   a detector. #26 (baseline) tells you settings changed since the baseline was
   *saved*, not since the bake — described that way above, no overclaim.
 - **Pre-launch gates (Superhive + your roadmap).** Done: multi-version headless
-  tests (4.2/4.5/5.0/5.2, **291/291 each**, including the new cloud/orphan/baseline
+  tests (4.2/4.5/5.0/5.2, **292/292 each**, including the new cloud/orphan/baseline
   checks, the headless CLI, and adversarial batch cases); owner GUI smoke-test on
   5.2.3 (install, scan, deleted-cache catch, export). Still open: real screenshots
   + optional video; a **separate** beginner usability test (a first-time user
