@@ -66,7 +66,7 @@ R26–R27 (re-review of `1ac88ba`) — on top of the certified v1 build (§0 bel
   isn't hidden; and #26's PASS wording now says the **tracked** settings are
   unchanged (a curated subset), never "all settings".
 
-**Package under test:** `dist/failsafe-1ac88ba.zip` (commit `1ac88ba`, built with
+**Package under test:** `dist/failsafe-5a78d17.zip` (commit `5a78d17`, built with
 `blender --command extension build`). SHA-256 recorded in
 `certification/RELEASE_SHA256SUMS.txt` and in the review package; contents
 verified: 21 files incl. `LICENSE`, `baseline.py`, `cli.py`, `batch.py`; no test
