@@ -1,0 +1,41 @@
+00:00.375  object.modifier  | WARNING Object: "Cloth", Modifier: "Cloth", Cannot build springs
+00:00.375  object.modifier  | WARNING Object: "Cloth", Modifier: "Cloth", Cannot initialize cloth
+00:00.375  reports          | WARNING Path 'D:\a\blender_physics_preflight\blender_physics_preflight\blender_bin\blender-5.2.3-windows-x64\5.2\datafiles\assets\brushes\essentials_brushes-gp_draw.blend' cannot be made relative for Material 'Dots Stroke'
+Blender 5.2.3 LTS (hash e13b728c6880 built 2026-10-22 01:37:16)
+00:00.375  reports          | WARNING Path 'D:\a\blender_physics_preflight\blender_physics_preflight\blender_bin\blender-5.2.3-windows-x64\5.2\datafiles\assets\brushes\essentials_brushes-gp_draw.blend' cannot be made relative for Material 'Material'
+00:00.391  object.modifier  | WARNING Object: "Cloth", Modifier: "Cloth", Cannot build springs
+00:00.391  object.modifier  | WARNING Object: "Cloth", Modifier: "Cloth", Cannot initialize cloth
+Windows functional acceptance — Blender 5.2.3 LTS
+Platform: win32 | binary: D:\a\blender_physics_preflight\blender_physics_preflight\blender_bin\blender-5.2.3-windows-x64\blender.exe
+PASS - extension imports (installed+enabled) :: C:\Users\runneradmin\AppData\Roaming\Blender Foundation\Blender\5.2\extensions\user_default\failsafe
+PASS - 26 checks registered :: 26
+PASS - Save Baseline operator registered :: 
+PASS - Export JSON operator registered :: 
+PASS - label(UNKNOWN) == "Couldn't verify" :: Couldn't verify
+Info: Saved as "win fixture.blend"
+PASS - saved disposable .blend (Windows path) :: C:\Users\RUNNER~1\AppData\Local\Temp\failsafe_win_hkzx2mw3\win fixture.blend
+PASS - baseline path is next to the .blend (Windows) :: C:\Users\RUNNER~1\AppData\Local\Temp\failsafe_win_hkzx2mw3\win fixture.failsafe-baseline.json
+Info: Settings baseline saved next to your .blend as 'win fixture.failsafe-baseline.json'. Your .blend was not modified.
+PASS - Save Baseline created the external sidecar :: C:\Users\RUNNER~1\AppData\Local\Temp\failsafe_win_hkzx2mw3\win fixture.failsafe-baseline.json
+PASS - Save Baseline left the .blend byte-identical :: 
+PASS - baseline JSON valid + schema recorded :: 3
+PASS - #26 PASS right after Save Baseline :: PASS
+PASS - #26 WARNING after a tracked setting change :: WARNING
+Warning: A baseline already exists. Tick 'Overwrite' to replace it — nothing was written.
+PASS - Save Baseline refuses silent overwrite (CANCELLED + preserved) :: ['CANCELLED']
+Info: Settings baseline updated next to your .blend as 'win fixture.failsafe-baseline.json'. Your .blend was not modified.
+PASS - Save Baseline replaces on explicit overwrite :: ['FINISHED']
+Info: JSON report written to new Text 'failsafe_report.json' (inside the .blend) and copied to the clipboard
+PASS - Export JSON is valid JSON :: 
+PASS - Export JSON keeps machine token UNKNOWN :: 
+PASS - Export JSON never emits the display word 'Couldn't verify' :: 
+PASS - Export JSON has 26 checks :: 26
+PASS - #26 'Couldn't verify' has reason + next action :: No settings baseline has been saved yet,
+PASS - ordinary scan writes no new files :: []
+PASS - ordinary scan leaves the .blend unchanged :: 
+PASS - CLI --help -> exit 3 (Windows) :: 
+PASS - CLI bad arg -> exit 3 (Windows) :: 
+PASS - CLI clean scan -> exit 0 (Windows) :: 
+
+============================================================
+Windows functional acceptance: 24 passed, 0 failed, 24 total

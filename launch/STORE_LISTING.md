@@ -131,7 +131,8 @@ in its **own Blender subprocess with a timeout**, so one corrupt or hanging
 ## Requirements
 
 - Blender **4.2 LTS or newer**. Automated headless tests pass on **4.2.9, 4.5.9,
-  5.0.1 and 5.2.3** (292/292 each). Windows is not yet tested — see `LIMITATIONS.md`.
+  5.0.1 and 5.2.3** (292/292 each) — on **macOS and Windows x64** (Windows via
+  GitHub Actions `windows-2025`; see `certification/WINDOWS_CERTIFICATION.md`).
 - No internet, no account, no extra downloads. Fully offline, no telemetry.
 - Read-only: a scan never changes your scene or writes any file. The only writes
   are the ones you click — Export Report, and Save Baseline (an external sidecar
@@ -171,10 +172,12 @@ The stack a buyer would otherwise assemble costs **≈ $24–27** (Phase 0). Opt
   *saved*, not since the bake — described that way above, no overclaim.
 - **Pre-launch gates (Superhive + your roadmap).** Done: multi-version headless
   tests (4.2/4.5/5.0/5.2, **292/292 each**, including the new cloud/orphan/baseline
-  checks, the headless CLI, and adversarial batch cases); owner GUI smoke-test on
-  5.2.3 (install, scan, deleted-cache catch, export). Still open: real screenshots
-  + optional video; a **separate** beginner usability test (a first-time user
-  tries it); optional Windows check; and your publishing approval. (The owner GUI
+  checks, the headless CLI, and adversarial batch cases) on **macOS and Windows x64**;
+  GUI acceptance on 5.2.3 (install, scan, deleted-cache catch, Save Baseline, Export
+  JSON — see `certification/GUI_ACCEPTANCE_933ea17.md`); Windows certification
+  (`certification/WINDOWS_CERTIFICATION.md`). Still open: real screenshots + optional
+  video; a **separate** beginner usability test (a first-time user tries it); and
+  your publishing approval. (The owner GUI
   test and the beginner test are two different things — the first is done, the
   second isn't. The GUI smoke-test has not yet re-exercised the new Save Baseline
   button or the JSON export button in the live window.)

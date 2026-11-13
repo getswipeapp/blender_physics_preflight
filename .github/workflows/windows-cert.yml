@@ -6,19 +6,12 @@ name: Windows Certification
 # multi-process batch (clean / corrupt / timed-out worker) on Windows.
 #
 # NOTE: workflow_dispatch can only be triggered for workflows on the DEFAULT
-# branch. To run this from the feature branch without touching main, a push
-# trigger scoped to this branch is included; it is removed once results are in.
+# branch. While certifying from the feature branch, a push trigger scoped to this
+# branch was used to run it; now that results are recorded, it is removed. To run
+# again from the feature branch, temporarily re-add:
+#   push: { branches: [failsafe-expanded-hardening] }
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - failsafe-expanded-hardening
-    paths:
-      - ".github/workflows/windows-cert.yml"
-      - "failsafe/**"
-      - "tests/**"
-      - "certification/ci/**"
-      - "certification/render_proof/**"
 
 permissions:
   contents: read

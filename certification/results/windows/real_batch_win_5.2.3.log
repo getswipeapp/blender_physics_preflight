@@ -1,0 +1,61 @@
+Blender 5.2.3 LTS (hash e13b728c6880 built 2026-10-22 01:37:16)
+Parent Blender: D:\a\blender_physics_preflight\blender_physics_preflight\blender_bin\blender-5.2.3-windows-x64\blender.exe
+Blender version: 5.2.3 LTS
+Info: Saved as "good.blend"
+
+=== REAL batch: good.blend + corrupt.blend (timeout 180s) ===
+{
+  "tool": "failsafe",
+  "schema": 1,
+  "batch": true,
+  "isolated": true,
+  "folder": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\failsafe_realbatch_50xbcwlq",
+  "overall_exit": 3,
+  "files": [
+    {
+      "file": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\failsafe_realbatch_50xbcwlq\\corrupt.blend",
+      "exit": 3,
+      "error": "worker exited abnormally (rc=1): Blender quit"
+    },
+    {
+      "file": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\failsafe_realbatch_50xbcwlq\\good.blend",
+      "exit": 0,
+      "overall": "PASS",
+      "summary": {
+        "FAIL": 0,
+        "WARNING": 0,
+        "UNKNOWN": 0,
+        "PASS": 0,
+        "NOT APPLICABLE": 26
+      },
+      "findings": [],
+      "cache_disk_usage": {
+        "total_bytes": 0,
+        "items": []
+      }
+    }
+  ]
+}
+overall_exit = 3
+partial-recovery: OK - good scanned, corrupt isolated
+
+=== REAL timeout: a child that sleeps 60s, timeout=3s ===
+{
+  "tool": "failsafe",
+  "schema": 1,
+  "batch": true,
+  "isolated": true,
+  "folder": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\failsafe_realto_3z5zlgzq",
+  "overall_exit": 3,
+  "files": [
+    {
+      "file": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\failsafe_realto_3z5zlgzq\\hang.blend",
+      "exit": 3,
+      "error": "timed out after 3s \u2014 subprocess killed (isolated, so the batch continues)"
+    }
+  ]
+}
+real-timeout: OK - timed out after 3s — subprocess killed (isolated, so the batch continues)
+
+============================================================
+REAL BATCH PROOF: ALL CHECKS PASSED (real subprocesses)

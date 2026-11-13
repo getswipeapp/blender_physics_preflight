@@ -96,13 +96,14 @@ Two checks were corrected after the code review and now behave honestly:
   fluid), damaged-cache cases, the cloud/orphan/baseline checks, the headless CLI,
   and adversarial batch cases (garbage files, partial-failure folders). See
   `certification/RUNTIME_CERTIFICATION.md`.
-- **Still untested (not advertised as working):** Windows, a live geometry-nodes
-  *disk* bake, and the CLI `-f`/`-a` render-handler paths. The live GUI smoke-test
-  has not yet re-exercised the new **Save Baseline** / **Export JSON** buttons in a
-  real window (the logic behind them is covered by the headless suite). The listing
-  names only the versions actually tested.
-- Cache folder names and relative paths differ slightly between Windows and macOS;
-  a Windows pass is also on the pre-launch list.
+- **Windows: tested and passing.** The same 292/292 suite passes on **Blender
+  4.2.9 / 4.5.9 / 5.0.1 / 5.2.3 Windows x64**, plus a Windows functional acceptance
+  (install, baseline, JSON export, CLI exit codes) and a real multi-process batch,
+  run on GitHub Actions `windows-2025`. See `certification/WINDOWS_CERTIFICATION.md`.
+  (The Windows runs are **headless**; a Windows GUI session isn't claimed.)
+- **Still untested (not advertised as working):** a live geometry-nodes *disk* bake,
+  the CLI `-f`/`-a` render-handler paths, and a **Windows GUI** session (the macOS
+  GUI acceptance covered Save Baseline / Export JSON in a real window).
 
 ## What it is NOT
 

@@ -141,9 +141,17 @@ outcomes) and **Export JSON** buttons in the real window on a disposable
 (`results/gui_acceptance_933ea17_panel.png`). Save Baseline left the `.blend`
 byte-identical; an ordinary scan wrote no files and changed no scene state.
 
+**Windows — CERTIFIED (real execution):** `WINDOWS_CERTIFICATION.md`. The full
+292-test suite passed **292/292 on Blender 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3 Windows
+x64**, plus a Windows functional acceptance (24/24: install, registration,
+baseline, JSON export, CLI exit codes via a real child process) and a **real
+multi-process batch** on Windows (good scanned, corrupt isolated, a hanging child
+killed at a 3 s timeout). Run on GitHub Actions `windows-2025`
+(`.github/workflows/windows-cert.yml`); logs in `results/windows/`.
+
 **Open items (not claimed as done):**
-- Same remaining gaps as §0: Windows, a live Geometry-Nodes *disk* bake, and the
-  CLI `-f`/`-a` render entry points.
+- A **Windows GUI** session (the Windows runs are headless), a live
+  Geometry-Nodes *disk* bake, and the CLI `-f`/`-a` render entry points.
 - A **separate** first-time-user usability test is still outstanding.
 
 ---
