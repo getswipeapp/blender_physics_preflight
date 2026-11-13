@@ -31,8 +31,9 @@ Legend: ✅ yes · ~ partial · — no · ? not stated on the page.
 
 **Where Failsafe leads:** per-frame disk verification, an honest "Couldn't verify"
 status, physics-setup **and** cache checks in one tool, and — unique here — a
-**crash/hang-isolated** batch mode built for render farms. Target price **$12**
-sits under Cache Guardian and at/under the others while covering more.
+**crash/hang-isolated** batch mode suitable for render farms. **Price is UNDECIDED**
+(owner decision); the competitor list prices above are recorded as factual
+reference only, not as a savings claim or a positioning recommendation.
 
 **Not claimed (scope, by choice):** general render-readiness (missing textures, no
 camera, output paths) is SceneCheck/Render Ready territory and is deliberately out

@@ -138,6 +138,69 @@ in its **own Blender subprocess with a timeout**, so one corrupt or hanging
   are the ones you click — Export Report, and Save Baseline (an external sidecar
   file) — and neither modifies your `.blend`.
 
+## Two ways to run it (artist vs. pipeline)
+
+Failsafe ships one add-on with two independent surfaces. You only need the first.
+
+**For artists — the panel (GUI).** Everything above: open the sidebar, click
+**Scan Scene**, read colour-coded results, jump to problem objects, and optionally
+Export a report or Save a settings baseline. No command line, no setup.
+
+**For technical directors / render farms — headless (optional).** The same checks
+also run from the command line with **no GUI**, returning a build-readable **exit
+code** (`0` clean · `1` blocking fail · `2` couldn't-verify · `3` usage/open error),
+optional `--json`, and a `--batch <folder>` mode that scans a whole folder of
+`.blend` files. In batch mode each file runs in its **own Blender subprocess with a
+per-file timeout**, so one corrupt or hanging file is isolated and logged while the
+rest keep scanning. This is a command-line capability you can wire into your own
+scripts — **not** a bundled integration with any specific render-farm product.
+
+Both surfaces share the exact same check engine, so a finding is identical whether a
+person clicks Scan or a script runs the CLI. Artists can ignore the headless side
+entirely.
+
+## FAQ
+
+**Will Failsafe guarantee my render succeeds?**
+No. It's a pre-render diagnostic that catches common, specific physics and cache
+problems. It can't promise a render will complete or look correct — plenty can go
+wrong that's outside its scope (textures, lighting, memory, render settings). It
+reduces one category of nasty surprises; it doesn't guarantee success.
+
+**Does it check every possible cache problem?**
+No. It verifies that the expected cache files **exist on disk and are non-empty
+across the required frame range** — which catches the big ones (deleted caches,
+partial bakes, missing first/last frames, 0-byte frames). It does **not** parse the
+internal contents of each cache file, so it can't prove the simulation data itself
+is perfect or will render identically. When Blender genuinely can't confirm
+something, it says **Couldn't verify** rather than a false "all good."
+
+**Does it change or fix my file?**
+No. **Scanning is read-only** — it never edits your scene and never writes a file.
+The only writes happen when **you** click **Export Report** (a text block inside the
+`.blend`, or a `.json` you choose) or **Save Baseline** (an **external** sidecar file
+next to your `.blend`). Neither modifies your `.blend`, and Save Baseline asks before
+overwriting an existing baseline.
+
+**Is it an auto-fixer?**
+No. It's a diagnostic — it finds problems and points you at the object; you make the
+fix. (Safe one-click fixes are a possible future update, not a v1 promise.)
+
+**Does it need the internet or an account?**
+No. Fully offline. No account, no telemetry, no downloads.
+
+**Which Blender versions are supported?**
+Blender **4.2 LTS or newer**. The automated test suite passes 292/292 on
+**4.2.9 / 4.5.9 / 5.0.1 / 5.2.3**, on **macOS and Windows x64** (headless). A Windows
+*GUI* session is not separately certified; the live-window acceptance was done on
+macOS.
+
+**What about check #26, the settings baseline?**
+It's opt-in. After you click **Save Baseline**, later scans can warn you if a
+curated set of key simulation settings **changed since you saved the baseline** — not
+since the bake. A "settings unchanged" result means those tracked settings didn't
+move, not that every property is identical or that the bake itself is good.
+
 ## Licensing
 
 GPL-3.0-or-later (standard and required for Blender add-ons on Superhive). Source
@@ -145,20 +208,19 @@ and license notices are distributed to buyers, as normal for GPL add-ons there.
 
 ---
 
-## Pricing (Keith decides)
+## Pricing — UNDECIDED (Keith decides)
 
-The stack a buyer would otherwise assemble costs **≈ $24–27** (Phase 0). Options:
+**No price is set.** This is an open owner decision, deliberately left blank in
+this draft. No savings figure, "replaces N add-ons" math, or buyer-demand estimate
+is asserted here — those would be guesses, and the selling rule is no invented
+claims.
 
-| Price | Angle | Trade-off |
-|------|-------|-----------|
-| **$12** | "Half the price of the 2–3 add-ons it replaces." | Phase 0's lead pick; clean value story. |
-| **$14–15** | Premium but still well under the stack. | Best margin if the file-check angle lands. |
-| **$9.99** | Matches the closest competitor head-on. | Easier to justify now: 26 checks + a headless CLI + batch mode is at or above what the $9–$14 rivals offer. |
-
-> **On the "$9 baseline":** ChatGPT's doc review said to keep $9 as the baseline.
-> Your own Phase 0 report (§0) **explicitly withdrew** the $9 figure — it was
-> "introduced in AI-drafted roadmap text, not specified by Keith… It is
-> withdrawn." So price is genuinely open; $9 is an option, not a required floor.
+For reference only (facts, not a recommendation): competitors' own list prices at
+the time the feature matrix was compiled are recorded in
+`strategy/FEATURE_MATRIX.md`. Any earlier "$9 baseline" or "$12 target" figures
+from draft roadmap text are **withdrawn** — they were AI-drafted, not specified by
+Keith. Set the price yourself when you're ready; the listing text does not depend
+on it.
 
 ## Notes for Keith (not part of the public listing)
 
