@@ -69,8 +69,11 @@ jobs:
         if: matrix.version == '5.2.3'
         shell: pwsh
         run: |
-          & "$env:BLENDER" --command extension build --source-dir ./failsafe --output-dir ./dist
-          $zip = Get-ChildItem -Path ./dist -Filter "failsafe-*.zip" | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $src = (Resolve-Path failsafe).Path
+          $out = (Resolve-Path dist).Path
+          & "$env:BLENDER" --command extension build --source-dir "$src" --output-dir "$out"
+          $zip = Get-ChildItem -Path dist -Filter "failsafe-*.zip" | Select-Object -First 1
           if (-not $zip) { throw "extension build produced no zip" }
           Write-Host "Built: $($zip.FullName)"
           $fp = $zip.FullName
