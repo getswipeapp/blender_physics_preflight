@@ -70,7 +70,7 @@ R26–R27 (re-review of `1ac88ba`) — on top of the certified v1 build (§0 bel
   unchanged…"), so the collapsed view carries the same limitation as the detailed
   message; a regression test asserts the heading.
 
-**Package under test:** `dist/failsafe-5a78d17.zip` (commit `5a78d17`, built with
+**Package under test:** `dist/failsafe-933ea17.zip` (commit `933ea17`, built with
 `blender --command extension build`). SHA-256 recorded in
 `certification/RELEASE_SHA256SUMS.txt` and in the review package; contents
 verified: 21 files incl. `LICENSE`, `baseline.py`, `cli.py`, `batch.py`; no test
