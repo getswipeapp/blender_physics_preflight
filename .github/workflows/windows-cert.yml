@@ -77,10 +77,18 @@ jobs:
           if (-not $zip) { throw "extension build produced no zip" }
           Write-Host "Built: $($zip.FullName)"
           $fp = $zip.FullName
-          & "$env:BLENDER" -b --python-expr "import bpy; print('INSTALL', list(bpy.ops.extensions.package_install_files(filepath=r'$fp', repo='user_default', enable_on_install=True)))" 2>&1 | Tee-Object -FilePath "win_install_5.2.3.log"
+          & "$env:BLENDER" -b --python-expr "import bpy; print('INSTALL', list(bpy.ops.extensions.package_install_files(filepath=r'$fp', repo='user_default', enable_on_install=True))); bpy.ops.wm.save_userpref()" 2>&1 | Tee-Object -FilePath "win_install_5.2.3.log"
           & "$env:BLENDER" -b -P certification/ci/win_acceptance.py 2>&1 | Tee-Object -FilePath "win_acceptance_5.2.3.log"
           $code = $LASTEXITCODE
           Write-Host "Acceptance exit code: $code"
+          # Blender may exit 0 even if the Python script raised or logged failures,
+          # so gate on the log contents too (belt + braces).
+          if (Select-String -Path "win_acceptance_5.2.3.log" -Pattern "FAIL -" -Quiet) {
+            Write-Host "Acceptance reported FAIL lines"; exit 1
+          }
+          if (-not (Select-String -Path "win_acceptance_5.2.3.log" -Pattern ", 0 failed," -Quiet)) {
+            Write-Host "Acceptance did not reach its summary (0 failed) line"; exit 1
+          }
           if ($code -ne 0) { exit $code }
 
       - name: REAL multi-process batch proof (Windows, 5.2.3)

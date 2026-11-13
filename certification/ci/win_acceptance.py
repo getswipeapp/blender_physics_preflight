@@ -43,6 +43,16 @@ def main():
     print("Platform:", sys.platform, "| binary:", bpy.app.binary_path)
 
     # --- install / registration ---------------------------------------------
+    # Ensure the installed extension is ENABLED in THIS (background) process, so
+    # its register() runs and the operators exist. `blender -b` does not reliably
+    # auto-enable it unless the installing process saved userprefs; enabling here
+    # makes the check deterministic (a real GUI install enables it the same way).
+    import addon_utils
+    try:
+        addon_utils.enable(MOD, default_set=False, persistent=True)
+    except Exception as e:
+        print("addon_utils.enable note:", repr(e))
+
     import importlib
     try:
         pkg = importlib.import_module(MOD)
