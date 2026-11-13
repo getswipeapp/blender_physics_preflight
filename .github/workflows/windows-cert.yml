@@ -1,11 +1,24 @@
 name: Windows Certification
 
-# Manually triggered real-Windows certification of the expanded Failsafe build.
+# Real-Windows certification of the expanded Failsafe build.
 # Runs the full headless test suite on four official Blender Windows x64 builds,
 # plus extension install/registration, functional acceptance, and a REAL
 # multi-process batch (clean / corrupt / timed-out worker) on Windows.
+#
+# NOTE: workflow_dispatch can only be triggered for workflows on the DEFAULT
+# branch. To run this from the feature branch without touching main, a push
+# trigger scoped to this branch is included; it is removed once results are in.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - failsafe-expanded-hardening
+    paths:
+      - ".github/workflows/windows-cert.yml"
+      - "failsafe/**"
+      - "tests/**"
+      - "certification/ci/**"
+      - "certification/render_proof/**"
 
 permissions:
   contents: read
