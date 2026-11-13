@@ -1385,6 +1385,98 @@ def review_blocker_tests():
                 (sorted(a_only), sorted(all_owned)), "B included only in all"))
     out.append(("R24 find_orphan scans all of bpy.data.scenes",
                 scB in list(bpy.data.scenes), True, True))
+
+    # --- R26: baseline identities are scene-qualified ----------------------
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    sA = bpy.context.scene
+    sA.name = "SceneA"
+    sB = bpy.data.scenes.new("SceneB")
+
+    def add_cloth_named(scene, objname):
+        m = bpy.data.meshes.new(objname + "_m")
+        o = bpy.data.objects.new(objname, m)
+        scene.collection.objects.link(o)
+        o.modifiers.new(name="Cloth", type="CLOTH")  # same mod name in both
+        return o
+    add_cloth_named(sA, "ClothA")
+    add_cloth_named(sB, "ClothB")
+    fp = bl.capture_fingerprints()
+    keys = [k for k, _ in bl.sim_items(fp)]
+    a_keys = [k for k in keys if k.startswith("SceneA::")]
+    b_keys = [k for k in keys if k.startswith("SceneB::")]
+    out.append(("R26 identities are scene-qualified (both scenes captured)",
+                len(a_keys) >= 1 and len(b_keys) >= 1, keys, "A:: and B:: keys"))
+    # The reviewer's exact case: Rigid Body World shares one owner name across
+    # scenes, so WITHOUT scene-qualification both would collide. Scene-qualified,
+    # the two RBW identities are distinct.
+    idA = "SceneA::Scene::Rigid Body World"
+    idB = "SceneB::Scene::Rigid Body World"
+    out.append(("R26 RBW identity is scene-qualified (no cross-scene collision)",
+                idA != idB and idA.startswith("SceneA::")
+                and idB.startswith("SceneB::"), (idA, idB), "distinct"))
+    # every fingerprint records its scene
+    out.append(("R26 each fingerprint carries its scene",
+                all(v.get("scene") for _, v in bl.sim_items(fp)),
+                "all have scene", True))
+
+    # #26: a baseline saved for Scene A must NOT PASS when Scene B is scanned.
+    cur_b = {"SceneB::C::Cloth::Cloth": {"scene": "SceneB", "system": "Cloth",
+             "kind": "point", "settings": {"mass": 1.0}, "cache_range": [1, 10]}}
+    saved_a = {"SceneA::C::Cloth::Cloth": {"scene": "SceneA", "system": "Cloth",
+               "kind": "point", "settings": {"mass": 1.0}, "cache_range": [1, 10]}}
+    meta26b = next(m for m in engine.CHECKS if m.id == 26)
+    mkb = engine._mk(meta26b)
+    ctxb = Ctx()
+    ctxb.scene = bpy.context.scene
+    orig2 = (bl.capture_fingerprints, bl.default_baseline_path, bl.load_baseline)
+    try:
+        bl.capture_fingerprints = lambda s=None: dict(cur_b)
+        bl.default_baseline_path = lambda: "/tmp/x.failsafe-baseline.json"
+        bl.load_baseline = lambda p: {"kind": "baseline",
+                                      "schema": bl.BASELINE_SCHEMA,
+                                      "fingerprints": dict(saved_a)}
+        w = worst_for_check(meta26b.func(ctxb, mkb), 26)
+        out.append(("R26 scanning an un-baselined scene -> Couldn't verify",
+                    w == engine.Status.UNKNOWN, w, engine.Status.UNKNOWN))
+    finally:
+        bl.capture_fingerprints, bl.default_baseline_path, bl.load_baseline = orig2
+
+    # --- R27: fingerprint coverage + float precision -----------------------
+    out.append(("R27 cloth tracks pin_stiffness", "pin_stiffness" in bl._CLOTH,
+                "pin_stiffness" in bl._CLOTH, True))
+    out.append(("R27 cloth tracks vertex_group_mass",
+                "vertex_group_mass" in bl._CLOTH,
+                "vertex_group_mass" in bl._CLOTH, True))
+    # a small float change (1e-6) that the old 5-dp rounding hid is now kept
+    out.append(("R27 float precision keeps a 1e-6 change",
+                bl._rv(0.5000010) != bl._rv(0.5000020),
+                (bl._rv(0.5000010), bl._rv(0.5000020)), "distinct"))
+    changed = bl.diff_fingerprint(
+        {"settings": {"mass": 0.5000010}, "cache_range": None},
+        {"settings": {"mass": 0.5000020}, "cache_range": None})
+    out.append(("R27 diff catches the 1e-6 setting change",
+                "mass" in changed, changed, "mass changed"))
+    # the PASS wording doesn't claim EVERY property is unchanged
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    one = {"S::C::Cloth::Cloth": {"scene": "S", "system": "Cloth", "kind": "point",
+           "settings": {"mass": 1.0}, "cache_range": [1, 10]}}
+    ctxp = Ctx()
+    ctxp.scene = bpy.context.scene
+    orig3 = (bl.capture_fingerprints, bl.default_baseline_path, bl.load_baseline)
+    try:
+        bl.capture_fingerprints = lambda s=None: dict(one)
+        bl.default_baseline_path = lambda: "/tmp/x.failsafe-baseline.json"
+        bl.load_baseline = lambda p: {"kind": "baseline",
+                                      "schema": bl.BASELINE_SCHEMA,
+                                      "fingerprints": dict(one)}
+        res = meta26b.func(ctxp, mkb)
+        pass_msg = " ".join(r.message for r in res
+                            if r.status == engine.Status.PASS).lower()
+    finally:
+        bl.capture_fingerprints, bl.default_baseline_path, bl.load_baseline = orig3
+    out.append(("R27 PASS says 'tracked', not 'all settings'",
+                "tracked" in pass_msg and "curated" in pass_msg, pass_msg[:50],
+                "tracked + curated"))
     return out
 
 

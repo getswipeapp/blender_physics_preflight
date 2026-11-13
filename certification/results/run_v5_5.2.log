@@ -1,0 +1,546 @@
+00:01.396  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_38/cloth.blend"
+00:01.452  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_40/cloth.blend"
+00:01.680  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_45/soft.blend"
+00:01.738  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_47/parts.blend"
+00:01.815  reports          | Fluid: Bake All complete (0.04s)
+Blender 5.2.3 LTS (hash e13b728c6880 built 2026-10-22 01:31:22)
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+bake: frame 1 :: 5
+bake: frame 2 :: 5
+bake: frame 3 :: 5
+bake: frame 4 :: 5
+bake: frame 5 :: 5
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+bake: frame 1 :: 8
+bake: frame 2 :: 8
+bake: frame 3 :: 8
+bake: frame 4 :: 8
+bake: frame 5 :: 8
+bake: frame 6 :: 8
+bake: frame 7 :: 8
+bake: frame 8 :: 8
+bake: frame 1 :: 8
+bake: frame 2 :: 8
+bake: frame 3 :: 8
+bake: frame 4 :: 8
+bake: frame 5 :: 8
+bake: frame 6 :: 8
+bake: frame 7 :: 8
+bake: frame 8 :: 8
+bake: frame 1 :: 8
+bake: frame 2 :: 8
+bake: frame 3 :: 8
+bake: frame 4 :: 8
+bake: frame 5 :: 8
+bake: frame 6 :: 8
+bake: frame 7 :: 8
+bake: frame 8 :: 8
+bake: frame 1 :: 8
+bake: frame 2 :: 8
+bake: frame 3 :: 8
+bake: frame 4 :: 8
+bake: frame 5 :: 8
+bake: frame 6 :: 8
+bake: frame 7 :: 8
+bake: frame 8 :: 8
+00:01.835  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_48/fluid.blend"
+00:01.941  reports          | Fluid: Bake All complete (0.04s)
+00:01.962  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_49/fluid.blend"
+00:02.066  reports          | Fluid: Bake All complete (0.04s)
+00:02.085  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_50/fluid.blend"
+00:02.191  reports          | Fluid: Bake All complete (0.04s)
+00:02.212  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_51/fluid.blend"
+00:02.321  reports          | Fluid: Bake All complete (0.04s)
+00:02.342  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_52/fluid.blend"
+00:02.446  reports          | Fluid: Bake All complete (0.04s)
+00:02.467  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_53/fluid.blend"
+00:02.655  reports          | Fluid: Bake All complete (0.11s)
+00:02.677  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/case_54/fluid_guide.blend"
+00:02.736  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/regr_00/cloth.blend"
+00:02.767  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/regr_01/cloth.blend"
+00:02.797  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_tests_xxngjyso/regr_02/cloth.blend"
+00:02.903  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_i20efsah/cloth.blend"
+00:02.955  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_mixedbatch_qpzcqln7/good.blend"
+00:03.001  object.modifier  | WARNING Object: "ClothA", Modifier: "Cloth", Cannot build springs
+00:03.001  object.modifier  | WARNING Object: "ClothA", Modifier: "Cloth", Cannot initialize cloth
+00:03.021  object.modifier  | WARNING Object: "ClothA", Modifier: "Cloth", Cannot build springs
+00:03.021  object.modifier  | WARNING Object: "ClothA", Modifier: "Cloth", Cannot initialize cloth
+  PASS  01 unapplied scale (warn)  -> WARNING
+  PASS  01 unapplied rotation on cloth (warn)  -> WARNING
+  PASS  01 scale applied (pass)  -> PASS
+  PASS  02 absurd mass (warn)  -> WARNING
+  PASS  02 sane mass (pass)  -> PASS
+  PASS  03 overlap (warn)  -> WARNING
+  PASS  03 containment (warn)  -> WARNING
+  PASS  03 separated (pass)  -> PASS
+  PASS  03 off start frame (unknown)  -> UNKNOWN
+  PASS  04 convex hull on torus (warn)  -> WARNING
+  PASS  04 convex hull on box (pass)  -> PASS
+  PASS  05 bad topology collider (warn)  -> WARNING
+  PASS  05 plane floor collider (pass)  -> PASS
+  PASS  06 rbw disabled (fail)  -> FAIL
+  PASS  06 rbw ok (pass)  -> PASS
+  PASS  07 cloth collision off (warn)  -> WARNING
+  PASS  07 cloth collision ok (pass)  -> PASS
+  PASS  08 negative scale (fail)  -> FAIL
+  PASS  08 normal scale (pass)  -> PASS
+  PASS  09 tiny object (warn)  -> WARNING
+  PASS  09 normal size (pass)  -> PASS
+  PASS  10 origin offset (warn)  -> WARNING
+  PASS  10 origin centred (pass)  -> PASS
+  PASS  11 big margin (warn)  -> WARNING
+  PASS  11 small margin (pass)  -> PASS
+  PASS  12 animated passive (fail)  -> FAIL
+  PASS  12 animated marked (pass)  -> PASS
+  PASS  13 broken constraint (fail)  -> FAIL
+  PASS  13 valid constraint (pass)  -> PASS
+  PASS  14 collision stack order (warn)  -> WARNING
+  PASS  14 collision at bottom (pass)  -> PASS
+  PASS  15 missing pin group (fail)  -> FAIL
+  PASS  15 valid pin group (pass)  -> PASS
+  PASS  16 domain no flow (warn)  -> WARNING
+  PASS  16 effector only, no flow (warn)  -> WARNING
+  PASS  16 flow in domain (pass)  -> PASS
+  PASS  17 not baked (warn)  -> WARNING
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+  PASS  18 baked files present (pass)  -> PASS
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+  PASS  18 FALSE-PASS TRAP: baked flag, no files (fail)  -> FAIL
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+  PASS  19 bake range short (warn)  -> WARNING
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+  PASS  20 missing interior frame (fail)  -> FAIL
+Info: Saved as "shared.blend"
+  PASS  21 shared cache dir (warn)  -> WARNING
+Info: Saved as "fluid_abs.blend"
+  PASS  22 absolute cache path (warn)  -> WARNING
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+  PASS  23 fps changed after bake (unknown)  -> UNKNOWN
+Info: Saved as "soft.blend"
+Info: Saved "soft.blend"
+  PASS  HS soft-body baked (pass)  -> PASS
+Info: Saved as "soft.blend"
+Info: Saved "soft.blend"
+  PASS  HS soft-body missing last frame (fail)  -> FAIL
+Info: Saved as "parts.blend"
+Info: Saved "parts.blend"
+  PASS  HS particle baked (pass)  -> PASS
+Info: Saved as "parts.blend"
+Info: Saved "parts.blend"
+  PASS  HS particle missing last frame (fail)  -> FAIL
+Info: Saved as "fluid.blend"
+Info: Saved "fluid.blend"
+  PASS  HS fluid baked (pass)  -> PASS
+Info: Saved as "fluid.blend"
+Info: Saved "fluid.blend"
+  PASS  HS fluid missing data frame (fail)  -> FAIL
+Info: Saved as "fluid.blend"
+Info: Saved "fluid.blend"
+  PASS  HS fluid missing mesh frame (fail)  -> FAIL
+Info: Saved as "fluid.blend"
+Info: Saved "fluid.blend"
+  PASS  HS fluid mislabeled data-in-mesh (fail)  -> FAIL
+Info: Saved as "fluid.blend"
+Info: Saved "fluid.blend"
+  PASS  HS fluid missing config frame (fail)  -> FAIL
+Info: Saved as "fluid.blend"
+Info: Saved "fluid.blend"
+Info: Saved "fluid.blend"
+  PASS  R12 fluid cache offset (unknown)  -> UNKNOWN
+Info: Saved as "fluid_guide.blend"
+Info: Saved "fluid_guide.blend"
+  PASS  HS fluid missing guiding frame (fail)  -> FAIL
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+  PASS  F01 missing LAST frame -> no cache PASS
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+  PASS  F01 missing FIRST frame -> no cache PASS
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+  PASS  F01 missing LAST 3 frames -> no cache PASS
+Info: Saved as "soft.blend"
+Info: Saved "soft.blend"
+Info: Saved as "soft.blend"
+Info: Saved "soft.blend"
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+Error: File format is not supported in file "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_badbatch_m6keh4q3/garbage.blend"
+Info: Saved as "good.blend"
+Error: File format is not supported in file "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_mixedbatch_qpzcqln7/bad.blend"
+  PASS  unit: F01 missing tail  -> INCOMPLETE
+  PASS  unit: F01 missing head  -> INCOMPLETE
+  PASS  unit: complete  -> COMPLETE
+  PASS  unit: empty but baked  -> EMPTY
+  PASS  unit: no files, not baked  -> NOT_BAKED
+  PASS  unit: F07 corrupt 0-byte  -> CORRUPT
+  PASS  unit: F07 unreadable  -> UNREADABLE
+  PASS  unit: F04 replay  -> REPLAY
+  PASS  unit: F05 memory (no files)  -> MEMORY
+  PASS  unit: packed GN  -> UNVERIFIABLE
+  PASS  unit: unsaved  -> UNVERIFIABLE
+  PASS  unit: F06 sampled complete  -> COMPLETE
+  PASS  unit: F06 sampled missing tail  -> INCOMPLETE
+  PASS  unit: F02 fluid missing mesh sub-cache  -> INCOMPLETE
+  PASS  unit: R11 fluid missing config sub-cache  -> INCOMPLETE
+  PASS  unit: R13 fluid stage-not-baked sub-cache  -> INCOMPLETE
+  PASS  unit: R14 complete but outdated -> UNVERIFIABLE  -> UNVERIFIABLE
+  PASS  unit: R14 outdated but no files -> EMPTY  -> EMPTY
+  PASS  unit: R15 complete but frame_skip (not outdated) -> UNVERIFIABLE  -> UNVERIFIABLE
+  PASS  unit: R15 both outdated and frame_skip -> UNVERIFIABLE  -> UNVERIFIABLE
+  PASS  unit: R15 frame_skip but missing files -> INCOMPLETE  -> INCOMPLETE
+  PASS  unit: R16 complete but bake in progress -> UNVERIFIABLE  -> UNVERIFIABLE
+  PASS  unit: R16 bake in progress but missing files -> INCOMPLETE  -> INCOMPLETE
+  PASS  unit: R16 fluid guiding stage-not-baked sub-cache  -> INCOMPLETE
+  PASS  unit: gn target: INHERIT falls back to modifier PACKED  -> PACKED
+  PASS  unit: gn target: explicit DISK overrides a PACKED modifier  -> DISK
+  PASS  unit: gn target: missing bake target uses modifier DISK  -> DISK
+  PASS  unit: gn target: empty bake target uses modifier PACKED  -> PACKED
+  PASS  unit: gn range: custom path only -> scene range  -> (1, 10)
+  PASS  unit: gn range: custom range -> its own range  -> (3, 7)
+  PASS  unit: gn range: no customisation -> scene range  -> (1, 10)
+  PASS  unit: gn range: still frame -> single frame  -> (5, 5)
+  PASS  unit: gn blobs missing -> INCOMPLETE  -> INCOMPLETE
+  PASS  unit: gn disk present -> UNVERIFIABLE (can't certify)  -> UNVERIFIABLE
+  PASS  unit: fluid matcher: data accepts fluid_data  -> True
+  PASS  unit: fluid matcher: mesh accepts fluid_mesh  -> True
+  PASS  unit: fluid matcher: noise accepts fluid_noise  -> True
+  PASS  unit: fluid matcher: particles accepts fluid_particles  -> True
+  PASS  unit: fluid matcher: mesh rejects a data file  -> False
+  PASS  unit: fluid matcher: data rejects a mesh file  -> False
+  PASS  unit: fluid matcher: data rejects unrelated file  -> False
+  PASS  unit: fluid matcher: noise rejects a data file  -> False
+  PASS  unit: fluid matcher: guiding accepts fluid_guiding  -> True
+  PASS  unit: fluid matcher: guiding rejects a data file  -> False
+  PASS  unit: fluid matcher: data rejects a guiding file  -> False
+  PASS  unit: R17 memory cache outdated -> #17 UNKNOWN (not PASS)  -> UNKNOWN
+  PASS  unit: R17 memory cache clean -> #17 PASS  -> PASS
+  PASS  unit: R17 RBW frame_skip -> #17 UNKNOWN (not PASS)  -> UNKNOWN
+  PASS  unit: R17 RBW clean -> #17 PASS  -> PASS
+  PASS  unit: R19 memory cache baking -> #19 no PASS  -> None
+  PASS  unit: R19 memory cache clean -> #19 PASS  -> PASS
+  PASS  unit: R17 clean cache has no reliability reasons  -> []
+  PASS  unit: R18 stage flag: flag True -> baked  -> baked
+  PASS  unit: R18 stage flag: flag False -> unbaked  -> unbaked
+  PASS  unit: R18 stage flag: flag absent -> unknown (not baked!)  -> unknown
+  PASS  unit: R18 unverifiable stage -> UNVERIFIABLE  -> UNVERIFIABLE
+  PASS  unit: R18 unverifiable stage carries its note  -> the 'mesh' stage's baked state isn't exposed on this Blender version
+  PASS  unit: read-only: selection unchanged  -> ['A']
+  PASS  unit: read-only: active object unchanged  -> A
+  PASS  unit: read-only: current frame unchanged  -> 1
+  PASS  unit: read-only: frame range unchanged  -> (1, 250)
+  PASS  unit: read-only: object set unchanged  -> 2
+  PASS  unit: read-only: mode unchanged  -> OBJECT
+  PASS  unit: read-only: no new text datablocks created  -> 0
+  PASS  unit: read-only: no new object datablocks  -> 2
+  PASS  unit: read-only: no new mesh datablocks  -> 2
+  PASS  unit: read-only fs: cache had files to guard  -> 10
+  PASS  unit: read-only fs: no files added by a scan  -> []
+  PASS  unit: read-only fs: no files removed by a scan  -> []
+  PASS  unit: read-only fs: no file contents/mtime changed  -> []
+  PASS  unit: roundtrip 1/3 baked+present -> #18 PASS  -> PASS
+  PASS  unit: roundtrip 2/3 frame deleted -> #18 FAIL  -> FAIL
+  PASS  unit: roundtrip 3/3 frame restored -> #18 PASS again  -> PASS
+  PASS  unit: help: every check has a 'why' line  -> []
+  PASS  unit: render check: broken scene -> fail>0  -> 2
+  PASS  unit: render check: broken scene -> problem flagged  -> True
+  PASS  unit: render check: banner mentions the fail count  -> Last render check: 2 fail, 1 warning, 2 couldn't verify
+  PASS  unit: render check: read-only (scene unchanged)  -> (['Cloth'], 1, 0, 1, 1)
+  PASS  unit: render check: warn-only scene has no hard fail  -> 0
+  PASS  unit: render check: warn-only scene has a warning  -> 2
+  PASS  unit: render check: include_warnings=True -> problem (escalates)  -> True
+  PASS  unit: render check: include_warnings=False -> not escalated  -> False
+  PASS  unit: V08: warn-only + include_warnings=False is NOT 'all clear'  -> Last render check: 0 fail, 2 warning, 3 couldn't verify
+  PASS  unit: V08: warn-only banner identical with alerts on vs off  -> ("Last render check: 0 fail, 2 warning, 3 couldn't verify", "Last render check: 0 fail, 2 warning, 3 couldn't verify")
+  PASS  unit: render banner: unknown-only is not a clean result  -> Last render check: no confirmed problems, 3 couldn't verify
+  PASS  unit: render banner: truly clean says all clear  -> Last render check: all clear
+  PASS  unit: render banner: confirmed problems show counts  -> Last render check: 2 fail, 1 warning, 1 couldn't verify
+  PASS  unit: V08 banner: warning-only shows counts, not clear  -> Last render check: 0 fail, 2 warning, 0 couldn't verify
+  PASS  unit: V08 banner: warning+unknown is not clear  -> Last render check: 0 fail, 1 warning, 2 couldn't verify
+  PASS  unit: title #3 UNKNOWN is explicit, not the positive name  -> Start overlap couldn't be checked
+  PASS  unit: title #4 UNKNOWN is explicit, not the positive name  -> Collision shape couldn't be checked
+  PASS  unit: title #5 UNKNOWN is explicit, not the positive name  -> Collider couldn't be fully checked
+  PASS  unit: title #15 UNKNOWN is explicit, not the positive name  -> Cloth pin group couldn't be checked
+  PASS  unit: title #17 UNKNOWN is explicit, not the positive name  -> Simulation bake couldn't be verified
+  PASS  unit: title #18 UNKNOWN is explicit, not the positive name  -> Cache files couldn't be verified
+  PASS  unit: title #19 UNKNOWN is explicit, not the positive name  -> Bake coverage couldn't be confirmed
+  PASS  unit: title #20 UNKNOWN is explicit, not the positive name  -> Frame coverage couldn't be checked
+  PASS  unit: title #21 UNKNOWN is explicit, not the positive name  -> Cache locations couldn't be fully checked
+  PASS  unit: title #22 UNKNOWN is explicit, not the positive name  -> Cache portability couldn't be confirmed
+  PASS  unit: title #23 UNKNOWN is explicit, not the positive name  -> Bake timing couldn't be confirmed
+  PASS  unit: title #23 UNKNOWN doesn't claim 'unchanged'  -> bake timing couldn't be confirmed
+  PASS  unit: title #18 N/A isn't a positive on-disk claim  -> No disk cache to verify
+  PASS  unit: title #20 WARNING != FAIL headline  -> Cache is sampled, not every frame
+  PASS  unit: title PASS shows positive name  -> Cache files are really on disk
+  PASS  unit: A2 cloud marker '/Users/x/Dropbox/proj/blendcache_a' -> Dropbox  -> Dropbox
+  PASS  unit: A2 cloud marker '/Users/x/OneDrive/proj' -> OneDrive  -> OneDrive
+  PASS  unit: A2 cloud marker '/Users/x/Google Drive/proj' -> Google Drive  -> Google Drive
+  PASS  unit: A2 cloud marker '/Users/x/Library/Mobile Documents/com~apple~CloudDocs/p' -> iCloud Drive  -> iCloud Drive
+  PASS  unit: A2 cloud marker '/Users/x/Projects/local/blendcache_a' -> None  -> None
+  PASS  unit: A2 cloud marker '' -> None  -> None
+  PASS  unit: A2 #24 cloud cache -> WARNING  -> WARNING
+  PASS  unit: A2 #24 local cache -> PASS  -> PASS
+  PASS  unit: A4 human_bytes(0)=0 B  -> 0 B
+  PASS  unit: A4 human_bytes(512)=512 B  -> 512 B
+  PASS  unit: A4 human_bytes(1536)=1.5 KB  -> 1.5 KB
+  PASS  unit: A4 human_bytes(5242880)=5.0 MB  -> 5.0 MB
+  PASS  unit: A4 human_bytes(None)=unknown size  -> unknown size
+  PASS  unit: A3 bphys regex accepts real name  -> True
+  PASS  unit: A3 bphys regex rejects junk  -> False
+  PASS  unit: A3 orphan scan finds 1 unowned identity  -> 1
+  PASS  unit: A3 orphan scan counts 2 files  -> 2
+  PASS  unit: A3 orphan scan sums 100 bytes  -> 100
+  PASS  unit: A3 orphan scan: all owned -> none  -> (list)
+  PASS  unit: R22 orphan scan matches full (prefix,index) identity  -> [{'prefix': '506C616E65', 'index': 1, 'files': 1, 'bytes': 10}]
+  PASS  unit: R22 missing folder -> [] (not an error)  -> []
+  PASS  unit: R22 unreadable folder raises (not silent clean)  -> True
+  PASS  unit: A7 JSON report parses  -> True
+  PASS  unit: A7 JSON has tool=failsafe  -> failsafe
+  PASS  unit: A7 JSON has 'summary'  -> True
+  PASS  unit: A7 JSON has 'overall'  -> True
+  PASS  unit: A7 JSON has 'checks'  -> True
+  PASS  unit: A7 JSON has 'cache_disk_usage'  -> True
+  PASS  unit: A7 JSON includes new checks 24 & 25  -> [24, 25, 26]
+  PASS  unit: A6 FAIL -> exit 1  -> 1
+  PASS  unit: A6 UNKNOWN -> exit 2  -> 2
+  PASS  unit: A6 WARNING (lax) -> exit 0  -> 0
+  PASS  unit: A6 WARNING (strict) -> exit 1  -> 1
+  PASS  unit: A6 FAIL beats UNKNOWN -> exit 1  -> 1
+  PASS  unit: A6 bad arg -> exit 3  -> 3
+  PASS  unit: A6 --json run returns defined code  -> 2
+  PASS  unit: A6 --json run emits JSON  -> {
+  PASS  unit: A8 aggregate [] -> clean  -> 0
+  PASS  unit: A8 aggregate blocking wins  -> 1
+  PASS  unit: A8 aggregate usage beats unverified  -> 3
+  PASS  unit: A8 aggregate unverified over clean  -> 2
+  PASS  unit: A8 _list_blend_files finds 2 .blend  -> 2
+  PASS  unit: A8 batch missing folder -> exit 3  -> 3
+  PASS  unit: label UNKNOWN -> Couldn't verify  -> Couldn't verify
+  PASS  unit: internal status stays UNKNOWN  -> UNKNOWN
+  PASS  unit: JSON summary keeps machine key UNKNOWN  -> ['FAIL', 'NOT APPLICABLE', 'PASS', 'UNKNOWN', 'WARNING']
+  PASS  unit: JSON never emits the display word  -> display word absent
+  PASS  unit: baseline diff identical -> none  -> []
+  PASS  unit: baseline diff finds changed setting  -> ['mass']
+  PASS  unit: baseline diff finds range change  -> ['cache frame range']
+  PASS  unit: baseline load missing -> ValueError  -> no baseline file
+  PASS  unit: baseline load corrupt -> ValueError  -> True
+  PASS  unit: baseline load wrong-shape -> ValueError  -> True
+  PASS  unit: baseline save+load round-trip  -> baseline
+  PASS  unit: baseline file has fingerprints dict  -> dict
+  PASS  unit: baseline save refuses to overwrite silently  -> True
+  PASS  unit: baseline file untouched after refused overwrite  -> unchanged
+  PASS  unit: baseline save overwrites when asked explicitly  -> True
+  PASS  unit: baseline save writes a brand-new file  -> True
+  PASS  unit: schema_ok accepts current schema  -> True
+  PASS  unit: schema_ok rejects a newer/unknown schema  -> False
+  PASS  unit: schema_ok rejects a baseline with no schema  -> False
+  PASS  unit: foreign file: different .blend name is flagged  -> flagged
+  PASS  unit: foreign file: same name (moved project) is NOT flagged  -> None
+  PASS  unit: foreign file: unknown current file -> not flagged  -> None
+  PASS  unit: #26 sims + no baseline -> Couldn't verify  -> UNKNOWN
+  PASS  unit: #26 matching baseline -> Pass  -> PASS
+  PASS  unit: #26 changed settings -> Warning  -> WARNING
+  PASS  unit: #26 identity mismatch -> Couldn't verify  -> UNKNOWN
+  PASS  unit: #26 corrupt baseline -> Couldn't verify  -> UNKNOWN
+  PASS  unit: #26 unknown-schema baseline -> Couldn't verify  -> UNKNOWN
+  PASS  unit: #26 never claims 'since bake'  -> The tracked settings of all 1 simulation00:03.143  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_render_fail_isipdyl7/cloth.blend"
+00:03.194  blend            | Read blend: "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_mixedbatch_hv_oscoc/good.blend"
+00:03.242  object.modifier  | WARNING Object: "ClothA", Modifier: "Cloth", Cannot build springs
+00:03.242  object.modifier  | WARNING Object: "ClothA", Modifier: "Cloth", Cannot initialize cloth
+00:03.261  object.modifier  | WARNING Object: "ClothA", Modifier: "Cloth", Cannot build springs
+00:03.261  object.modifier  | WARNING Object: "ClothA", Modifier: "Cloth", Cannot initialize cloth
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+bake: frame 1 :: 8
+bake: frame 2 :: 8
+bake: frame 3 :: 8
+bake: frame 4 :: 8
+bake: frame 5 :: 8
+bake: frame 6 :: 8
+bake: frame 7 :: 8
+bake: frame 8 :: 8
+bake: frame 1 :: 8
+bake: frame 2 :: 8
+bake: frame 3 :: 8
+bake: frame 4 :: 8
+bake: frame 5 :: 8
+bake: frame 6 :: 8
+bake: frame 7 :: 8
+bake: frame 8 :: 8
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+bake: frame 1 :: 8
+bake: frame 2 :: 8
+bake: frame 3 :: 8
+bake: frame 4 :: 8
+bake: frame 5 :: 8
+bake: frame 6 :: 8
+bake: frame 7 :: 8
+bake: frame 8 :: 8
+bake: frame 1 :: 8
+bake: frame 2 :: 8
+bake: frame 3 :: 8
+bake: frame 4 :: 8
+bake: frame 5 :: 8
+bake: frame 6 :: 8
+bake: frame 7 :: 8
+bake: frame 8 :: 8
+bake: frame 1 :: 10
+bake: frame 2 :: 10
+bake: frame 3 :: 10
+bake: frame 4 :: 10
+bake: frame 5 :: 10
+bake: frame 6 :: 10
+bake: frame 7 :: 10
+bake: frame 8 :: 10
+bake: frame 9 :: 10
+bake: frame 10 :: 10
+
+  PASS  unit: batch garbage: JSON still parses  -> True
+  PASS  unit: batch garbage: recorded as a per-file error  -> [['file', 'exit', 'error']]
+  PASS  unit: batch garbage: defined exit 3 (no crash)  -> 3
+  PASS  unit: batch partial: both files reported  -> 2
+  PASS  unit: batch partial: good scanned (0) + bad errored (3)  -> [0, 3]
+  PASS  unit: batch partial: overall exit = worst (3)  -> 3
+  PASS  unit: batch partial: good file has no error key  -> [0, 3]
+  PASS  unit: R20 in-process empty folder -> exit 3  -> 3
+  PASS  unit: isolated clean -> exit 0, no error  -> 0
+  PASS  unit: isolated hang -> timeout error, exit 3  -> timed out after 5s — subprocess killed (isolated, so the batch continues)
+  PASS  unit: isolated crash -> error, exit 3 (never a pass)  -> 3
+  PASS  unit: isolated corrupt -> no-result error, exit 3  -> 3
+  PASS  unit: isolated launch failure -> error, exit 3  -> could not run Blender on this file: blender binary missing
+  PASS  unit: R19 clean JSON + abnormal exit -> error, not clean  -> {'exit': 3, 'overall': None}
+  PASS  unit: R25 per-file findings preserved (names missing frame)  -> frame 7 is missing from the cache
+  PASS  unit: R25 PASS checks are dropped from findings  -> ['FAIL']
+  PASS  unit: iso batch: all 4 files reported  -> 4
+  PASS  unit: iso batch: clean file preserved (exit 0, no error)  -> 0
+  PASS  unit: iso batch: crash isolated to its file  -> ['file', 'exit', 'error']
+  PASS  unit: iso batch: hang isolated (timeout)  -> timed out after 5s — subprocess killed (isolated, so the batch continues)
+  PASS  unit: iso batch: real FAIL still seen (exit 1)  -> 1
+  PASS  unit: iso batch: marked isolated in JSON  -> True
+  PASS  unit: iso batch: FAIL outranks errors in aggregate (exit 1)  -> 1
+  PASS  unit: iso batch: an error beats clean files (exit 3)  -> 3
+  PASS  unit: iso batch: FAIL beats clean (exit 1)  -> 1
+  PASS  unit: iso batch: missing folder -> exit 3  -> 3
+  PASS  unit: R20 iso empty folder -> exit 3, not clean  -> 3
+  PASS  unit: R20 iso empty folder -> says no .blend found  -> (msg)
+  PASS  unit: R20 iso only-non-blend -> exit 3  -> 3
+  PASS  unit: iso child argv: background + file + python-expr  -> ['blenderbin', '-b', '/shots/x.blend']
+  PASS  unit: iso child argv: source mode adds --factory-startup  -> True
+  PASS  unit: iso extract: finds JSON amid noise  -> parsed
+  PASS  unit: iso extract: no markers -> None  -> None
+  PASS  unit: R21 two particle systems -> two distinct identities  -> ['Scene::Emitter::Particles::PSysA', 'Scene::Emitter::Particles::PSysB']
+  PASS  unit: R21 ambiguous identity -> Couldn't verify (not PASS)  -> UNKNOWN
+  PASS  unit: R23 UNKNOWN title isn't the positive name  -> Couldn't verify this check
+  PASS  unit: R23 check #24 has a truthful name_unknown  -> Couldn't check the cache folder location
+  PASS  unit: R23 check #25 has a truthful name_unknown  -> Couldn't check for orphaned cache files
+  PASS  unit: R23 check #26 has a truthful name_unknown  -> Couldn't compare against a settings baseline
+  PASS  unit: R24 ownership includes other scenes' caches  -> ([('CLOTHA', 0)], [('CLOTHA', 0), ('CLOTHB', 0)])
+  PASS  unit: R24 find_orphan scans all of bpy.data.scenes  -> True
+  PASS  unit: R26 identities are scene-qualified (both scenes captured)  -> ['SceneA::ClothA::Cloth::Cloth', 'SceneB::ClothB::Cloth::Cloth']
+  PASS  unit: R26 RBW identity is scene-qualified (no cross-scene collision)  -> ('SceneA::Scene::Rigid Body World', 'SceneB::Scene::Rigid Body World')
+  PASS  unit: R26 each fingerprint carries its scene  -> all have scene
+  PASS  unit: R26 scanning an un-baselined scene -> Couldn't verify  -> UNKNOWN
+  PASS  unit: R27 cloth tracks pin_stiffness  -> True
+  PASS  unit: R27 cloth tracks vertex_group_mass  -> True
+  PASS  unit: R27 float precision keeps a 1e-6 change  -> (0.500001, 0.500002)
+  PASS  unit: R27 diff catches the 1e-6 setting change  -> ['mass']
+  PASS  unit: R27 PASS says 'tracked', not 'all settings'  -> the tracked settings of all 1 simulation are uncha
+  PASS  unit: label(UNKNOWN) -> 'Couldn't verify'  -> Couldn't verify
+  PASS  unit: label keeps the plain words for the others  -> Fail/Pass
+  PASS  unit: collected several 'Couldn't verify' branches  -> 6
+  PASS  unit: every 'Couldn't verify' states a reason  -> 0
+  PASS  unit: every 'Couldn't verify' states a next action  -> 0
+  PASS  unit: text report uses 'Couldn't verify'  -> True
+  PASS  unit: json keeps UNKNOWN, never the display word  -> True
+Info: Saved as "soft.blend"
+Info: Saved "soft.blend"
+Info: Saved as "soft.blend"
+Info: Saved "soft.blend"
+Info: Saved as "cloth.blend"
+Info: Saved "cloth.blend"
+Error: File format is not supported in file "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_badbatch_qa7krss1/garbage.blend"
+Info: Saved as "good.blend"
+Error: File format is not supported in file "/var/folders/s1/q9tllnr57x7dgys1sw5zpxqw0000gn/T/failsafe_mixedbatch_hv_oscoc/bad.blend"
+
+============================================================
+Blender 5.2.3 LTS  |  291 passed, 0 failed, 291 total

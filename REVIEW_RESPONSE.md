@@ -327,10 +327,26 @@ read-only rule:
 - **R25** — isolated batch JSON preserves per-file **findings incl. exact
   missing-frame messages**, not just summary counts.
 
+### Re-review of `1ac88ba` — baseline false-PASS risks R26–R27 closed
+
+- **R26 — cross-scene baseline identity.** Baseline identities are now
+  **scene-qualified** (`Scene::Owner::System::SubName`, and
+  `Scene::Scene::Rigid Body World`), and the baseline captures **every scene** in
+  the `.blend`. The Rigid Body World (which shared one identity across scenes) is
+  now per-scene, so scanning scene B never PASSes against scene A's baseline — a
+  scene not in the baseline reports "Couldn't verify". Schema bumped to 3.
+- **R27 — incomplete fingerprint + float rounding.** The cloth fingerprint now
+  also tracks `pin_stiffness`, `vertex_group_mass`, the per-vertex-group stiffness
+  groups, sewing force and shrink range. Float precision tightened **5 → 10 dp** so
+  a small real change isn't hidden. #26's PASS wording now states the **tracked**
+  settings are unchanged (a curated subset) — it never claims "all settings",
+  honouring "never claim all settings are unchanged when only a subset was
+  compared".
+
 **Evidence**
-- Headless suite **282/282 on 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** (rc=0 each);
-  logs `certification/results/run_v4_{4.2,4.5,5.0,5.2}.log`. Includes a regression
-  test for every blocker R19–R25.
+- Headless suite **291/291 on 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** (rc=0 each);
+  logs `certification/results/run_v5_{4.2,4.5,5.0,5.2}.log`. Includes a regression
+  test for every blocker R19–R27.
 - **Real multi-process batch proof** (Blender 5.2.3):
   `certification/results/real_batch_proof_5.2.3.log` — actual child processes: a
   good file scanned clean, a corrupt file isolated as an error with the good one

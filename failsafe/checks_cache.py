@@ -631,7 +631,10 @@ def c26_settings_baseline(ctx, mk):
     saved_sims = dict(bl.sim_items(saved))
     for ident, cur in bl.sim_items(current):
         nice = ident.replace("::", " — ")
-        obj_name = None if cur.get("kind") == "rbw" else ident.split("::")[0]
+        # identity is Scene::Owner::System[::Sub]; the object is field [1].
+        parts = ident.split("::")
+        obj_name = None if cur.get("kind") == "rbw" else (
+            parts[1] if len(parts) > 1 else None)
         if ident not in saved_sims:
             out.append(mk(Status.UNKNOWN,
                           "%s isn't in the baseline (added or renamed after it "
@@ -663,8 +666,9 @@ def c26_settings_baseline(ctx, mk):
                           hint="Update the baseline if you meant to remove it."))
     if not out and matched:
         return [mk(Status.PASS,
-                   "All %d simulation%s match the saved settings baseline "
-                   "(unchanged since it was saved — this is not proof the bake "
-                   "itself is good)."
+                   "The tracked settings of all %d simulation%s are unchanged "
+                   "since the baseline was saved. (Failsafe compares a curated set "
+                   "of key settings, not every property, and this is not proof the "
+                   "bake itself is good.)"
                    % (matched, "" if matched == 1 else "s"))]
     return out

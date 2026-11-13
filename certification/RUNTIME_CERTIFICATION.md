@@ -5,12 +5,12 @@ older references below predate the rename.)*
 
 ---
 
-## −1. Expanded release — hardening + independent-review fixes (R19–R25) — re-certification (2026-11-12)
+## −1. Expanded release — hardening + independent-review fixes (R19–R27) — re-certification (2026-11-12)
 
 Adds the competitor-parity features, the render-farm hardening, **and** the fixes
-for the independent review of commit `f148524` (blockers R19–R25), on top of the
-certified v1 build (§0 below, **preserved unchanged** as the prior certified
-baseline). New in this round:
+for two rounds of independent review — blockers R19–R25 (review of `f148524`) and
+R26–R27 (re-review of `1ac88ba`) — on top of the certified v1 build (§0 below,
+**preserved unchanged** as the prior certified baseline). New in this round:
 
 - **3 new checks** — #24 cloud-synced cache folder, #25 orphaned cache files,
   #26 opt-in settings-baseline drift.
@@ -54,24 +54,36 @@ baseline). New in this round:
 - **R25** — isolated batch JSON now preserves each file's **per-check findings
   (incl. exact missing-frame messages)**, not just the summary counts.
 
+**Second re-review of `1ac88ba` — two baseline false-PASS risks closed:**
+- **R26** — baseline identities are now **scene-qualified**
+  (`Scene::Owner::System::SubName`, and `Scene::Scene::Rigid Body World`), and the
+  baseline captures **every scene** in the `.blend` (the sidecar is project-wide).
+  A simulation — the Rigid Body World especially — is never compared against a
+  different scene's; a scene not in the baseline reports "Couldn't verify".
+- **R27** — the cloth fingerprint now also tracks `pin_stiffness`,
+  `vertex_group_mass`, the per-vertex-group stiffness groups, sewing force and
+  shrink range; float precision tightened from 5 → 10 dp so a small real change
+  isn't hidden; and #26's PASS wording now says the **tracked** settings are
+  unchanged (a curated subset), never "all settings".
+
 **Package under test:** `dist/failsafe-1ac88ba.zip` (commit `1ac88ba`, built with
 `blender --command extension build`). SHA-256 recorded in
 `certification/RELEASE_SHA256SUMS.txt` and in the review package; contents
 verified: 21 files incl. `LICENSE`, `baseline.py`, `cli.py`, `batch.py`; no test
 files.
 
-**Headless suite (now 282 tests, up from 162) — full matrix, all green:**
+**Headless suite (now 291 tests, up from 162) — full matrix, all green:**
 
 | Blender build | Result | Tests | Evidence log |
 |---------------|--------|-------|--------------|
-| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 282 / 0 | `results/run_v4_4.2.log` |
-| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 282 / 0 | `results/run_v4_4.5.log` |
-| Blender 5.0.1 | ✅ PASS (rc=0) | 282 / 0 | `results/run_v4_5.0.log` |
-| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 282 / 0 | `results/run_v4_5.2.log` |
+| Blender 4.2.9 LTS | ✅ PASS (rc=0) | 291 / 0 | `results/run_v5_4.2.log` |
+| Blender 4.5.9 LTS | ✅ PASS (rc=0) | 291 / 0 | `results/run_v5_4.5.log` |
+| Blender 5.0.1 | ✅ PASS (rc=0) | 291 / 0 | `results/run_v5_5.0.log` |
+| Blender 5.2.3 LTS | ✅ PASS (rc=0) | 291 / 0 | `results/run_v5_5.2.log` |
 
 All four are the same official arm64 builds used in §0/§1 (4.2.9/4.5.9/5.0.1 from
 isolated copies under `…/blender_runtime_certification/apps/`; 5.2.3 is the user's
-installed copy). The **120 new tests** over §0's 162 cover:
+installed copy). The **129 new tests** over §0's 162 cover:
 
 - the cloud-folder / orphan-file / settings-baseline checks;
 - the **display-label** layer (and its assertion that JSON never emits
@@ -86,10 +98,12 @@ installed copy). The **120 new tests** over §0's 162 cover:
   files' results are preserved; worst exit wins; and an error beats clean files
   while a blocking FAIL outranks an error (documented aggregation priority);
 - the **in-process** batch adversarial cases (garbage file, partial failure);
-- **regression tests for every review blocker R19–R25** (abnormal-exit-with-JSON,
+- **regression tests for every review blocker R19–R27** (abnormal-exit-with-JSON,
   empty folder, particle-identity collision + ambiguity, full-identity orphan
   match + unreadable-dir, UNKNOWN titles, multi-scene ownership, preserved
-  findings).
+  findings, **scene-qualified baseline identities + cross-scene RBW**, and the
+  **expanded cloth settings + 10-dp float precision + "tracked not all" PASS
+  wording**).
 
 **Headless CLI — captured proof (Blender 5.2.3):** `results/cli_proof_5.2.3.log`.
 `--text` on an empty scene → the 26-check report with "Couldn't verify" wording and

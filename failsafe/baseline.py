@@ -25,7 +25,7 @@ import time
 import bpy
 
 
-BASELINE_SCHEMA = 2
+BASELINE_SCHEMA = 3
 
 # Reserved key inside a fingerprint dict listing any identities that collided
 # while capturing (so #26 can report "Couldn't verify" instead of silently
@@ -55,7 +55,12 @@ def ambiguities(fp):
 # degrades gracefully across versions.
 _CLOTH = ["quality", "mass", "air_damping", "bending_model", "tension_stiffness",
           "compression_stiffness", "shear_stiffness", "bending_stiffness",
-          "use_pressure", "uniform_pressure_force", "use_sewing_springs"]
+          "use_pressure", "uniform_pressure_force", "use_sewing_springs",
+          # R27: pinning / per-vertex-group settings were missing — a change to
+          # them could leave the fingerprint identical and falsely PASS.
+          "pin_stiffness", "vertex_group_mass", "vertex_group_structural_stiffness",
+          "vertex_group_shear_stiffness", "vertex_group_bending",
+          "sewing_force_max", "shrink_min", "shrink_max"]
 _CLOTH_COLL = ["collision_quality", "distance_min", "use_collision",
                "use_self_collision", "self_distance_min"]
 _SOFTBODY = ["mass", "speed", "goal_default", "goal_spring", "pull", "push",
@@ -68,17 +73,24 @@ _PARTICLE = ["count", "frame_start", "frame_end", "lifetime", "mass", "timestep"
 _RBW = ["time_scale", "substeps_per_frame", "solver_iterations"]
 
 
+# Float comparison precision. These are STORED setting values (not recomputed sim
+# data), so reading an unchanged property twice yields the identical double — we
+# only round to keep JSON stable across platforms. 5 dp (the old value) could hide
+# a real small change (R27); 10 dp closes that window to the negligible. (R27)
+_ROUND_DP = 10
+
+
 def _rv(v):
-    """Normalise a value for stable comparison: round floats, pass ints/bools/
-    strings, stringify anything exotic."""
+    """Normalise a value for stable comparison: round floats to _ROUND_DP, pass
+    ints/bools/strings, stringify anything exotic."""
     if isinstance(v, bool):
         return v
     if isinstance(v, float):
-        return round(v, 5)
+        return round(v, _ROUND_DP)
     if isinstance(v, (int, str)):
         return v
     try:
-        return round(float(v), 5)
+        return round(float(v), _ROUND_DP)
     except (TypeError, ValueError):
         return str(v)
 
@@ -104,72 +116,81 @@ def _cache_range_point(pc, scene):
         return None
 
 
-def capture_fingerprints(scene):
-    """Walk the scene and return {identity: {system, kind, settings, cache_range}}.
-    Pure read — touches nothing.
+def capture_fingerprints(scene=None):
+    """Return {identity: {scene, system, kind, settings, cache_range}} for EVERY
+    scene in the .blend. Pure read — touches nothing.
 
-    Identity is ``Object::System::SubName`` (the modifier or particle-system name),
-    so an object with *two* cloth/particle systems gets two distinct entries — a
-    plain ``Object::System`` key would let the second overwrite the first and hide
-    a changed sim. If two sims still resolve to the same identity, it's recorded
-    under ``AMBIG_KEY`` so #26 reports "Couldn't verify" rather than a false PASS."""
+    The baseline sidecar is one file per *project* (`<blend>.failsafe-baseline`),
+    not per scene, so we capture every scene and qualify each identity with its
+    scene name: ``Scene::Owner::System::SubName`` (and ``Scene::Rigid Body World``).
+    That way a baseline saved while one scene is active still covers the others,
+    and a simulation in scene B is never compared against scene A's — including the
+    Rigid Body World, which otherwise shares one identity across scenes. (R26)
+
+    ``SubName`` (modifier / particle-system name) keeps two sims on one object
+    distinct; a residual identity collision is recorded under ``AMBIG_KEY`` so #26
+    reports "Couldn't verify" rather than a false PASS. The ``scene`` argument is
+    ignored (kept for back-compat) — the whole file is always captured."""
     fp = {}
     ambiguous = []
 
-    def add(obj_name, system, kind, settings, crange, sub=None):
-        ident = "%s::%s" % (obj_name, system)
+    def add(scene_name, owner_name, system, kind, settings, crange, sub=None):
+        ident = "%s::%s::%s" % (scene_name, owner_name, system)
         if sub:
             ident += "::%s" % sub
         if ident in fp and ident not in ambiguous:
             ambiguous.append(ident)
         fp[ident] = {
-            "system": system, "kind": kind,
+            "scene": scene_name, "system": system, "kind": kind,
             "settings": settings, "cache_range": crange,
         }
 
-    for obj in scene.objects:
-        for mod in obj.modifiers:
-            if mod.type == "CLOTH":
-                s = _sample(getattr(mod, "settings", None), _CLOTH)
-                s.update({"coll_%s" % k: v for k, v in
-                          _sample(getattr(mod, "collision_settings", None),
-                                  _CLOTH_COLL).items()})
-                add(obj.name, "Cloth", "point", s,
-                    _cache_range_point(getattr(mod, "point_cache", None), scene),
-                    sub=mod.name)
-            elif mod.type == "SOFT_BODY":
-                s = _sample(getattr(mod, "settings", None), _SOFTBODY)
-                add(obj.name, "Soft Body", "point", s,
-                    _cache_range_point(getattr(mod, "point_cache", None), scene),
-                    sub=mod.name)
-            elif mod.type == "FLUID":
-                if getattr(mod, "fluid_type", "") == "DOMAIN":
-                    ds = getattr(mod, "domain_settings", None)
-                    s = _sample(ds, _FLUID)
-                    cr = None
-                    if ds is not None:
-                        try:
-                            cr = [int(getattr(ds, "cache_frame_start",
-                                              scene.frame_start)),
-                                  int(getattr(ds, "cache_frame_end",
-                                              scene.frame_end))]
-                        except Exception:
-                            cr = None
-                    add(obj.name, "Fluid", "fluid", s, cr, sub=mod.name)
-        if obj.type == "MESH":
-            for psys in obj.particle_systems:
-                st = psys.settings
-                if st is None or st.type != "EMITTER":
-                    continue
-                s = _sample(st, _PARTICLE)
-                add(obj.name, "Particles", "point", s,
-                    _cache_range_point(getattr(psys, "point_cache", None), scene),
-                    sub=psys.name)
+    for scn in bpy.data.scenes:
+        for obj in scn.objects:
+            for mod in obj.modifiers:
+                if mod.type == "CLOTH":
+                    s = _sample(getattr(mod, "settings", None), _CLOTH)
+                    s.update({"coll_%s" % k: v for k, v in
+                              _sample(getattr(mod, "collision_settings", None),
+                                      _CLOTH_COLL).items()})
+                    add(scn.name, obj.name, "Cloth", "point", s,
+                        _cache_range_point(getattr(mod, "point_cache", None), scn),
+                        sub=mod.name)
+                elif mod.type == "SOFT_BODY":
+                    s = _sample(getattr(mod, "settings", None), _SOFTBODY)
+                    add(scn.name, obj.name, "Soft Body", "point", s,
+                        _cache_range_point(getattr(mod, "point_cache", None), scn),
+                        sub=mod.name)
+                elif mod.type == "FLUID":
+                    if getattr(mod, "fluid_type", "") == "DOMAIN":
+                        ds = getattr(mod, "domain_settings", None)
+                        s = _sample(ds, _FLUID)
+                        cr = None
+                        if ds is not None:
+                            try:
+                                cr = [int(getattr(ds, "cache_frame_start",
+                                                  scn.frame_start)),
+                                      int(getattr(ds, "cache_frame_end",
+                                                  scn.frame_end))]
+                            except Exception:
+                                cr = None
+                        add(scn.name, obj.name, "Fluid", "fluid", s, cr,
+                            sub=mod.name)
+            if obj.type == "MESH":
+                for psys in obj.particle_systems:
+                    st = psys.settings
+                    if st is None or st.type != "EMITTER":
+                        continue
+                    s = _sample(st, _PARTICLE)
+                    add(scn.name, obj.name, "Particles", "point", s,
+                        _cache_range_point(getattr(psys, "point_cache", None), scn),
+                        sub=psys.name)
 
-    rbw = getattr(scene, "rigidbody_world", None)
-    if rbw is not None:
-        s = _sample(rbw, _RBW)
-        add("Scene", "Rigid Body World", "rbw", s, None)
+        rbw = getattr(scn, "rigidbody_world", None)
+        if rbw is not None:
+            s = _sample(rbw, _RBW)
+            add(scn.name, "Scene", "Rigid Body World", "rbw", s, None)
+
     if ambiguous:
         fp[AMBIG_KEY] = ambiguous
     return fp

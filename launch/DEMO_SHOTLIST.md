@@ -78,6 +78,6 @@ The best demo shows a **single missing frame**, which the fixed build now catche
 ## D. Before any of this goes public (reminder)
 
 - Independent **re-review PASS** on the fixed build.
-- Headless tests on Blender **4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** — ✅ done (282/282 each).
+- Headless tests on Blender **4.2.9 / 4.5.9 / 5.0.1 / 5.2.3** — ✅ done (291/291 each).
 - Record on the newest Blender so the UI matches what buyers see.
 - Keith's final approval on screenshots, text, price, and publishing.

@@ -59,10 +59,15 @@ level verification is the right and sufficient check.
   afterward. #23 is an honest reminder to re-bake if you did — not a detector.
 - **Settings baseline (check #26).** This compares your current sim settings to a
   baseline **you** chose to save. It can only tell you settings changed **since the
-  baseline was saved — not since the bake.** With no baseline saved (or a missing,
-  corrupt, or mismatched one), it reports **Couldn't verify**, not a pass. Save the
+  baseline was saved — not since the bake.** It compares a **curated set of key
+  settings**, not every property, so a PASS says "the tracked settings are
+  unchanged," never "nothing changed." The baseline covers **every scene** in the
+  file, and each simulation is matched to its own scene, so one scene's settings are
+  never compared against another's. With no baseline saved (or a missing, corrupt,
+  foreign, or ambiguous one), it reports **Couldn't verify**, not a pass. Save the
   baseline right after baking for it to mean the most. A "settings unchanged" result
-  is **not** proof the bake itself is good — only that the settings didn't move.
+  is **not** proof the bake itself is good — only that the tracked settings didn't
+  move.
 - **Cloud-folder caches (check #24)** are flagged as a *risk*, by matching common
   sync-folder names (Dropbox, OneDrive, Google Drive, iCloud, etc.). It warns you
   the cache could be locked or only partly downloaded at render time; it can't see
@@ -86,7 +91,7 @@ Two checks were corrected after the code review and now behave honestly:
 ## Platform / version coverage
 
 - **Minimum Blender: 4.2 LTS.**
-- The automated test suite passes **282/282 on Blender 4.2.9, 4.5.9, 5.0.1 and
+- The automated test suite passes **291/291 on Blender 4.2.9, 4.5.9, 5.0.1 and
   5.2.3** (headless), including real heavy-sim bakes (cloth, soft body, particle,
   fluid), damaged-cache cases, the cloud/orphan/baseline checks, the headless CLI,
   and adversarial batch cases (garbage files, partial-failure folders). See
