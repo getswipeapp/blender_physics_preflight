@@ -54,10 +54,10 @@ baseline). New in this round:
 - **R25** — isolated batch JSON now preserves each file's **per-check findings
   (incl. exact missing-frame messages)**, not just the summary counts.
 
-**Package under test:** `dist/failsafe-<commit>.zip` (built with
+**Package under test:** `dist/failsafe-1ac88ba.zip` (commit `1ac88ba`, built with
 `blender --command extension build`). SHA-256 recorded in
 `certification/RELEASE_SHA256SUMS.txt` and in the review package; contents
-verified: 22 files incl. `LICENSE`, `baseline.py`, `cli.py`, `batch.py`; no test
+verified: 21 files incl. `LICENSE`, `baseline.py`, `cli.py`, `batch.py`; no test
 files.
 
 **Headless suite (now 282 tests, up from 162) — full matrix, all green:**
