@@ -1,0 +1,89 @@
+name: Windows Certification
+
+# Manually triggered real-Windows certification of the expanded Failsafe build.
+# Runs the full headless test suite on four official Blender Windows x64 builds,
+# plus extension install/registration, functional acceptance, and a REAL
+# multi-process batch (clean / corrupt / timed-out worker) on Windows.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-cert:
+    name: Blender ${{ matrix.version }}
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "4.2.9"
+            url: "https://download.blender.org/release/Blender4.2/blender-4.2.9-windows-x64.zip"
+          - version: "4.5.9"
+            url: "https://download.blender.org/release/Blender4.5/blender-4.5.9-windows-x64.zip"
+          - version: "5.0.1"
+            url: "https://download.blender.org/release/Blender5.0/blender-5.0.1-windows-x64.zip"
+          - version: "5.2.3"
+            url: "https://download.blender.org/release/Blender5.2/blender-5.2.3-windows-x64.zip"
+    steps:
+      - name: Checkout (failsafe-expanded-hardening)
+        uses: actions/checkout@v4
+
+      - name: Download & extract Blender ${{ matrix.version }} (official Windows x64)
+        shell: pwsh
+        run: |
+          Write-Host "Downloading ${{ matrix.url }}"
+          Invoke-WebRequest -Uri "${{ matrix.url }}" -OutFile blender.zip
+          New-Item -ItemType Directory -Force -Path blender_bin | Out-Null
+          Expand-Archive -Path blender.zip -DestinationPath blender_bin -Force
+          $exe = Get-ChildItem -Path blender_bin -Recurse -Filter blender.exe | Select-Object -First 1
+          if (-not $exe) { throw "blender.exe not found after extracting ${{ matrix.url }}" }
+          "BLENDER=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Blender at: $($exe.FullName)"
+          & $exe.FullName --version
+
+      - name: Headless test suite (292) on Blender ${{ matrix.version }}
+        shell: pwsh
+        run: |
+          & "$env:BLENDER" -b --factory-startup -P tests/run_tests.py 2>&1 | Tee-Object -FilePath "run_win_${{ matrix.version }}.log"
+          $code = $LASTEXITCODE
+          Write-Host "Suite exit code: $code"
+          if ($code -ne 0) { exit $code }
+
+      - name: Build + install extension, functional acceptance (Windows, 5.2.3)
+        if: matrix.version == '5.2.3'
+        shell: pwsh
+        run: |
+          & "$env:BLENDER" --command extension build --source-dir ./failsafe --output-dir ./dist
+          $zip = Get-ChildItem -Path ./dist -Filter "failsafe-*.zip" | Select-Object -First 1
+          if (-not $zip) { throw "extension build produced no zip" }
+          Write-Host "Built: $($zip.FullName)"
+          $fp = $zip.FullName
+          & "$env:BLENDER" -b --python-expr "import bpy; print('INSTALL', list(bpy.ops.extensions.package_install_files(filepath=r'$fp', repo='user_default', enable_on_install=True)))" 2>&1 | Tee-Object -FilePath "win_install_5.2.3.log"
+          & "$env:BLENDER" -b -P certification/ci/win_acceptance.py 2>&1 | Tee-Object -FilePath "win_acceptance_5.2.3.log"
+          $code = $LASTEXITCODE
+          Write-Host "Acceptance exit code: $code"
+          if ($code -ne 0) { exit $code }
+
+      - name: REAL multi-process batch proof (Windows, 5.2.3)
+        if: matrix.version == '5.2.3'
+        shell: pwsh
+        run: |
+          & "$env:BLENDER" -b --factory-startup -P certification/render_proof/real_batch_proof.py 2>&1 | Tee-Object -FilePath "real_batch_win_5.2.3.log"
+          $code = $LASTEXITCODE
+          Write-Host "Real batch exit code: $code"
+          if ($code -ne 0) { exit $code }
+
+      - name: Upload logs (Blender ${{ matrix.version }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-logs-${{ matrix.version }}
+          path: |
+            run_win_${{ matrix.version }}.log
+            win_install_5.2.3.log
+            win_acceptance_5.2.3.log
+            real_batch_win_5.2.3.log
+          if-no-files-found: ignore
