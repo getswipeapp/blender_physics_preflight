@@ -42,7 +42,7 @@ claims were re-verified against the source before editing:
 | **C04** | `FEATURE_MATRIX.md` replaces unsupported "— no" cells with **? not verified**. All five competitor **prices** are now sourced to first-party Superhive listings (2026-11-13); per-product **feature** cells remain not-individually-verified. |
 | **C05** | Everywhere exit codes appear (LIMITATIONS, FEATURE_MATRIX, README): **exit `0` can include WARNINGs unless `--strict`** is now stated explicitly. (Verified in `cli.py` `verdict_exit_code`.) |
 | **C06** | Licensing corrected: **Superhive permits GPL or MIT** for code products; Failsafe uses GPL-3.0-or-later (STORE_LISTING, README). |
-| **C07** | Gallery requirement corrected in `DEMO_SHOTLIST.md`: **featured image + ≥1 additional** (Superhive recommends ~4–6), confirm on site. |
+| **C07** | Gallery requirement corrected in `DEMO_SHOTLIST.md` to **at least five images total** (2:1, ≥1200 px) — one additional image is **not** enough; confirm the current spec on the Superhive listing. (Supersedes an earlier draft of this log that said "featured image + ≥1 additional.") |
 | **C08** | Removed the unsupported "other tools bluff / say all-good" generalization from `INSTALL_GUIDE.md`; reworded to describe Failsafe's own behaviour only. |
 | **C09** | Removed the contradictory internal note; the macOS live-GUI acceptance **did** exercise Save Baseline + Export JSON (`GUI_ACCEPTANCE_933ea17.md`). |
 | **C10** | Removed the unverified "Render Ready $19+" comparator from the matrix. |

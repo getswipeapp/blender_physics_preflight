@@ -24,7 +24,9 @@ upload, as specs change:
   Superhive's official listing/rejection guidelines require a minimum of five —
   one additional image alone is **not** enough. (Aim for 5–6 strong shots; more good
   images sell better. Confirm the current spec on Superhive when you upload.)
-- **2:1 aspect ratio**, **minimum 1200 px wide** (PNG or JPG) — confirm current specs.
+- **2:1 aspect ratio**, **minimum 1200 px wide** — confirm current specs.
+- **File format:** the **featured image must be JPG and under 5 MB**; the other
+  gallery images may be **PNG or JPG**. Confirm the current limit on Superhive.
 - Written **install instructions and FAQs on the product page itself** — a
   downloadable guide alone isn't enough. (Reuse `INSTALL_GUIDE.md` + a short FAQ.)
 - A demo **video is optional**, not required.
