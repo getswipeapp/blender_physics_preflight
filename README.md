@@ -92,7 +92,7 @@ an error and the batch keeps going, preserving every good file's result. Use
 | 22 | Non-portable caches (absolute paths, outside the project) |
 | 23 | FPS / time-scale changed after baking |
 | 24 | Cache sitting in a cloud-synced folder (Dropbox, OneDrive, Google Drive, iCloud…) — can be locked or only partly downloaded at render time |
-| 25 | Potentially unclaimed cache files no simulation in this scene owns (often from renamed/deleted sims) — flagged to review before deleting, since a shared folder may hold another `.blend`'s data |
+| 25 | Potentially unclaimed cache files no simulation in any scene of the `.blend` owns (ownership checked across all scenes; often from renamed/deleted sims) — flagged to review before deleting, since a shared folder may hold another `.blend`'s data |
 | 26 | Simulation settings changed since you saved a **baseline** (opt-in; compares against an external sidecar file, never written into your `.blend`) |
 
 Covered cache systems: Cloth, Soft Body, Rigid Body World, Particles, Fluid

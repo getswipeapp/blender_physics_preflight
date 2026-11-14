@@ -20,10 +20,10 @@ recorder (macOS **Shift-Cmd-5**).
 Per ChatGPT's reading of Superhive's seller guidelines — double-check when you
 upload, as specs change:
 
-- A **featured image** plus **at least one additional image** is the minimum
-  Superhive currently requires; it **recommends ~4–6 additional images**. (Aim for
-  5–6 strong shots regardless — more good images sell better. Confirm the current
-  minimum/recommended counts on Superhive when you upload.)
+- **At least FIVE images total** in the gallery (a featured image plus the rest).
+  Superhive's official listing/rejection guidelines require a minimum of five —
+  one additional image alone is **not** enough. (Aim for 5–6 strong shots; more good
+  images sell better. Confirm the current spec on Superhive when you upload.)
 - **2:1 aspect ratio**, **minimum 1200 px wide** (PNG or JPG) — confirm current specs.
 - Written **install instructions and FAQs on the product page itself** — a
   downloadable guide alone isn't enough. (Reuse `INSTALL_GUIDE.md` + a short FAQ.)

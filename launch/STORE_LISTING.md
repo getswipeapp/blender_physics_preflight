@@ -81,7 +81,7 @@ find out when the render looks wrong — or after you've wasted hours.
 22. Non-portable cache paths (absolute, or outside the project folder)
 23. FPS / time-scale reminder *(Blender doesn't record the FPS used at bake time, so this flags the risk and reminds you to re-bake if you changed it — it can't detect the change for you)*
 24. **Cache in a cloud-synced folder** (Dropbox, OneDrive, Google Drive, iCloud…) that can be locked or only partly downloaded while a render reads it
-25. **Potentially unclaimed cache files** — cache files in the project's blendcache folder that no simulation in *this* scene owns (often left by a renamed or deleted object). Flagged as a WARNING to **review before deleting** — if another `.blend` shares the folder, they may belong to it. Failsafe never deletes anything.
+25. **Potentially unclaimed cache files** — cache files in the project's blendcache folder that **no simulation in any scene of this `.blend`** owns (often left by a renamed or deleted object). Flagged as a WARNING to **review before deleting** — if another `.blend` shares the folder, they may belong to it. Failsafe never deletes anything.
 26. **Settings-baseline drift** *(opt-in)* — warns if a simulation's settings changed since you clicked **Save Baseline**. The baseline is an external sidecar file; **nothing is ever written into your `.blend`.** It can only tell you settings changed since the baseline was saved, not since the bake — so save it right after baking.
 
 Every report also shows **total cache disk usage** per simulation.
@@ -158,7 +158,9 @@ Export a report or Save a settings baseline. No command line, no setup.
 
 **For technical directors / render farms — headless (optional).** The same checks
 also run from the command line with **no GUI**, returning a build-readable **exit
-code** (`0` clean · `1` blocking fail · `2` couldn't-verify · `3` usage/open error),
+code** (`0` = no blocking failures or unverified results — **warnings may still
+remain unless you pass `--strict`**, which makes a warning blocking · `1` blocking
+fail · `2` couldn't-verify · `3` usage/open error),
 optional `--json`, and a `--batch <folder>` mode that scans a whole folder of
 `.blend` files. In batch mode each file runs in its **own Blender subprocess with a
 per-file timeout**, so one corrupt or hanging file is isolated and logged while the

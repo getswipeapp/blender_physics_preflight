@@ -4,11 +4,12 @@
 > strategy doc, not public copy (competitor names stay out of the store listing per
 > the selling rule).
 >
-> **Verification status (important):** competitor claims below are labelled by how
-> they were checked. Only **Cache Commander** was re-verified against a live
-> Superhive listing on **2026-11-13**. Other products and prices are recorded from
-> the independent commercial review of the same date and were **not** independently
-> re-confirmed here — they are marked accordingly. Unknown ≠ absent: where a rival's
+> **Verification status (important):** all five competitors' **advertised list
+> prices** were located on their **first-party Superhive listings** (independent
+> commercial review, **2026-11-13**; links in the price table below), and Cache
+> Commander's batch feature was re-checked against its own docs here. Per-product
+> **feature** cells, however, are **not** individually verified — a confirmed listing
+> establishes the price, not every capability. Unknown ≠ absent: where a rival's
 > support for a capability isn't established by public evidence, it's shown as
 > **? not verified**, never as "no."
 
@@ -50,27 +51,26 @@ with transparent "Couldn't verify" uncertainty and an optional headless workflow
 camera, output paths); Alembic (`.abc`) cache verification and an HTML report are
 possible future work.
 
-## Observed competitor list prices (reference only — provenance labelled)
+## Observed competitor list prices (reference only — first-party sources)
 
-Public **list prices**, not verified sales or willingness-to-pay data. Recorded from
-the independent commercial review dated **2026-11-13**; only Cache Commander was
-re-checked here.
+Public **advertised list prices**, not verified sales or willingness-to-pay data.
+All five were located on their **first-party Superhive listings** by the independent
+commercial review on **2026-11-13** (Cache Commander was also re-checked directly
+here). Prices can change and promos appear — re-confirm on the live page before any
+public use.
 
-| Product | Reported list price | Verification (2026-11-13) |
+| Product | Advertised list price | First-party Superhive source (checked 2026-11-13) |
 |---|---|---|
-| SceneCheck | $3 | Per review; **not re-verified here** |
-| Triage | $9.99 | Per review; **not found** in my Superhive search — unverified |
-| Preflight | $9.99 | Per review; **not found** in my Superhive search — unverified |
-| Cache Guardian | $14 | Per review; **not re-verified here** |
-| Cache Commander | $29 | Superhive product/docs page confirmed to exist; **$29 seen on a reseller mirror (Getly)**, not scraped from the Superhive page itself |
+| SceneCheck | $3 | [listing](https://superhivemarket.com/products/scenecheck-one-click-scene-validator-for-error-free-renders-and-deliveries) |
+| Triage | $9.99 | [listing](https://superhivemarket.com/products/triage) |
+| Preflight | $9.99 | [listing](https://superhivemarket.com/products/preflight--find-out-what-will-go-wrong-before-the-render-starts) |
+| Cache Guardian | $14 (has also appeared with promotional pricing) | [listing](https://superhivemarket.com/products/cache-guardian-simulation-cache-checker--pre-render-validator) |
+| Cache Commander | $29 | [listing](https://superhivemarket.com/products/cache-commander--see-what-your-simulations-weigh-and-move-them) · [docs (background-process batch)](https://superhivemarket.com/products/cache-commander--see-what-your-simulations-weigh-and-move-them/docs) |
 
-Links: [Cache Commander (Superhive)](https://superhivemarket.com/products/cache-commander--see-what-your-simulations-weigh-and-move-them) ·
-[Cache Commander docs (background-process batch)](https://superhivemarket.com/products/cache-commander--see-what-your-simulations-weigh-and-move-them/docs) ·
-[Cache Commander price mirror (Getly, third-party)](https://www.getly.store/product/cache-commander-see-what-your-simulations-weigh-and-move-them-muq21n45)
-
-> **Before any public use:** re-open each Superhive listing and record the price and
-> feature claims directly from the live page, with the date. Do not restate the
-> unverified rows above as established fact.
+> **Prices are verified; per-product feature cells are not.** A confirmed listing
+> establishes the price, **not** every capability — keep feature comparisons marked
+> **? not verified** until each is checked against the specific listing. Re-open each
+> page and record price + claims with the date before any public use.
 
 ## Pricing — UNDECIDED (owner decision)
 

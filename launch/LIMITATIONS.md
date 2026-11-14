@@ -94,7 +94,8 @@ level verification is the right and sufficient check.
   the cache could be locked or only partly downloaded at render time; it can't see
   a given file's live sync state, so this is a heads-up, not a guarantee of trouble.
 - **Potentially unclaimed cache files (check #25)** are cache files in the project's
-  blendcache folder that **no simulation in this scene owns**. They're flagged as a
+  blendcache folder that **no simulation in any scene of this `.blend` owns**
+  (ownership is checked across all scenes, not just the active one). They're flagged as a
   WARNING to **review before deleting** — never as categorically safe to delete. If
   another `.blend` shares that folder, files this scene doesn't own may belong to it.
   Failsafe never deletes anything; the call stays yours.
