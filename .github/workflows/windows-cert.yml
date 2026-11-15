@@ -12,6 +12,10 @@ name: Windows Certification
 #   push: { branches: [failsafe-expanded-hardening] }
 on:
   workflow_dispatch:
+  # Temporarily re-added to certify the B2 fix (cd734f5+) on real Windows from the
+  # feature branch. Remove again once the result is recorded.
+  push:
+    branches: [failsafe-expanded-hardening]
 
 permissions:
   contents: read

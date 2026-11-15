@@ -79,7 +79,7 @@ find out when the render looks wrong — or after you've wasted hours.
 20. Frame gaps: every frame cached (first, middle **and** last), or flagged if sampled
 21. Two simulations sharing one cache location
 22. Non-portable cache paths (absolute, or outside the project folder)
-23. FPS / time-scale reminder *(Blender doesn't record the FPS used at bake time, so this flags the risk and reminds you to re-bake if you changed it — it can't detect the change for you)*
+23. **Frame-rate timing baseline** *(opt-in)* — records each scene's frame rate (and Rigid Body World time scale) when you click **Save Baseline**, then warns if the frame rate changed since. Unchanged → PASS, changed → WARNING; no baseline yet → a one-line "save one" hint, never a fake pass. A match means "unchanged since the baseline," not proof of the exact rate baked. The baseline is the same external sidecar file as #26; **nothing is written into your `.blend`.***
 24. **Cache in a cloud-synced folder** (Dropbox, OneDrive, Google Drive, iCloud…) that can be locked or only partly downloaded while a render reads it
 25. **Potentially unclaimed cache files** — cache files in the project's blendcache folder that **no simulation in any scene of this `.blend`** owns (often left by a renamed or deleted object). Flagged as a WARNING to **review before deleting** — if another `.blend` shares the folder, they may belong to it. Failsafe never deletes anything.
 26. **Settings-baseline drift** *(opt-in)* — warns if a simulation's settings changed since you clicked **Save Baseline**. The baseline is an external sidecar file; **nothing is ever written into your `.blend`.** It can only tell you settings changed since the baseline was saved, not since the bake — so save it right after baking.
@@ -268,9 +268,12 @@ on it.
   notes the batch-isolation feature is **not unique** (Cache Commander offers a
   comparable per-file background-process folder mode). The internal
   `strategy/FEATURE_MATRIX.md` carries the honest, verification-labelled comparison.
-- **Feature accuracy:** checks #1, #3, #16, #18–#20 and #23 are described above to
-  match the **fixed** build, not the first draft. #23 is honestly a reminder, not
-  a detector. #26 (baseline) tells you settings changed since the baseline was
+- **Feature accuracy:** checks #1, #3, #16, #18–#20, #23 and #26 are described above
+  to match the **fixed** build, not the first draft. #23 is a baseline-anchored
+  frame-rate check: it detects a frame-rate **change since the baseline you saved**
+  (unchanged → PASS, changed → WARNING, no baseline → a hint, unreadable baseline →
+  Couldn't verify) — it does **not** claim to know the exact rate the cache was baked
+  at. #26 (settings baseline) tells you settings changed since the baseline was
   *saved*, not since the bake — described that way above, no overclaim.
 - **Pre-launch gates (Superhive + your roadmap).** Done: multi-version headless
   tests (4.2/4.5/5.0/5.2, **292/292 each**, including the new cloud/orphan/baseline

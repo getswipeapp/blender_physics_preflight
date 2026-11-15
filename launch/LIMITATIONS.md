@@ -75,9 +75,16 @@ level verification is the right and sufficient check.
   there's no cache folder yet → cache checks report **UNKNOWN**. _Save, then scan._
 - **Fluid "Replay" mode.** Not a true bake — Blender re-creates frames on reopen.
   Flagged as **WARNING**, never PASS.
-- **Bake-time FPS / time-scale (check #23).** Blender doesn't record the FPS used
-  when a cache was baked, so the tool **cannot detect** whether you changed it
-  afterward. #23 is an honest reminder to re-bake if you did — not a detector.
+- **Frame-rate timing baseline (check #23).** Blender doesn't record the FPS a
+  cache was baked at, so Failsafe anchors this to a baseline **you** save: clicking
+  Save Baseline records each scene's frame rate (and the Rigid Body World time
+  scale). Later scans compare the current frame rate to that saved value —
+  **unchanged → PASS, changed → WARNING.** With no baseline saved (or one that
+  predates this feature) it reports **Not applicable** with a one-line hint to save
+  one — not a nag and not a fake pass. If the baseline is missing, corrupt, foreign,
+  or holds invalid / non-finite values it reports **Couldn't verify**. A match means
+  "frame rate unchanged **since the baseline was saved**" — **not** proof the cache
+  was actually baked at that rate.
 - **Settings baseline (check #26).** This compares your current sim settings to a
   baseline **you** chose to save. It can only tell you settings changed **since the
   baseline was saved — not since the bake.** It compares a **curated set of key

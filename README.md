@@ -90,7 +90,7 @@ an error and the batch keeps going, preserving every good file's result. Use
 | 20 | **Frame gaps**: every frame cached, not a sample |
 | 21 | Two simulations writing to the same cache location |
 | 22 | Non-portable caches (absolute paths, outside the project) |
-| 23 | FPS / time-scale changed after baking |
+| 23 | Frame rate changed since the timing **baseline** you saved (opt-in; records each scene's FPS + Rigid Body World time scale into the same external sidecar as #26) |
 | 24 | Cache sitting in a cloud-synced folder (Dropbox, OneDrive, Google Drive, iCloud…) — can be locked or only partly downloaded at render time |
 | 25 | Potentially unclaimed cache files no simulation in any scene of the `.blend` owns (ownership checked across all scenes; often from renamed/deleted sims) — flagged to review before deleting, since a shared folder may hold another `.blend`'s data |
 | 26 | Simulation settings changed since you saved a **baseline** (opt-in; compares against an external sidecar file, never written into your `.blend`) |
@@ -125,8 +125,12 @@ collider not marked "Animated") are **FAIL**.
   on-disk file check is **Not applicable** for them.
 - **Fluid "Replay"** is a playback cache, not a bake. It is reported as a
   **Warning**, never PASS.
-- **FPS at bake time is not recorded by Blender**, so check #23 is "Couldn't
-  verify" by nature (it flags a non-default time scale, and reminds you to re-bake).
+- **FPS at bake time is not recorded by Blender**, so check #23 anchors to a
+  baseline you save: it records each scene's frame rate (and Rigid Body World time
+  scale) when you click Save Baseline, then flags a **change since** — unchanged →
+  PASS, changed → WARNING, no baseline → a "save one" hint, unreadable baseline →
+  "Couldn't verify". A match means "unchanged since the baseline," not proof of the
+  exact rate baked.
 - The **baseline** check (#26) can only tell you settings changed since you saved
   the baseline — not since the bake itself. Save the baseline right after baking
   for it to mean the most; with no baseline saved it reports "Couldn't verify".

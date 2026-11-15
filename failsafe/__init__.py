@@ -2,7 +2,7 @@
 """Failsafe — a read-only Blender extension that catches physics and
 simulation-cache problems before you render.
 
-23 checks in two groups (Physics Setup, Simulation Caches). The cache checks
+26 checks in two groups (Physics Setup, Simulation Caches). The cache checks
 verify the actual files on disk instead of trusting Blender's "baked" flags,
 which stay True after the cache files are gone.
 """
