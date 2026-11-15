@@ -456,33 +456,131 @@ def c22_portable(ctx, mk):
     return []
 
 
+def _fmt_fps(v):
+    """Human-friendly frame rate: whole numbers without a decimal tail (24),
+    fractional rates kept readable (29.97)."""
+    if v is None:
+        return "?"
+    if abs(v - round(v)) < 1e-3:
+        return "%d" % round(v)
+    return ("%.3f" % v).rstrip("0").rstrip(".")
+
+
 # -------------------------------------------------------------------- 23 ----
-@check(23, "Frame rate/speed unchanged since bake", GROUP_CACHE,
-       name_bad="Frame rate/speed may have changed since bake",
-       name_warn="Playback speed may have changed since bake",
-       name_unknown="Bake timing couldn't be confirmed")
+@check(23, "Frame rate unchanged since the timing baseline", GROUP_CACHE,
+       name_warn="Frame rate changed since the timing baseline",
+       name_unknown="Timing baseline couldn't be read",
+       name_na="Frame-rate timing tracking")
 def c23_fps_timescale(ctx, mk):
+    """Flag a frame-rate change *since a saved baseline* for any baked simulation.
+
+    Blender keeps no record of the frame rate a cache was baked at, so this can't
+    be reconstructed from the cache. Instead we compare the current scene frame
+    rate (and Rigid Body World time scale) against the values the user captured
+    with Save Baseline. A match is reported only as 'unchanged since the baseline'
+    — never as proof the cache was baked at that rate. A change is a WARNING, not
+    a FAIL: a different frame rate alters playback length/speed but does not prove
+    the cache is wrong or that a re-bake is mandatory. The Rigid Body World time
+    scale is compared against the *saved* value, not against 1.0 — a non-default
+    time scale can be deliberate. Read-only: reads the external baseline sidecar
+    and nothing else."""
     entries = _caches(ctx)
     baked_any = any((e.baked_flag or e.frames_present) for e in entries)
     if not baked_any:
-        return []
+        return []  # no baked simulation: nothing to track
+
     scene = ctx.scene
+    cur_eff = bl.effective_fps(getattr(scene, "render", None))
+    rbw = getattr(scene, "rigidbody_world", None)
+    cur_ts = None
+    if rbw is not None and hasattr(rbw, "time_scale"):
+        try:
+            cur_ts = float(rbw.time_scale)
+        except Exception:
+            cur_ts = None
+
+    path = bl.default_baseline_path()
+    if not path:
+        return [mk(Status.NA,
+                   "Frame-rate timing tracking isn't set up (the file isn't "
+                   "saved, so there's nowhere to keep a reference).",
+                   hint="Save your .blend, bake, then click Save Baseline to "
+                        "record the frame rate for future scans.")]
+    try:
+        data = bl.load_baseline(path)
+    except ValueError as exc:
+        reason = str(exc)
+        if reason == "no baseline file":
+            # Truly nothing saved yet: a quiet setup prompt, not a problem.
+            return [mk(Status.NA,
+                       "Frame-rate timing tracking isn't set up yet. Current "
+                       "scene frame rate is %s FPS." % _fmt_fps(cur_eff),
+                       hint="Right after a good bake, click Save Baseline. Later "
+                            "scans will then flag a frame-rate change.")]
+        # A baseline file exists but is unreadable/invalid: honest UNKNOWN.
+        return [mk(Status.UNKNOWN,
+                   "The saved baseline file couldn't be read (%s), so the frame "
+                   "rate can't be compared." % reason,
+                   hint="Re-save it with Save Baseline, or delete the file.")]
+
+    # A baseline exists — but can we trust it for a timing comparison? A
+    # newer/older schema or a baseline copied in from another file is an honest
+    # 'Couldn't verify', never a guess.
+    if not bl.schema_ok(data):
+        return [mk(Status.UNKNOWN,
+                   "The saved baseline was written by a different version of "
+                   "Failsafe (schema %s), so its frame rate can't be compared "
+                   "safely." % data.get("schema"),
+                   hint="Click Save Baseline again to write a fresh one.")]
+    foreign = bl.foreign_file_name(data, bpy.data.filepath)
+    if foreign:
+        return [mk(Status.UNKNOWN,
+                   "The saved baseline was taken for a different file ('%s'), so "
+                   "its frame rate doesn't describe this scene." % foreign,
+                   hint="Click Save Baseline to record a reference for this "
+                        "file.")]
+
+    saved = bl.scene_timing_for(data, scene.name)
+    if saved is None:
+        return [mk(Status.NA,
+                   "This baseline has no frame-rate reference for scene '%s' (it "
+                   "predates timing tracking)." % scene.name,
+                   hint="Click Save Baseline again to start tracking frame "
+                        "rate.")]
+
     out = []
-    # Rigid Body World time scale is a clear, readable red flag.
-    rbw = scene.rigidbody_world
-    if rbw is not None and abs(getattr(rbw, "time_scale", 1.0) - 1.0) > 1e-4:
+    saved_eff = bl.effective_fps(saved)
+    if saved_eff is not None and cur_eff is not None \
+            and abs(saved_eff - cur_eff) > 1e-4:
         out.append(mk(Status.WARNING,
-                      "Rigid Body World time scale is %.3g (not 1.0). If it "
-                      "changed after baking, the sim plays at the wrong speed."
-                      % rbw.time_scale,
-                      hint="Re-bake after changing time scale."))
-    # Blender records no FPS at bake time, so this is UNKNOWN by nature.
-    fps = scene.render.fps / max(scene.render.fps_base, 1e-6)
-    out.append(mk(Status.UNKNOWN,
-                  "Blender doesn't store the FPS used at bake time. Current "
-                  "scene FPS is %.3g — if you changed FPS or time scale after "
-                  "baking, re-bake so the timing matches." % fps,
-                  hint="When in doubt, delete the cache and re-bake."))
+            "Frame rate changed since the baseline: saved %s FPS, scene is now "
+            "%s FPS. A baked sim covers a different length of time at a new frame "
+            "rate, so its motion can play too fast or too slow — review the "
+            "timing." % (_fmt_fps(saved_eff), _fmt_fps(cur_eff)),
+            hint="If the motion looks wrong at the new frame rate, delete the "
+                 "cache and re-bake; otherwise set the frame rate back."))
+
+    saved_ts = saved.get("rbw_time_scale")
+    if cur_ts is not None and saved_ts is not None:
+        try:
+            if abs(float(saved_ts) - cur_ts) > 1e-4:
+                out.append(mk(Status.WARNING,
+                    "Rigid Body World time scale changed since the baseline: "
+                    "saved %.4g, now %.4g. If this changed after baking, the sim "
+                    "plays at a different speed than it was baked."
+                    % (float(saved_ts), cur_ts),
+                    hint="Re-bake after changing time scale, or restore the "
+                         "baselined value."))
+        except (TypeError, ValueError):
+            pass
+
+    if not out:
+        extra = (" Rigid Body World time scale also matches."
+                 if cur_ts is not None and saved_ts is not None else "")
+        out.append(mk(Status.PASS,
+            "Frame rate unchanged since the baseline was saved (%s FPS).%s This "
+            "only confirms the setting hasn't moved — it is not proof the cache "
+            "was baked at that rate." % (_fmt_fps(cur_eff), extra)))
     return out
 
 

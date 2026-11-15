@@ -63,9 +63,14 @@ HELP = {
          "other's frames, unless their cache names differ."),
     22: ("A cache saved outside the project may not be found on another machine "
          "or a render farm, unless the path is still reachable there."),
-    23: ("Changing scene timing or simulation speed after baking can make the "
-         "existing cache play back wrong. Blender doesn't always record enough "
-         "to confirm the original bake settings."),
+    23: ("A baked sim plays over a fixed number of frames; change the scene frame "
+         "rate afterward and the same cache now covers a different length of "
+         "time, so the motion speeds up or slows down. Blender keeps no record of "
+         "the frame rate a cache was baked at, so Failsafe watches a value you "
+         "save instead: click Save Baseline right after a good bake, and later "
+         "scans flag if the frame rate (or Rigid Body World time scale) changed "
+         "since. A match means 'unchanged since the baseline' — not proof the "
+         "cache was baked at that rate."),
     24: ("A cache inside a cloud-synced folder (Dropbox, Google Drive, OneDrive, "
          "iCloud and the like) can be locked, only partly uploaded, or replaced "
          "with an offline placeholder while a render reads it — any of which can "

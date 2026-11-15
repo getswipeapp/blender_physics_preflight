@@ -757,7 +757,109 @@ def build_21_fail(outdir):
     bpy.ops.wm.save_as_mainfile(filepath=blend)
 
 
-def build_23_fail(outdir):
-    blend = _make_cloth_blend(outdir)
-    bpy.context.scene.rigidbody_world  # none; use cloth baked + change fps
-    bpy.context.scene.render.fps = 60
+# ---- #23 frame-rate / timing baseline fixtures -----------------------------
+# #23 compares the current scene frame rate (and Rigid Body World time scale)
+# against a value captured with Save Baseline. These exercise every branch:
+# unchanged (PASS), changed fps / fps_base / time scale (WARNING), no baseline
+# (NA setup hint), corrupt / foreign baseline (UNKNOWN), an intentional
+# non-default time scale that MATCHES the baseline (PASS, not a false warning),
+# and multiple scenes.
+
+def _save_timing_baseline():
+    """Capture a Failsafe baseline (external sidecar) for the current file."""
+    from failsafe import baseline as bl
+    p = bl.default_baseline_path()
+    bl.save_baseline(bpy.context.scene, p, overwrite=True)
+    return p
+
+
+def build_23_pass(outdir):
+    """Bake at 24 fps, save a baseline, change nothing -> #23 PASS."""
+    _make_cloth_blend(outdir)
+    bpy.context.scene.render.fps = 24
+    bpy.context.scene.render.fps_base = 1.0
+    _save_timing_baseline()
+
+
+def build_23_warn_fps(outdir):
+    """Bake + baseline at 24 fps, then set the scene to 30 -> #23 WARNING."""
+    _make_cloth_blend(outdir)
+    sc = bpy.context.scene
+    sc.render.fps, sc.render.fps_base = 24, 1.0
+    _save_timing_baseline()
+    sc.render.fps = 30
+
+
+def build_23_warn_fpsbase(outdir):
+    """Change only fps_base (24/1.0 -> 24/1.001) so effective fps differs -> WARN."""
+    _make_cloth_blend(outdir)
+    sc = bpy.context.scene
+    sc.render.fps, sc.render.fps_base = 24, 1.0
+    _save_timing_baseline()
+    sc.render.fps_base = 1.001
+
+
+def build_23_na_no_baseline(outdir):
+    """Baked cloth, NO baseline saved -> #23 NA (unobtrusive setup hint)."""
+    _make_cloth_blend(outdir)
+    # deliberately no baseline
+
+
+def build_23_unknown_foreign(outdir):
+    """Baseline saved, then its recorded source file is a different name -> UNKNOWN."""
+    import json
+    from failsafe import baseline as bl
+    _make_cloth_blend(outdir)
+    p = _save_timing_baseline()
+    with open(p) as fh:
+        d = json.load(fh)
+    d["file"] = "/elsewhere/some_other_project.blend"
+    with open(p, "w") as fh:
+        json.dump(d, fh)
+
+
+def build_23_unknown_corrupt(outdir):
+    """A baseline file that exists but is unreadable garbage -> UNKNOWN."""
+    from failsafe import baseline as bl
+    _make_cloth_blend(outdir)
+    _save_timing_baseline()
+    with open(bl.default_baseline_path(), "w") as fh:
+        fh.write("{ this is not valid json")
+
+
+def build_23_rbw_intentional_ok(outdir):
+    """A deliberate non-default Rigid Body World time scale (0.5) that MATCHES
+    the baseline must NOT warn (the old code warned on any value != 1.0) -> PASS."""
+    _make_cloth_blend(outdir)
+    sc = bpy.context.scene
+    sc.render.fps, sc.render.fps_base = 24, 1.0
+    with bpy.context.temp_override(scene=sc):
+        bpy.ops.rigidbody.world_add()
+    sc.rigidbody_world.time_scale = 0.5
+    _save_timing_baseline()           # captures time_scale=0.5
+    # leave it at 0.5 -> unchanged -> PASS
+
+
+def build_23_rbw_changed(outdir):
+    """Rigid Body World time scale changed since the baseline -> WARNING."""
+    _make_cloth_blend(outdir)
+    sc = bpy.context.scene
+    sc.render.fps, sc.render.fps_base = 24, 1.0
+    with bpy.context.temp_override(scene=sc):
+        bpy.ops.rigidbody.world_add()
+    sc.rigidbody_world.time_scale = 1.0
+    _save_timing_baseline()
+    sc.rigidbody_world.time_scale = 0.5   # changed -> WARNING
+
+
+def build_23_multiscene(outdir):
+    """Two scenes captured in one baseline; change fps only in the active (sim)
+    scene -> WARNING, proving per-scene timing is independent."""
+    _make_cloth_blend(outdir)
+    sc = bpy.context.scene
+    sc.name = "SimScene"
+    sc.render.fps, sc.render.fps_base = 24, 1.0
+    other = bpy.data.scenes.new("OtherScene")
+    other.render.fps = 48
+    _save_timing_baseline()           # captures both scenes
+    sc.render.fps = 30                # change active only -> WARNING on scan

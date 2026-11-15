@@ -25,7 +25,7 @@ import time
 import bpy
 
 
-BASELINE_SCHEMA = 3
+BASELINE_SCHEMA = 4   # 4: adds per-scene frame-rate / timing reference (#23)
 
 # Reserved key inside a fingerprint dict listing any identities that collided
 # while capturing (so #26 can report "Couldn't verify" instead of silently
@@ -196,6 +196,68 @@ def capture_fingerprints(scene=None):
     return fp
 
 
+def capture_scene_timing():
+    """Record each scene's frame-rate reference and timing knobs so a later scan
+    can flag a change *since the baseline was saved* (check #23). Pure read.
+
+    Stored per scene name. Effective playback rate is ``fps / fps_base``; we keep
+    both raw values. The Rigid Body World ``time_scale`` is recorded too and is
+    compared against *this saved value* — never against a hard-coded 1.0, because
+    a non-default time scale can be a deliberate choice, not an error.
+
+    We never claim this value is the frame rate the cache was actually baked at —
+    only the value in effect when the user saved the baseline. The honest wording
+    lives in the check; this function just records the numbers."""
+    out = {}
+    for scn in bpy.data.scenes:
+        rnd = getattr(scn, "render", None)
+        if rnd is None:
+            continue
+        rec = {
+            "fps": int(getattr(rnd, "fps", 0) or 0),
+            "fps_base": _rv(float(getattr(rnd, "fps_base", 1.0) or 1.0)),
+        }
+        rbw = getattr(scn, "rigidbody_world", None)
+        if rbw is not None and hasattr(rbw, "time_scale"):
+            try:
+                rec["rbw_time_scale"] = _rv(float(rbw.time_scale))
+            except Exception:
+                pass
+        out[scn.name] = rec
+    return out
+
+
+def scene_timing_for(data, scene_name):
+    """The saved timing record for ``scene_name`` (keys: fps, fps_base, and
+    optionally rbw_time_scale), or None when this baseline carries no timing
+    section (e.g. one written before timing tracking) or no entry for that scene.
+    Callers treat None as 'tracking not set up', never as a match."""
+    if not isinstance(data, dict):
+        return None
+    st = data.get("scene_timing")
+    if not isinstance(st, dict):
+        return None
+    rec = st.get(scene_name)
+    return rec if isinstance(rec, dict) and "fps" in rec else None
+
+
+def effective_fps(rec):
+    """Effective playback rate (fps / fps_base) from a timing record or a live
+    scene.render, with a safe divisor. Returns a float, or None if unreadable."""
+    try:
+        if rec is None:
+            return None
+        if isinstance(rec, dict):
+            fps = float(rec.get("fps", 0))
+            base = float(rec.get("fps_base", 1.0) or 1.0)
+        else:  # a scene.render
+            fps = float(getattr(rec, "fps", 0))
+            base = float(getattr(rec, "fps_base", 1.0) or 1.0)
+        return fps / max(base, 1e-6)
+    except (TypeError, ValueError):
+        return None
+
+
 def default_baseline_path():
     """`<blenddir>/<blendbasename>.failsafe-baseline.json`, or None if unsaved."""
     fp = bpy.data.filepath
@@ -225,6 +287,7 @@ def save_baseline(scene, path, overwrite=False):
         "file": bpy.data.filepath or None,
         "saved_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "fingerprints": capture_fingerprints(scene),
+        "scene_timing": capture_scene_timing(),
     }
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)

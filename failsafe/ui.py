@@ -77,8 +77,10 @@ def _status_label(row, text, status):
         row.label(text=text, icon=_STATUS_ICON.get(status, "DOT"))
 
 
-def _wrap_chars(context):
-    """Estimate how many characters fit on one line of the panel."""
+def _wrap_chars(context, reserve_extra=0):
+    """Estimate how many characters fit on one line of the panel. ``reserve_extra``
+    subtracts additional pixels (e.g. for a header's second leading icon) so the
+    text wraps instead of truncating."""
     region = context.region
     width = region.width if region else 300
     try:
@@ -87,8 +89,39 @@ def _wrap_chars(context):
         uifac = 1.0
     # Panel padding + the indent + an icon eats some width; be conservative so
     # text wraps a touch early rather than truncating.
-    usable = max(width - 62, 70)
+    usable = max(width - 62 - reserve_extra, 70)
     return max(int(usable / (7.3 * uifac)), 14)
+
+
+def _header_title(box, context, m, worst, is_collapsed):
+    """Draw a result's clickable headline: the coloured severity icon, the
+    collapse arrow, then the title text — LEFT-ALIGNED and word-wrapped onto as
+    many lines as the panel width needs. This fixes two defects in the old
+    single-button header: the title no longer truncates with '…' on a narrow
+    panel, and no longer drifts to centre on a wide one (a filled button centres
+    its label). Clicking any line still toggles the detail, exactly as before."""
+    from .engine import display_name
+    title = display_name(m, worst)
+    # Reserve room for the two leading icons (severity + arrow) so line 1 wraps
+    # rather than clipping; continuation lines get the same budget (a little slack
+    # is harmless) and indent under the title.
+    maxc = _wrap_chars(context, reserve_extra=26)
+    lines = textwrap.wrap(title, maxc) or [title]
+    arrow = "TRIA_RIGHT" if is_collapsed else "TRIA_DOWN"
+    col = box.column(align=True)
+    for i, ln in enumerate(lines):
+        r = col.row(align=True)
+        r.scale_y = 1.15
+        r.alignment = "LEFT"
+        if i == 0:
+            _status_label(r, "", worst)
+            op = r.operator("failsafe.toggle_detail", text=ln, icon=arrow,
+                            emboss=False)
+        else:
+            r.separator(factor=1.4)
+            op = r.operator("failsafe.toggle_detail", text=ln, icon="BLANK1",
+                            emboss=False)
+        op.key = str(m.id)
 
 
 def _wrap_label(col, context, text, status=None, indent=1.6):
@@ -245,15 +278,7 @@ class FAILSAFE_PT_panel(Panel):
             # the check passes, and a short problem wording the moment it is a
             # warning or fail — so a collapsed row never reads as reassurance
             # while its dot is amber or red.
-            head = box.row(align=True)
-            head.scale_y = 1.15
-            _status_label(head, "", worst)
-            op = head.operator(
-                "failsafe.toggle_detail",
-                text=display_name(m, worst),
-                icon="TRIA_RIGHT" if is_collapsed else "TRIA_DOWN",
-                emboss=False)
-            op.key = str(m.id)
+            _header_title(box, context, m, worst, is_collapsed)
             if is_collapsed:
                 # Even collapsed, a problem row shows a one-line reason, so a
                 # "Couldn't verify" (or fail/warning) never hides WHY behind a
