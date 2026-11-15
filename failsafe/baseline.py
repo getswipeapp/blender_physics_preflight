@@ -215,7 +215,7 @@ def capture_scene_timing():
             continue
         rec = {
             "fps": int(getattr(rnd, "fps", 0) or 0),
-            "fps_base": _rv(float(getattr(rnd, "fps_base", 1.0) or 1.0)),
+            "fps_base": _rv(float(getattr(rnd, "fps_base", 1.0))),
         }
         rbw = getattr(scn, "rigidbody_world", None)
         if rbw is not None and hasattr(rbw, "time_scale"):
@@ -248,11 +248,13 @@ def effective_fps(rec):
         if rec is None:
             return None
         if isinstance(rec, dict):
+            # A null/garbage fps or fps_base (hand-edited sidecar) raises here and
+            # is reported as None -> the caller treats it as UNKNOWN, never a guess.
             fps = float(rec.get("fps", 0))
-            base = float(rec.get("fps_base", 1.0) or 1.0)
+            base = float(rec.get("fps_base", 1.0))
         else:  # a scene.render
             fps = float(getattr(rec, "fps", 0))
-            base = float(getattr(rec, "fps_base", 1.0) or 1.0)
+            base = float(getattr(rec, "fps_base", 1.0))
         return fps / max(base, 1e-6)
     except (TypeError, ValueError):
         return None
@@ -309,10 +311,24 @@ def load_baseline(path):
     return data
 
 
+# Baseline schemas whose `fingerprints` block this build can still compare. The
+# 3 -> 4 bump only ADDED a per-scene `scene_timing` section; the settings
+# fingerprint format is unchanged, so a schema-3 baseline a customer saved before
+# upgrading is still valid for the settings-drift check (#26) and must not be
+# voided. A newer/unknown schema is still rejected. (#23's timing comparison
+# separately needs the scene_timing section, which only schema >= 4 writes, so an
+# older baseline simply reads there as 'tracking not set up', never a false PASS.)
+FINGERPRINT_COMPAT_SCHEMAS = (3, 4)
+
+
 def schema_ok(data):
-    """True if the baseline's schema is one this build knows how to compare.
-    A newer/unknown schema -> caller reports 'Couldn't verify', never a guess."""
-    return isinstance(data, dict) and data.get("schema") == BASELINE_SCHEMA
+    """True if the baseline's settings fingerprints are a format this build can
+    compare. Accepts the whole compatible range (not just the newest schema), so
+    adding a new section by bumping the schema never silently invalidates every
+    baseline already on disk. A newer/unknown schema -> caller reports 'Couldn't
+    verify', never a guess."""
+    return isinstance(data, dict) and \
+        data.get("schema") in FINGERPRINT_COMPAT_SCHEMAS
 
 
 def foreign_file_name(data, current_filepath):

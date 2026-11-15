@@ -95,6 +95,10 @@ CASES = [
     ("23 intentional non-default time scale matches baseline (pass)", 23, fixtures.build_23_rbw_intentional_ok, True, {Status.PASS}),
     ("23 time scale changed since baseline (warn)", 23, fixtures.build_23_rbw_changed, True, {Status.WARNING}),
     ("23 multi-scene fps change in active scene (warn)", 23, fixtures.build_23_multiscene, True, {Status.WARNING}),
+    ("23 unreadable fps in baseline -> unknown (B1: no false pass)", 23, fixtures.build_23_unknown_unreadable_fps, True, {Status.UNKNOWN}),
+    ("23 unreadable time scale -> unknown (M2: no false 'matches')", 23, fixtures.build_23_unknown_bad_timescale, True, {Status.UNKNOWN}),
+    ("23 schema-3 baseline -> NA (predates timing)", 23, fixtures.build_schema3_baseline, True, {Status.NA}),
+    ("26 schema-3 baseline still compares (M1: not voided)", 26, fixtures.build_schema3_baseline, True, {Status.PASS}),
     # heavy-sim integration (real bakes): prove the scanners populate correctly,
     # not just the decision logic.
     ("HS soft-body baked (pass)", 18, fixtures.build_softbody_pass, True, {Status.PASS}),

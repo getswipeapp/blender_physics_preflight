@@ -99,8 +99,9 @@ def _header_title(box, context, m, worst, is_collapsed):
     many lines as the panel width needs. This fixes two defects in the old
     single-button header: the title no longer truncates with '…' on a narrow
     panel, and no longer drifts to centre on a wide one (a filled button centres
-    its label). Clicking any line still toggles the detail, exactly as before."""
-    from .engine import display_name
+    its label). Clicking the arrow or any title line still toggles the detail —
+    the clickable target is now the icon-free text rather than the whole row
+    width, the tradeoff for left alignment + wrapping."""
     title = display_name(m, worst)
     # Reserve room for the two leading icons (severity + arrow) so line 1 wraps
     # rather than clipping; continuation lines get the same budget (a little slack
@@ -111,7 +112,10 @@ def _header_title(box, context, m, worst, is_collapsed):
     col = box.column(align=True)
     for i, ln in enumerate(lines):
         r = col.row(align=True)
-        r.scale_y = 1.15
+        # Height bump only on the first line, so a title that wraps to several
+        # lines doesn't become a tall block on a narrow panel.
+        if i == 0:
+            r.scale_y = 1.15
         r.alignment = "LEFT"
         if i == 0:
             _status_label(r, "", worst)

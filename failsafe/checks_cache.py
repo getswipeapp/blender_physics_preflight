@@ -550,8 +550,18 @@ def c23_fps_timescale(ctx, mk):
 
     out = []
     saved_eff = bl.effective_fps(saved)
-    if saved_eff is not None and cur_eff is not None \
-            and abs(saved_eff - cur_eff) > 1e-4:
+    # The frame-rate comparison must actually be possible. A hand-edited or
+    # half-written sidecar can carry a null/garbage fps; if either side can't be
+    # read we report UNKNOWN — never fall through to a green "unchanged" that was
+    # never actually compared (the cardinal 'no false PASS' rule).
+    if saved_eff is None or cur_eff is None:
+        return [mk(Status.UNKNOWN,
+                   "The baseline's frame rate for scene '%s' couldn't be read, so "
+                   "it can't be compared." % scene.name,
+                   hint="Click Save Baseline again to write a fresh reference.")]
+    # Tolerance above the display precision so two values that render identically
+    # never read as "changed … 24 -> 24".
+    if abs(saved_eff - cur_eff) > 1e-3:
         out.append(mk(Status.WARNING,
             "Frame rate changed since the baseline: saved %s FPS, scene is now "
             "%s FPS. A baked sim covers a different length of time at a new frame "
@@ -560,7 +570,11 @@ def c23_fps_timescale(ctx, mk):
             hint="If the motion looks wrong at the new frame rate, delete the "
                  "cache and re-bake; otherwise set the frame rate back."))
 
+    # Rigid Body World time scale: compare to the SAVED value (never to 1.0 — a
+    # non-default scale can be deliberate). A present-but-unreadable saved value
+    # is an honest UNKNOWN, not a silent skip that could later read as a match.
     saved_ts = saved.get("rbw_time_scale")
+    ts_matches = False
     if cur_ts is not None and saved_ts is not None:
         try:
             if abs(float(saved_ts) - cur_ts) > 1e-4:
@@ -571,12 +585,16 @@ def c23_fps_timescale(ctx, mk):
                     % (float(saved_ts), cur_ts),
                     hint="Re-bake after changing time scale, or restore the "
                          "baselined value."))
+            else:
+                ts_matches = True
         except (TypeError, ValueError):
-            pass
+            out.append(mk(Status.UNKNOWN,
+                "The baseline's Rigid Body World time scale couldn't be read, so "
+                "it can't be compared.",
+                hint="Click Save Baseline again to write a fresh reference."))
 
     if not out:
-        extra = (" Rigid Body World time scale also matches."
-                 if cur_ts is not None and saved_ts is not None else "")
+        extra = " Rigid Body World time scale also matches." if ts_matches else ""
         out.append(mk(Status.PASS,
             "Frame rate unchanged since the baseline was saved (%s FPS).%s This "
             "only confirms the setting hasn't moved — it is not proof the cache "

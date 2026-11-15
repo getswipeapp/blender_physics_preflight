@@ -859,7 +859,59 @@ def build_23_multiscene(outdir):
     sc = bpy.context.scene
     sc.name = "SimScene"
     sc.render.fps, sc.render.fps_base = 24, 1.0
+    # OtherScene's saved fps is set to the value the active scene will CHANGE to
+    # (30), so if #23 ever compared against the wrong scene's record it would
+    # wrongly PASS. Correct per-scene anchoring must still WARNING here.
     other = bpy.data.scenes.new("OtherScene")
-    other.render.fps = 48
-    _save_timing_baseline()           # captures both scenes
+    other.render.fps = 30
+    _save_timing_baseline()           # captures both scenes (SimScene=24, Other=30)
     sc.render.fps = 30                # change active only -> WARNING on scan
+
+
+def build_23_unknown_unreadable_fps(outdir):
+    """B1 regression: a schema-4 baseline whose scene_timing fps was hand-edited
+    to null. #23 must be UNKNOWN (it could not compare), NEVER a green PASS."""
+    import json
+    _make_cloth_blend(outdir)
+    sc = bpy.context.scene
+    sc.render.fps, sc.render.fps_base = 24, 1.0
+    p = _save_timing_baseline()
+    with open(p) as fh:
+        d = json.load(fh)
+    d["scene_timing"][sc.name]["fps"] = None
+    with open(p, "w") as fh:
+        json.dump(d, fh)
+
+
+def build_23_unknown_bad_timescale(outdir):
+    """M2 regression: fps matches, but the baseline's rbw_time_scale is garbage.
+    #23 must report UNKNOWN, never a PASS that claims the time scale 'matches'."""
+    import json
+    _make_cloth_blend(outdir)
+    sc = bpy.context.scene
+    sc.render.fps, sc.render.fps_base = 24, 1.0
+    with bpy.context.temp_override(scene=sc):
+        bpy.ops.rigidbody.world_add()
+    sc.rigidbody_world.time_scale = 1.0
+    p = _save_timing_baseline()
+    with open(p) as fh:
+        d = json.load(fh)
+    d["scene_timing"][sc.name]["rbw_time_scale"] = "not-a-number"
+    with open(p, "w") as fh:
+        json.dump(d, fh)
+
+
+def build_schema3_baseline(outdir):
+    """M1 regression: a baseline saved under the PREVIOUS schema (3), i.e. before
+    timing tracking (no scene_timing section). After the 3->4 bump it must stay
+    comparable for #26 (settings unchanged -> PASS) and read as NA for #23
+    (frame-rate tracking simply not set up) — never voided to a false result."""
+    import json
+    _make_cloth_blend(outdir)
+    p = _save_timing_baseline()
+    with open(p) as fh:
+        d = json.load(fh)
+    d["schema"] = 3
+    d.pop("scene_timing", None)       # schema-3 baselines carried no timing
+    with open(p, "w") as fh:
+        json.dump(d, fh)
