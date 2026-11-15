@@ -6,6 +6,13 @@
 > actual first-time user sitting down with it; this catches the obvious friction
 > ahead of that. No code was changed (per the "no redesign / no new features"
 > direction) — the items below are recommendations for a future polish pass.
+>
+> **Gate status (owner decision):** the independent naive-human beginner session is
+> recorded as **NOT TESTED** — recommended, not a release blocker. Standing in for
+> it at launch: this heuristic pass, a scripted clean-config fresh-install + first-
+> scan usability test (17/17, `certification/FRESH_INSTALL_USABILITY_933ea17.md`),
+> and the owner's own 2-minute install-and-scan spot-check. A real naive-user
+> session stays a good post-release follow-up.
 
 ## What already works well for a newcomer
 

@@ -56,11 +56,17 @@ claims were re-verified against the source before editing:
 - **Read-only guarantee**: a scan writes nothing; Save Baseline leaves the `.blend` byte-identical.
 - **macOS GUI acceptance** 9/9 (`certification/GUI_ACCEPTANCE_933ea17.md`).
 - **Windows functional acceptance** 24/24, headless (`certification/WINDOWS_CERTIFICATION.md`).
+- **Fresh-install usability** 17/17 on a **clean Blender config** — the real
+  customer zip installs, enables, registers the Failsafe tab, and the first scan
+  reproduces the documented findings (3 fail / 1 warning / 1 couldn't verify / 8
+  pass / 13 N/A), FAILs naming frame 247, with a privacy-clean report
+  (`certification/FRESH_INSTALL_USABILITY_933ea17.md`). This is a scripted
+  install + first-scan walkthrough, **not** the naive-human session (gate 1 below).
 - **Reproducible release artifact**: ZIP byte-identical to committed source; SHA in `certification/RELEASE_SHA256SUMS.txt`.
 
 ## Owner decisions / human gates (not code — yours to make)
 
-1. A **real first-time-user session** — a genuine naive user tries install + first scan (only a heuristic pre-pass was done: `certification/BEGINNER_UX_REVIEW.md`).
+1. A **real first-time-user session** — a genuine naive user tries install + first scan. **Status: NOT TESTED (owner decision — recommended, not a release blocker).** In its place for launch: a scripted clean-config fresh-install + first-scan usability pass (17/17, `certification/FRESH_INSTALL_USABILITY_933ea17.md`), a heuristic UX pre-pass (`certification/BEGINNER_UX_REVIEW.md`), and the owner's own 2-minute install-and-scan spot-check. A genuine naive-user session stays a good **post-release** follow-up; it is recorded as not tested rather than claimed as passed.
 2. **Final store assets** — the real screenshots (and optional video) per `DEMO_SHOTLIST.md`.
 3. **Price** — currently UNDECIDED.
 4. **Publication approval** and the merge/release action itself.
