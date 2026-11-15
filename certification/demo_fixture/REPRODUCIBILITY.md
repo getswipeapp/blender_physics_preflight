@@ -51,11 +51,17 @@ identical every time:
 ```
 is_baked = True   use_disk_cache = True
 cache files on disk = 249 / 250   (frame 247 missing)
-baseline sidecar present = True
+baseline sidecar present = True   (schema 4, with frame-rate timing)
 
-Failsafe: 3 fail, 1 warning, 1 couldn't verify
-(tally: 3 FAIL, 1 WARNING, 1 UNKNOWN, 8 PASS, 13 N/A)
+Failsafe: 3 fail, 1 warning, 0 couldn't verify
+(tally: 3 FAIL, 1 WARNING, 0 UNKNOWN, 9 PASS, 13 N/A)
 ```
+
+> Updated for build `dfda2f7`: the fixture's sidecar is now a **schema-4** baseline
+> that records the scene frame rate, so check **#23** is a real **PASS** ("frame
+> rate unchanged since the baseline was saved") instead of the prior build's
+> permanent "couldn't verify". That moves one result from UNKNOWN to PASS (old
+> tally was 1 UNKNOWN / 8 PASS).
 
 The three FAIL messages, verbatim from the scan:
 
@@ -65,9 +71,12 @@ The three FAIL messages, verbatim from the scan:
 - "Cloth is missing 1 cached frame(s) across its 1–250 range: **247**. Each gap is
   a freeze/pop in the render."
 
-The one "couldn't verify" is #23 (Blender doesn't record bake-time FPS); the
-baseline check (#26) is a PASS ("unchanged since the baseline was saved — not
-proof the bake itself is good") because the sidecar is present.
+Both baseline-anchored checks are a **PASS** because the schema-4 sidecar is
+present and matches the scene: **#23** "frame rate unchanged since the baseline was
+saved (24 FPS)" and **#26** "tracked settings unchanged since the baseline" — each
+with the honest caveat that a match is "unchanged since the baseline," not proof
+the bake itself is good. (Change the scene frame rate after baking and #23 turns to
+a WARNING; that is how the new timing check earns its keep.)
 
 ## Restoring the fixture
 

@@ -4,6 +4,17 @@
 > **reproducible** scene. No mockups, no fabricated UI, no fabricated results, no
 > edited findings (a selling rule from the launch brief). Cropping only.
 
+> **⚠️ REFRESH PENDING for build `dfda2f7` (2026-11-15).** The four
+> `gallery_0X.png` below were shot on the **prior build**: they show check **#23**
+> as a blue "couldn't verify" and a tally of **3 / 1 / 1**. On the current build,
+> #23 is a real **frame-rate timing baseline** check (unchanged → PASS, changed →
+> WARNING) and the saved demo now scans **3 fail · 1 warning · 0 couldn't verify ·
+> 9 pass · 13 N/A**. Fresh new-build captures — including #23 catching a 24→30 FPS
+> change and the title-wrap/left-align fixes — are in **`refresh_dfda2f7/`**. The
+> published `gallery_0X.png` will be re-cropped from those (uniform 2:1) before
+> launch; the captures there are honest full-window / full-panel grabs (cropping
+> only, no edits), captured from build `dfda2f7` in Blender 5.2.3 LTS.
+
 ## Provenance (so the gallery is defensible)
 
 - **Captured from:** the actual installed extension `bl_ext.user_default.failsafe`
@@ -17,10 +28,12 @@
   re-saved after that deletion. On a fresh open from disk, Blender still reports
   the cloth as baked (`is_baked = True`, `use_disk_cache = True`), 249 of 250
   cache files are present, and frame **247** is genuinely missing.
-- **Verified by reopening three times.** Each fresh open + scan through the real
-  GUI operator reports, in Blender's own words:
-  **"3 fail, 1 warning, 1 couldn't verify"** (8 pass, 13 N/A). The three FAIL
-  messages name frame **247**.
+- **Verified by reopening and scanning.** On the current build `dfda2f7`, a fresh
+  open + scan through the real GUI operator reports, in Blender's own words:
+  **"3 fail, 1 warning, 0 couldn't verify"** (9 pass, 13 N/A). The three FAIL
+  messages name frame **247**. (The prior build reported "1 couldn't verify / 8
+  pass" because old #23 was a permanent "couldn't verify"; the demo now carries a
+  schema-4 timing baseline so #23 is a real PASS.)
 - Every number and message shown in these images came out of that scan. Nothing
   was edited into the UI. The baseline comparison shown in
   `gallery_03_baseline.png` is real: **Save Settings Baseline** wrote an external
