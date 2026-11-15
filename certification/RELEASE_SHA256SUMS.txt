@@ -1,3 +1,3 @@
 # Failsafe release artifact — SHA-256
-# commit: cd734f50a52baf72e1a51cbdd622b1540a1b5313   built: 2026-11-15T05:35:09Z
-af2715ca8a9e756ce1405247548f7f5f82245849bbe77210241744c39fa161bd  failsafe-cd734f5.zip
+# commit: dfda2f72dbee7c62f36504b899f95ca090f6d862   built: 2026-11-15T07:38:53Z
+e339df6e9f206a21815a92756e1a84faaf1a63b9073189c6bf773cb10c7f09bb  failsafe-dfda2f7.zip
