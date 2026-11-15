@@ -55,17 +55,18 @@ possible future work.
 
 Public **advertised list prices**, not verified sales or willingness-to-pay data.
 All five were located on their **first-party Superhive listings** by the independent
-commercial review on **2026-11-13** (Cache Commander was also re-checked directly
-here). Prices can change and promos appear — re-confirm on the live page before any
-public use.
+commercial review on **2026-11-13**. **Cache Commander was re-checked directly on
+the live listing on 2026-11-14 and now displays $9.99** (it was recorded at $29 the
+day before — prices change and promos appear, so this is exactly why the figures
+below must be re-confirmed on the live page before any public use).
 
-| Product | Advertised list price | First-party Superhive source (checked 2026-11-13) |
+| Product | Advertised list price | First-party Superhive source |
 |---|---|---|
-| SceneCheck | $3 | [listing](https://superhivemarket.com/products/scenecheck-one-click-scene-validator-for-error-free-renders-and-deliveries) |
-| Triage | $9.99 | [listing](https://superhivemarket.com/products/triage) |
-| Preflight | $9.99 | [listing](https://superhivemarket.com/products/preflight--find-out-what-will-go-wrong-before-the-render-starts) |
-| Cache Guardian | $14 (has also appeared with promotional pricing) | [listing](https://superhivemarket.com/products/cache-guardian-simulation-cache-checker--pre-render-validator) |
-| Cache Commander | $29 | [listing](https://superhivemarket.com/products/cache-commander--see-what-your-simulations-weigh-and-move-them) · [docs (background-process batch)](https://superhivemarket.com/products/cache-commander--see-what-your-simulations-weigh-and-move-them/docs) |
+| SceneCheck | $3 (checked 2026-11-13) | [listing](https://superhivemarket.com/products/scenecheck-one-click-scene-validator-for-error-free-renders-and-deliveries) |
+| Triage | $9.99 (checked 2026-11-13) | [listing](https://superhivemarket.com/products/triage) |
+| Preflight | $9.99 (checked 2026-11-13) | [listing](https://superhivemarket.com/products/preflight--find-out-what-will-go-wrong-before-the-render-starts) |
+| Cache Guardian | $14, has also appeared with promotional pricing (checked 2026-11-13) | [listing](https://superhivemarket.com/products/cache-guardian-simulation-cache-checker--pre-render-validator) |
+| Cache Commander | **$9.99** (re-checked live 2026-11-14; was $29 on 2026-11-13) | [listing](https://superhivemarket.com/products/cache-commander--see-what-your-simulations-weigh-and-move-them) · [docs (background-process batch)](https://superhivemarket.com/products/cache-commander--see-what-your-simulations-weigh-and-move-them/docs) |
 
 > **Prices are verified; per-product feature cells are not.** A confirmed listing
 > establishes the price, **not** every capability — keep feature comparisons marked
@@ -74,13 +75,13 @@ public use.
 
 ## Pricing — UNDECIDED (owner decision)
 
-No price is set, and no savings or demand figure is asserted. The review suggested
-$9.99 / $12 / $14 as *test* prices to evaluate (a preference for $12 one-time as an
-experiment, below Cache Guardian's reported $14) — these are options to consider,
-**not** externally established values and **not** a decision. A separate higher
-"Pipeline" SKU is **not** planned: the GUI and headless workflows ship together in
-one product, and Cache Commander's reported $29 does not establish what Failsafe
-could charge.
+No price is set, and no savings or demand figure is asserted. Reviews have suggested
+$9.99 / $12 / $14 as *test* prices to evaluate — these are options to consider,
+**not** externally established values and **not** a decision. With Cache Commander
+now at **$9.99** (re-checked 2026-11-14), the overlapping cache tools sit at Cache
+Commander $9.99 and Cache Guardian $14; that competitive context informs but does
+not set the price. A separate higher "Pipeline" SKU is **not** planned: the GUI and
+headless workflows ship together in one product.
 
 ## One product, two workflows (not two editions)
 

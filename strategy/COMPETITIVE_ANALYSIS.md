@@ -1,11 +1,12 @@
 # Physics Preflight — Competitive Analysis & Roadmap
 
-> **⚠️ Superseded for competitor facts (2026-11-13).** The independent commercial
-> review found some figures here are stale — e.g. **Cache Commander is ~$29, not
-> $9.99, and offers a comparable per-file background-process batch mode**, so any
-> "uniquely" claim about batch isolation below is **outdated**. Use the
-> verification-labelled `strategy/FEATURE_MATRIX.md` as the source of truth for
-> competitor claims; treat prices/claims in this Phase-0 research doc as unverified.
+> **⚠️ Superseded for competitor facts.** This Phase-0 doc is stale. **Cache
+> Commander displays $9.99 on its live Superhive listing (re-checked 2026-11-14;
+> it briefly showed $29 on 2026-11-13)** and offers a comparable per-file
+> background-process batch mode, so any "uniquely" claim about batch isolation
+> below is **outdated**. Use the verification-labelled `strategy/FEATURE_MATRIX.md`
+> as the source of truth for competitor claims; treat prices/claims in this
+> research doc as unverified.
 
 *Prepared by Claude, 2026-11-10. Market data from live web research (sources at
 the end). This is Claude's independent take; a separate neutral brief

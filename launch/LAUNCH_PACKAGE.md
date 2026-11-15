@@ -36,7 +36,7 @@ claims were re-verified against the source before editing:
 
 | ID | Correction made |
 |---|---|
-| **C01** | Batch isolation is **no longer called unique.** Cache Commander (verified on its live Superhive docs) offers a comparable per-file background-process folder mode; `FEATURE_MATRIX.md` now says so and records its **$29** first-party Superhive price. Lead differentiator is now frame-level cache verification + physics-setup + honest "Couldn't verify." |
+| **C01** | Batch isolation is **no longer called unique.** Cache Commander (verified on its live Superhive docs) offers a comparable per-file background-process folder mode; `FEATURE_MATRIX.md` now says so and records its first-party Superhive price (**$9.99**, re-checked live 2026-11-14; it showed $29 on 2026-11-13 — confirm on the live page before any public use). Lead differentiator is now frame-level cache verification + physics-setup + honest "Couldn't verify." |
 | **C02** | **GUI exports corrected everywhere.** `Export Text Report` / `Export JSON Report` write a Blender **Text datablock** + clipboard — **no file-save dialog.** Docs now say you save it yourself from the Text Editor, that this changes the **in-memory** project (not the `.blend` on disk, never scene data), and that **headless `--json` prints to stdout.** Real button names used. |
 | **C03** | Check #25 is now "**potentially unclaimed** cache files — review before deleting," never "safe to remove" (STORE_LISTING, LIMITATIONS, README). Matches the code's own cautious message. |
 | **C04** | `FEATURE_MATRIX.md` replaces unsupported "— no" cells with **? not verified**. All five competitor **prices** are now sourced to first-party Superhive listings (2026-11-13); per-product **feature** cells remain not-individually-verified. |
