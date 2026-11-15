@@ -121,12 +121,12 @@ Two checks were corrected after the code review and now behave honestly:
 ## Platform / version coverage
 
 - **Minimum Blender: 4.2 LTS.**
-- The automated test suite passes **292/292 on Blender 4.2.9, 4.5.9, 5.0.1 and
+- The automated test suite passes **310/310 on Blender 4.2.9, 4.5.9, 5.0.1 and
   5.2.3** (headless), including real heavy-sim bakes (cloth, soft body, particle,
   fluid), damaged-cache cases, the cloud/orphan/baseline checks, the headless CLI,
   and adversarial batch cases (garbage files, partial-failure folders). See
   `certification/RUNTIME_CERTIFICATION.md`.
-- **Windows: tested and passing.** The same 292/292 suite passes on **Blender
+- **Windows: tested and passing.** The same 310/310 suite passes on **Blender
   4.2.9 / 4.5.9 / 5.0.1 / 5.2.3 Windows x64**, plus a Windows functional acceptance
   (install, baseline, JSON export, CLI exit codes) and a real multi-process batch,
   run on GitHub Actions `windows-2025`. See `certification/WINDOWS_CERTIFICATION.md`.

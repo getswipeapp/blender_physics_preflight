@@ -12,10 +12,6 @@ name: Windows Certification
 #   push: { branches: [failsafe-expanded-hardening] }
 on:
   workflow_dispatch:
-  # Temporarily re-added to certify the B2 fix (cd734f5+) on real Windows from the
-  # feature branch. Remove again once the result is recorded.
-  push:
-    branches: [failsafe-expanded-hardening]
 
 permissions:
   contents: read
@@ -54,7 +50,7 @@ jobs:
           Write-Host "Blender at: $($exe.FullName)"
           & $exe.FullName --version
 
-      - name: Headless test suite (292) on Blender ${{ matrix.version }}
+      - name: Headless test suite (310) on Blender ${{ matrix.version }}
         shell: pwsh
         run: |
           & "$env:BLENDER" -b --factory-startup -P tests/run_tests.py 2>&1 | Tee-Object -FilePath "run_win_${{ matrix.version }}.log"

@@ -6,7 +6,7 @@
 > build (see `REVIEW_RESPONSE.md`).
 > **Price:** _TBD_ — see "Pricing" at the bottom.
 > **Before publishing:** add real screenshots/video and get Keith's approval.
-> (Multi-version headless tests are **done** — 292/292 on 4.2.9 / 4.5.9 / 5.0.1 /
+> (Multi-version headless tests are **done** — 310/310 on 4.2.9 / 4.5.9 / 5.0.1 /
 > 5.2.3; see `certification/RUNTIME_CERTIFICATION.md`.) See `launch/LIMITATIONS.md`
 > and `launch/DEMO_SHOTLIST.md`.
 
@@ -139,7 +139,7 @@ at least one other cache tool offers a comparable folder/batch mode; see
 ## Requirements
 
 - Blender **4.2 LTS or newer**. Automated headless tests pass on **4.2.9, 4.5.9,
-  5.0.1 and 5.2.3** (292/292 each) — on **macOS and Windows x64** (Windows via
+  5.0.1 and 5.2.3** (310/310 each) — on **macOS and Windows x64** (Windows via
   GitHub Actions `windows-2025`; see `certification/WINDOWS_CERTIFICATION.md`).
 - No internet, no account, no extra downloads. Fully offline, no telemetry.
 - **Scanning is read-only** — a scan never changes your scene and never writes any
@@ -211,7 +211,7 @@ fix. (Safe one-click fixes are a possible future update, not a v1 promise.)
 No. Fully offline. No account, no telemetry, no downloads.
 
 **Which Blender versions are supported?**
-Blender **4.2 LTS or newer**. The automated test suite passes 292/292 on
+Blender **4.2 LTS or newer**. The automated test suite passes 310/310 on
 **4.2.9 / 4.5.9 / 5.0.1 / 5.2.3**, on **macOS and Windows x64** (headless). A Windows
 *GUI* session is not separately certified; the live-window acceptance was done on
 macOS.
@@ -276,7 +276,7 @@ on it.
   at. #26 (settings baseline) tells you settings changed since the baseline was
   *saved*, not since the bake — described that way above, no overclaim.
 - **Pre-launch gates (Superhive + your roadmap).** Done: multi-version headless
-  tests (4.2/4.5/5.0/5.2, **292/292 each**, including the new cloud/orphan/baseline
+  tests (4.2/4.5/5.0/5.2, **310/310 each**, including the new cloud/orphan/baseline
   checks, the headless CLI, and adversarial batch cases) on **macOS and Windows x64**;
   the **macOS** live-GUI acceptance (install, scan, deleted-cache catch, **Save
   Baseline and Export JSON exercised in a real window** — see

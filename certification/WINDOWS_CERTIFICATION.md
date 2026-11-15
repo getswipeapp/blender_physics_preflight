@@ -6,6 +6,15 @@
 > only. Source under test: branch `failsafe-expanded-hardening`, build `933ea17`
 > code (commit at run time `bda8b6d`). Date: 2026-11-13.
 
+> **Re-certified 2026-11-15 for the B2 fix.** The current build `125d59a` (contains
+> `cd734f5` — the non-finite / incomplete-timing fix for check #23) re-ran this same
+> workflow on hosted `windows-2025`: **310 passed, 0 failed on all four versions**
+> (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3) plus **24/24 Windows functional acceptance**. Run:
+> <https://github.com/getswipeapp/blender_physics_preflight/actions/runs/43690637246>
+> (all four matrix jobs **success**). The 292/292 figures in the 2026-11-13 record
+> below are preserved as-is; the suite has since grown to **310** with the #23
+> timing-baseline and B2 regression tests.
+
 **Workflow:** `.github/workflows/windows-cert.yml` (runner `windows-2025`).
 **Run:** <https://github.com/getswipeapp/blender_physics_preflight/actions/runs/43472730612>
 — all four matrix jobs **success**. Logs preserved under
