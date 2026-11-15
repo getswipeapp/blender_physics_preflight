@@ -19,6 +19,7 @@ Honesty rules baked in here:
 The baseline file is plain JSON so it's auditable and diffable.
 """
 import json
+import math
 import os
 import time
 
@@ -241,22 +242,43 @@ def scene_timing_for(data, scene_name):
     return rec if isinstance(rec, dict) and "fps" in rec else None
 
 
+def _finite_positive(x):
+    """``float(x)`` if it is a finite, strictly-positive number, else None.
+    Rejects None, NaN, +/-inf, zero, negatives and non-numeric junk — the values
+    a hand-edited or half-written JSON sidecar could carry (Python's json parses
+    NaN/Infinity by default). A rejected value must become 'Couldn't verify',
+    never a silently-accepted guess."""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v) or v <= 0.0:
+        return None
+    return v
+
+
 def effective_fps(rec):
     """Effective playback rate (fps / fps_base) from a timing record or a live
-    scene.render, with a safe divisor. Returns a float, or None if unreadable."""
+    scene.render. Returns a float ONLY when the record is complete and every
+    value is finite and positive; otherwise None, so the caller reports UNKNOWN
+    rather than comparing against a bogus number. For a dict record, BOTH ``fps``
+    and ``fps_base`` must be present (a missing key is an incomplete record, not a
+    1.0 default)."""
     try:
         if rec is None:
             return None
         if isinstance(rec, dict):
-            # A null/garbage fps or fps_base (hand-edited sidecar) raises here and
-            # is reported as None -> the caller treats it as UNKNOWN, never a guess.
-            fps = float(rec.get("fps", 0))
-            base = float(rec.get("fps_base", 1.0))
-        else:  # a scene.render
-            fps = float(getattr(rec, "fps", 0))
-            base = float(getattr(rec, "fps_base", 1.0))
-        return fps / max(base, 1e-6)
-    except (TypeError, ValueError):
+            if "fps" not in rec or "fps_base" not in rec:
+                return None            # incomplete saved record -> can't verify
+            fps = _finite_positive(rec.get("fps"))
+            base = _finite_positive(rec.get("fps_base"))
+        else:  # a live scene.render — always complete and finite
+            fps = _finite_positive(getattr(rec, "fps", None))
+            base = _finite_positive(getattr(rec, "fps_base", None))
+        if fps is None or base is None:
+            return None
+        return fps / base
+    except Exception:
         return None
 
 

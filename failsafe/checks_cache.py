@@ -10,6 +10,7 @@ that compares the files on disk against the entire required frame range, so they
 can never contradict each other — a missing first, middle or last frame fails
 every one of them, not none.
 """
+import math
 import os
 
 import bpy
@@ -577,21 +578,28 @@ def c23_fps_timescale(ctx, mk):
     ts_matches = False
     if cur_ts is not None and saved_ts is not None:
         try:
-            if abs(float(saved_ts) - cur_ts) > 1e-4:
-                out.append(mk(Status.WARNING,
-                    "Rigid Body World time scale changed since the baseline: "
-                    "saved %.4g, now %.4g. If this changed after baking, the sim "
-                    "plays at a different speed than it was baked."
-                    % (float(saved_ts), cur_ts),
-                    hint="Re-bake after changing time scale, or restore the "
-                         "baselined value."))
-            else:
-                ts_matches = True
+            sts = float(saved_ts)
+            cts = float(cur_ts)
         except (TypeError, ValueError):
+            sts = cts = None
+        # A non-finite (NaN/inf) saved time scale must NOT pass through the
+        # comparison: NaN comparisons are all False, which would otherwise read
+        # as "matches" — a false reassurance. Reject it as UNKNOWN instead.
+        if sts is None or cts is None or not math.isfinite(sts) \
+                or not math.isfinite(cts):
             out.append(mk(Status.UNKNOWN,
                 "The baseline's Rigid Body World time scale couldn't be read, so "
                 "it can't be compared.",
                 hint="Click Save Baseline again to write a fresh reference."))
+        elif abs(sts - cts) > 1e-4:
+            out.append(mk(Status.WARNING,
+                "Rigid Body World time scale changed since the baseline: saved "
+                "%.4g, now %.4g. If this changed after baking, the sim plays at a "
+                "different speed than it was baked." % (sts, cts),
+                hint="Re-bake after changing time scale, or restore the "
+                     "baselined value."))
+        else:
+            ts_matches = True
 
     if not out:
         extra = " Rigid Body World time scale also matches." if ts_matches else ""

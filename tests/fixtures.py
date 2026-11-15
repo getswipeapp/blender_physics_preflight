@@ -915,3 +915,66 @@ def build_schema3_baseline(outdir):
     d.pop("scene_timing", None)       # schema-3 baselines carried no timing
     with open(p, "w") as fh:
         json.dump(d, fh)
+
+
+# ---- B2 regression: non-finite / incomplete timing values must be UNKNOWN -----
+_DELETE_KEY = object()
+
+
+def _save_then_corrupt_timing(outdir, with_rbw=False, **changes):
+    """Save a schema-4 baseline for a baked cloth at 24 fps, then overwrite one or
+    more scene_timing values with junk (or delete a key with _DELETE_KEY). Python's
+    json writes NaN/Infinity literally and parses them back, so these simulate a
+    hand-edited or half-written sidecar."""
+    import json
+    _make_cloth_blend(outdir)
+    sc = bpy.context.scene
+    sc.render.fps, sc.render.fps_base = 24, 1.0
+    if with_rbw:
+        with bpy.context.temp_override(scene=sc):
+            bpy.ops.rigidbody.world_add()
+        sc.rigidbody_world.time_scale = 1.0
+    p = _save_timing_baseline()
+    with open(p) as fh:
+        d = json.load(fh)
+    rec = d["scene_timing"][sc.name]
+    for k, v in changes.items():
+        if v is _DELETE_KEY:
+            rec.pop(k, None)
+        else:
+            rec[k] = v
+    with open(p, "w") as fh:
+        json.dump(d, fh)
+
+
+def build_23_nan_fps(outdir):
+    """fps = NaN: NaN comparisons are all False, so an unguarded check would fall
+    through to a green PASS. Must be UNKNOWN."""
+    _save_then_corrupt_timing(outdir, fps=float("nan"))
+
+
+def build_23_inf_fps(outdir):
+    """fps = Infinity -> UNKNOWN (not a WARNING formatting 'inf FPS')."""
+    _save_then_corrupt_timing(outdir, fps=float("inf"))
+
+
+def build_23_nan_fpsbase(outdir):
+    """fps_base = NaN -> UNKNOWN."""
+    _save_then_corrupt_timing(outdir, fps_base=float("nan"))
+
+
+def build_23_zero_fps(outdir):
+    """fps = 0 (non-positive) -> UNKNOWN."""
+    _save_then_corrupt_timing(outdir, fps=0)
+
+
+def build_23_missing_fpsbase(outdir):
+    """A saved record missing fps_base is incomplete -> UNKNOWN, not a 1.0 default
+    that could mask a changed base."""
+    _save_then_corrupt_timing(outdir, fps_base=_DELETE_KEY)
+
+
+def build_23_nan_timescale(outdir):
+    """fps matches, but rbw_time_scale = NaN -> UNKNOWN, never a PASS that claims
+    the time scale 'also matches'."""
+    _save_then_corrupt_timing(outdir, with_rbw=True, rbw_time_scale=float("nan"))

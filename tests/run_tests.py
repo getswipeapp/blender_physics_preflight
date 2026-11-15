@@ -99,6 +99,12 @@ CASES = [
     ("23 unreadable time scale -> unknown (M2: no false 'matches')", 23, fixtures.build_23_unknown_bad_timescale, True, {Status.UNKNOWN}),
     ("23 schema-3 baseline -> NA (predates timing)", 23, fixtures.build_schema3_baseline, True, {Status.NA}),
     ("26 schema-3 baseline still compares (M1: not voided)", 26, fixtures.build_schema3_baseline, True, {Status.PASS}),
+    ("23 NaN fps -> unknown (B2: no false pass)", 23, fixtures.build_23_nan_fps, True, {Status.UNKNOWN}),
+    ("23 inf fps -> unknown (B2)", 23, fixtures.build_23_inf_fps, True, {Status.UNKNOWN}),
+    ("23 NaN fps_base -> unknown (B2)", 23, fixtures.build_23_nan_fpsbase, True, {Status.UNKNOWN}),
+    ("23 zero fps -> unknown (B2)", 23, fixtures.build_23_zero_fps, True, {Status.UNKNOWN}),
+    ("23 missing fps_base -> unknown (B2: no 1.0 default)", 23, fixtures.build_23_missing_fpsbase, True, {Status.UNKNOWN}),
+    ("23 NaN time scale -> unknown (B2: no false 'matches')", 23, fixtures.build_23_nan_timescale, True, {Status.UNKNOWN}),
     # heavy-sim integration (real bakes): prove the scanners populate correctly,
     # not just the decision logic.
     ("HS soft-body baked (pass)", 18, fixtures.build_softbody_pass, True, {Status.PASS}),
