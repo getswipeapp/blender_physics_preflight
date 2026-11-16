@@ -534,14 +534,16 @@ def _file_state(path):
 # 4.2.9, 4.5.9, 5.0.1 and 5.2.3 (only the high 16 bits of the type word differ by
 # version, so we never key on it).
 #
-# SCOPE — this validates FILE STRUCTURE, not payload correctness. We verify the
-# signature, a full header, that the header's declared point count and data-type
-# mask are non-zero, and that payload bytes exist beyond the header. We do NOT
-# decode the per-point payload: it is compressed and version-variable (the
-# compression toggle is even gone from 5.2's API), and Blender exposes no error
-# when a present frame fails to load (it silently falls back to the rest shape —
-# verified by probe). So a frame that passes this is a well-formed cache file,
-# NOT a guarantee that its simulation data is numerically intact; payload
+# SCOPE — this is a BASIC STRUCTURAL verification, not complete format validation
+# and not payload correctness. We verify the signature, a full header, that the
+# declared point count and data-type mask are non-zero, that the type word (low
+# 16 bits) matches the type of the simulation that owns the cache, and that some
+# payload exists beyond the header. We do NOT bound the payload size (it is
+# compressed and version-variable — the compression toggle is even gone from
+# 5.2's API) and we do NOT decode it. Blender itself exposes no error when a
+# present frame fails to load (it silently falls back to the rest shape — verified
+# by probe), so a frame that passes this is a well-formed cache file, NOT a
+# guarantee that its simulation data is usable or numerically intact; payload
 # integrity is reported as unverified, never as proven healthy. (Detecting a
 # corrupted-but-well-formed body is a separate, future increment — baselined
 # per-frame hashes.)
@@ -549,28 +551,57 @@ _BPHYS_MAGIC = b"BPHYSICS"
 _BPHYS_HEADER_LEN = 20
 
 
-def _bphys_header_valid(path):
-    """True only if ``path`` is a STRUCTURALLY valid point-cache frame: the
-    BPHYSICS magic, a full 20-byte header, a non-zero declared point count AND
-    data-type mask, and at least one payload byte beyond the header. False if it
-    is present but structurally invalid — bad magic, a header shorter than 20
-    bytes, header fields that are zero (e.g. a fabricated 'BPHYSICS' + zero bytes
-    file), or a header with no payload at all. None if it can't be read.
+# The point-cache ``type`` code (low 16 bits of the word at offset 8) for each
+# kind of simulation that writes a .bphys cache. Verified against real bakes on
+# official Blender 4.2.9, 4.5.9, 5.0.1 and 5.2.3. Keyed by the human ``system``
+# label we assign in enumeration. We validate a frame's type ONLY against the
+# type of the simulation that owns the cache — never against a guessed universal
+# set — so an unforeseen-but-valid type can never be rejected: an unmapped owner
+# (``.get`` -> None) simply skips the type check.
+#
+# Hair Dynamics is DELIBERATELY omitted: a hair-dynamics cache is mixed — frame 0
+# is a particle frame (type 1) while the simulated frames are a cloth solve
+# (type 2, verified on all four versions). There is no single correct type for
+# it, so enforcing one would reject a valid cache (exactly the false positive M1
+# warns against). Hair still gets the magic/field/payload structural checks.
+_EXPECTED_TYPE_CODE = {
+    "Cloth": 2,
+    "Soft Body": 0,
+    "Particles": 1,
+    "Dynamic Paint": 5,
+}
 
-    This closes the gap where a non-empty, readable file that merely starts with
-    the magic would pass. It does not, and cannot cheaply, prove the compressed
-    payload is numerically correct — see the module note above."""
+
+def _bphys_header_valid(path, expected_type=None):
+    """Basic STRUCTURAL check of a point-cache frame. True only if ``path`` has
+    the BPHYSICS magic, a full 20-byte header, a non-zero declared point count
+    AND data-type mask, and at least one payload byte beyond the header. False if
+    present but structurally invalid — bad magic, a header shorter than 20 bytes,
+    zero header fields (e.g. a fabricated 'BPHYSICS' + zero bytes file), a header
+    with no payload, or — when ``expected_type`` is given — a type word (low 16
+    bits) that does not match the type of the simulation that owns this cache
+    (the file is then a wrong/foreign cache at the path). None if unreadable.
+
+    This is a BASIC structural verification, not complete format validation: it
+    does not prove the compressed payload is usable (we accept any non-empty
+    payload) — see the module note above. An unrecognised owner type
+    (``expected_type is None``) skips the type comparison rather than risk
+    rejecting a valid cache."""
     try:
         with open(path, "rb") as fh:
             head = fh.read(_BPHYS_HEADER_LEN)
             if len(head) < _BPHYS_HEADER_LEN or head[:8] != _BPHYS_MAGIC:
                 return False
-            # The three remaining header fields must describe actual data: a frame
-            # that declares zero points or zero data channels is not a usable
-            # cache frame (confirmed: real frames always have both > 0).
+            type_code = struct.unpack_from("<I", head, 8)[0] & 0xFFFF
             totpoint = struct.unpack_from("<I", head, 12)[0]
             data_types = struct.unpack_from("<I", head, 16)[0]
+            # A frame that declares zero points or zero data channels is not a
+            # usable cache frame (real frames always have both > 0).
             if totpoint == 0 or data_types == 0:
+                return False
+            # If we know the owning sim's type, the frame must declare it; a
+            # mismatch means this isn't that simulation's cache file.
+            if expected_type is not None and type_code != expected_type:
                 return False
             # A valid frame carries per-point payload after the header; a file
             # that is exactly the header (no payload) is truncated/empty of data.
@@ -580,7 +611,7 @@ def _bphys_header_valid(path):
         return None
 
 
-def _scan_point_cache_files(cache_dir, prefix, index, frames):
+def _scan_point_cache_files(cache_dir, prefix, index, frames, expected_type=None):
     present, empty, unreadable, badheader = set(), set(), set(), set()
     if not cache_dir or not os.path.isdir(cache_dir):
         return present, empty, unreadable, badheader
@@ -595,9 +626,9 @@ def _scan_point_cache_files(cache_dir, prefix, index, frames):
             elif st == "unreadable":
                 unreadable.add(fr)
             else:
-                # Non-empty and readable: now confirm it is actually point-cache
-                # data, not just any non-empty file at that path.
-                hv = _bphys_header_valid(p)
+                # Non-empty and readable: now confirm it is actually this
+                # simulation's point-cache data, not just any non-empty file.
+                hv = _bphys_header_valid(p, expected_type)
                 if hv is False:
                     badheader.add(fr)
                 elif hv is None:
@@ -657,7 +688,8 @@ def inspect_point_cache(obj, system, pc, scene):
     e.frames_expected = list(range(cs, ce + 1, step))
     (e.frames_present, e.frames_empty, e.frames_unreadable,
      e.frames_badheader) = _scan_point_cache_files(
-        cache_dir, prefix, int(getattr(pc, "index", 0)), e.frames_expected)
+        cache_dir, prefix, int(getattr(pc, "index", 0)), e.frames_expected,
+        expected_type=_EXPECTED_TYPE_CODE.get(system))
     e.disk_bytes = _point_cache_bytes(cache_dir, prefix, e.cache_index,
                                       e.frames_present)
     e.cloud_marker = cloud_sync_marker(cache_dir)

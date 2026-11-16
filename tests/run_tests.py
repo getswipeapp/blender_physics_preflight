@@ -126,6 +126,9 @@ CASES = [
     # 'BPHYSICS'+zeros file), and a valid header with no payload. Both must FAIL.
     ("HS bphys zero header fields -> corrupt (fail)", 18, fixtures.build_bphys_zerofields, True, {Status.FAIL}),
     ("HS bphys header-only, no payload -> corrupt (fail)", 18, fixtures.build_bphys_header_only, True, {Status.FAIL}),
+    # M1: a frame whose type word declares a different simulation (particle on a
+    # cloth cache) is not this sim's cache -> corrupt.
+    ("HS bphys wrong sim-type -> corrupt (fail)", 18, fixtures.build_bphys_wrongtype, True, {Status.FAIL}),
     ("HS fluid baked (pass)", 18, fixtures.build_fluid_pass, True, {Status.PASS}),
     ("HS fluid missing data frame (fail)", 18, fixtures.build_fluid_missing_data_frame, True, {Status.FAIL}),
     ("HS fluid missing mesh frame (fail)", 18, fixtures.build_fluid_missing_mesh_frame, True, {Status.FAIL}),
@@ -166,6 +169,8 @@ CACHE_REGRESSION = [
     ("bphys zero fields -> no cache PASS", fixtures.build_bphys_zerofields,
      {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
     ("bphys header-only -> no cache PASS", fixtures.build_bphys_header_only,
+     {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
+    ("bphys wrong sim-type -> no cache PASS", fixtures.build_bphys_wrongtype,
      {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
 ]
 
@@ -1601,6 +1606,17 @@ def integrity_header_tests():
     out.append(("integrity header-only (no payload) -> False",
                 ci._bphys_header_valid(headeronly) is False,
                 ci._bphys_header_valid(headeronly), False))
+    # M1: the 'good' file declares type 2 (cloth). It passes when the owner type
+    # matches, and is rejected when the owner expects a different type.
+    out.append(("integrity type matches owner -> True",
+                ci._bphys_header_valid(good, expected_type=2) is True,
+                ci._bphys_header_valid(good, expected_type=2), True))
+    out.append(("integrity type mismatches owner -> False",
+                ci._bphys_header_valid(good, expected_type=1) is False,
+                ci._bphys_header_valid(good, expected_type=1), False))
+    out.append(("integrity unknown owner type skips type check -> True",
+                ci._bphys_header_valid(good, expected_type=None) is True,
+                ci._bphys_header_valid(good, expected_type=None), True))
 
     e = ci.CacheEntry("Obj", "Cloth", "point")
     e.baked_flag = True

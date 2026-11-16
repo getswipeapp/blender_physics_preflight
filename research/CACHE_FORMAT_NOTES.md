@@ -20,9 +20,10 @@ Measured (cloth grid, 81 verts): `magic=BPHYSICS`, typeword `0x0000_0002` (4.2/4
 / `0x0001_0002` (5.0/5.2), totpoint `81`, data_types `22`. Soft body (42 verts):
 type `0`, totpoint `42`. Particles (count 40): type `1`, totpoint `40`.
 
-## What we validate now (file structure)
+## What we validate now (basic structural verification)
 
-`cache_inspect._bphys_header_valid()` + `_scan_point_cache_files()`. A present,
+`cache_inspect._bphys_header_valid()` + `_scan_point_cache_files()` perform a
+**basic structural** check — not complete format validation. A present,
 non-empty, readable `.bphys` frame is treated as **structurally invalid** (→
 `frames_badheader` → `V_CORRUPT` → #17/#18 FAIL) when any of these hold:
 - **Bad magic** — first 8 bytes ≠ `BPHYSICS` (garbage or a foreign file at the path).
@@ -30,12 +31,26 @@ non-empty, readable `.bphys` frame is treated as **structurally invalid** (→
 - **Zero header fields** — `totpoint == 0` or `data_types == 0`. This catches the
   fabricated `BPHYSICS` + 12 zero bytes file raised in review B1.
 - **No payload** — exactly the 20-byte header with nothing after it.
+- **Wrong sim-type** (review M1) — the type word (low 16 bits) does not match the
+  type of the simulation that **owns** this cache. We compare only against the
+  owner's known type (Cloth=2, Soft Body=0, Particles=1, Dynamic Paint=5,
+  verified on real bakes across all four versions), never a guessed universal
+  set, so an unforeseen-but-valid type is never rejected.
 
-On the four-version matrix (4.2.9/4.5.9/5.0.1/5.2.3) every real baked
-cloth/soft/particle/hair/DP frame passes this (no regressions; see the suite's
-`integrity_header_tests` and the `HS bphys …` / `bphys … no cache PASS` cases).
-We do not claim this is provably false-positive-free in general — it is validated
-against our fixtures and the real bakes, no more than that.
+**Hair Dynamics is intentionally exempt from the type check.** A hair-dynamics
+cache is *mixed*: frame 0 is a particle frame (type 1, `totpoint` = strand count)
+while the simulated frames are a cloth solve (type 2, `totpoint` = strand ×
+points-per-strand) — verified on all four versions. There is no single correct
+type, so enforcing one would reject a valid cache (the regression that the
+`HS hair dynamics baked (pass)` fixture catches). Hair still gets the
+magic/field/payload checks.
+
+Known limits of this basic check (review M1): it does not bound the payload size
+(it accepts any non-empty payload, down to a single byte, because the body is
+compressed and version-variable) and does not decode the body. On the four-version
+matrix every real baked cloth/soft/particle/hair/DP frame passes; this is
+validated against our fixtures and real bakes, not proven false-positive-free in
+general.
 
 ## What we DO NOT claim — verified structure ≠ verified payload (review B1)
 
@@ -67,13 +82,24 @@ payload as proven healthy.
 
 ## Next deep-integrity increment (planned, not yet built)
 
-- **Baselined per-frame hashes** — the right way to catch a corrupted/truncated
+- **Baselined per-frame hashes** — the planned way to catch a corrupted/truncated
   **body** that still has a valid header. When the user clicks Save Baseline,
-  record a hash of each cache frame file; a later scan flags any frame whose
-  bytes changed. This detects all three body-level mutations above with no false
-  positives (a hash matches or it doesn't) and no format reverse-engineering.
-  This is the honest path to "content integrity"; the current increment is
-  structure validation only.
+  record a SHA-256 of each cache frame file keyed to a stable simulation identity,
+  frame number and project context; a later scan compares and reports per frame.
+  Important honesty constraints (review M2):
+    - A mismatch means **"cache file changed since the baseline,"** NOT
+      automatically "corrupt." A deliberate re-bake legitimately changes the
+      bytes — it is a *detected change*, which may be expected.
+    - A match means **"bytes unchanged since the baseline,"** NEVER "content is
+      valid." If the baseline was saved *after* the cache was already damaged, the
+      hash faithfully records the damaged bytes and will keep matching them.
+    - So hashing is a **change-detection** tool, not a validity oracle, and it is
+      only as trustworthy as the moment the baseline was taken. It is NOT
+      "no false positives": an intentional re-bake is a true change that is not a
+      defect.
+    - A missing / stale / incomplete / unreadable baseline cannot produce PASS.
+  This is complementary to — not a substitute for — actually having Blender decode
+  the frame. Both are worth building; neither alone proves a cache is usable.
 - **Stale-topology check** — compare header `totpoint` against the current
   object's point count; a mismatch means the cache was baked for a different
   mesh. Higher value, higher false-positive risk (modifier-stack order, particle

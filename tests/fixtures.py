@@ -7,6 +7,7 @@ save/bake inside it.
 """
 import os
 import shutil
+import struct
 import bpy
 import bmesh
 from mathutils import Vector
@@ -657,6 +658,15 @@ def _corrupt_point_frame(cachedir, mode):
     elif mode == "zerofields":
         with open(target, "wb") as fh:
             fh.write(b"BPHYSICS" + b"\x00" * 12)  # 20 bytes, totpoint/data_types=0
+    elif mode == "wrongtype":
+        # Keep a fully valid structure but overwrite the type word (offset 8)
+        # with a DIFFERENT valid sim type (particle=1 on a cloth cache=2), so the
+        # frame declares it belongs to another simulation.
+        with open(target, "rb") as fh:
+            data = bytearray(fh.read())
+        struct.pack_into("<I", data, 8, 1)  # low16 = 1 (particle) != cloth (2)
+        with open(target, "wb") as fh:
+            fh.write(data)
     else:  # headeronly: keep the real 20-byte header, drop the payload
         with open(target, "rb") as fh:
             header = fh.read(20)
@@ -693,6 +703,14 @@ def build_bphys_header_only(outdir):
     """A frame with the real, valid 20-byte header but no payload at all."""
     blend = _make_cloth_blend(outdir, frame_end_cache=6, scene_end=6)
     _corrupt_point_frame(os.path.join(outdir, "blendcache_cloth"), "headeronly")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_bphys_wrongtype(outdir):
+    """A structurally-valid frame whose type word says particle (1) on a cloth
+    cache (2) — not this simulation's cache file. Must FAIL (M1)."""
+    blend = _make_cloth_blend(outdir, frame_end_cache=6, scene_end=6)
+    _corrupt_point_frame(os.path.join(outdir, "blendcache_cloth"), "wrongtype")
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
