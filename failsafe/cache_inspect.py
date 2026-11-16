@@ -35,6 +35,7 @@ Filename schemes proven on official Blender 4.2.23 / 4.5.15 / 5.0.1 / 5.2.3:
 """
 import os
 import re
+import struct
 import collections
 
 import bpy
@@ -528,31 +529,53 @@ def _file_state(path):
 
 
 # A real disk point-cache FRAME file begins with this 8-byte magic, followed by a
-# 20-byte header (magic + type + totpoint + data_types, three LE uint32). This
-# layout was verified byte-for-byte identical on official Blender 4.2.9, 4.5.9,
-# 5.0.1 and 5.2.3 (only the high 16 bits of the type word differ by version, so
-# we never key on it). Validating the header lets us catch a frame file that is
-# present, non-empty and readable but is NOT valid point-cache data — garbage, a
-# truncated header, or a foreign file written to the cache path — which a plain
-# 0-byte check would wave through. We deliberately verify only the HEADER: point
-# cache bodies are compressed (variable size) on 5.0+, so an "expected byte size"
-# check would misfire. No false positives: a genuine frame always passes this.
+# 20-byte header: magic(8) + type(4) + totpoint(4) + data_types(4), three LE
+# uint32. This layout was verified byte-for-byte identical on official Blender
+# 4.2.9, 4.5.9, 5.0.1 and 5.2.3 (only the high 16 bits of the type word differ by
+# version, so we never key on it).
+#
+# SCOPE — this validates FILE STRUCTURE, not payload correctness. We verify the
+# signature, a full header, that the header's declared point count and data-type
+# mask are non-zero, and that payload bytes exist beyond the header. We do NOT
+# decode the per-point payload: it is compressed and version-variable (the
+# compression toggle is even gone from 5.2's API), and Blender exposes no error
+# when a present frame fails to load (it silently falls back to the rest shape —
+# verified by probe). So a frame that passes this is a well-formed cache file,
+# NOT a guarantee that its simulation data is numerically intact; payload
+# integrity is reported as unverified, never as proven healthy. (Detecting a
+# corrupted-but-well-formed body is a separate, future increment — baselined
+# per-frame hashes.)
 _BPHYS_MAGIC = b"BPHYSICS"
 _BPHYS_HEADER_LEN = 20
 
 
 def _bphys_header_valid(path):
-    """True if ``path`` looks like a valid point-cache frame (BPHYSICS magic and
-    at least a full 20-byte header), False if it is present but structurally
-    invalid (bad magic or truncated header), None if it can't be read (the caller
-    already treats unreadable frames as 'Couldn't verify')."""
+    """True only if ``path`` is a STRUCTURALLY valid point-cache frame: the
+    BPHYSICS magic, a full 20-byte header, a non-zero declared point count AND
+    data-type mask, and at least one payload byte beyond the header. False if it
+    is present but structurally invalid — bad magic, a header shorter than 20
+    bytes, header fields that are zero (e.g. a fabricated 'BPHYSICS' + zero bytes
+    file), or a header with no payload at all. None if it can't be read.
+
+    This closes the gap where a non-empty, readable file that merely starts with
+    the magic would pass. It does not, and cannot cheaply, prove the compressed
+    payload is numerically correct — see the module note above."""
     try:
         with open(path, "rb") as fh:
-            head = fh.read(len(_BPHYS_MAGIC))
-            if head != _BPHYS_MAGIC:
+            head = fh.read(_BPHYS_HEADER_LEN)
+            if len(head) < _BPHYS_HEADER_LEN or head[:8] != _BPHYS_MAGIC:
                 return False
+            # The three remaining header fields must describe actual data: a frame
+            # that declares zero points or zero data channels is not a usable
+            # cache frame (confirmed: real frames always have both > 0).
+            totpoint = struct.unpack_from("<I", head, 12)[0]
+            data_types = struct.unpack_from("<I", head, 16)[0]
+            if totpoint == 0 or data_types == 0:
+                return False
+            # A valid frame carries per-point payload after the header; a file
+            # that is exactly the header (no payload) is truncated/empty of data.
             fh.seek(0, os.SEEK_END)
-            return fh.tell() >= _BPHYS_HEADER_LEN
+            return fh.tell() > _BPHYS_HEADER_LEN
     except OSError:
         return None
 

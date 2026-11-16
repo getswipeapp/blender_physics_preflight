@@ -122,6 +122,10 @@ CASES = [
     # This is beyond the 0-byte check; the file exists and reads fine.
     ("HS bphys bad magic -> corrupt (fail)", 18, fixtures.build_bphys_badmagic, True, {Status.FAIL}),
     ("HS bphys truncated header -> corrupt (fail)", 18, fixtures.build_bphys_truncated_header, True, {Status.FAIL}),
+    # B1: valid magic + full 20-byte length but zero header fields (the fabricated
+    # 'BPHYSICS'+zeros file), and a valid header with no payload. Both must FAIL.
+    ("HS bphys zero header fields -> corrupt (fail)", 18, fixtures.build_bphys_zerofields, True, {Status.FAIL}),
+    ("HS bphys header-only, no payload -> corrupt (fail)", 18, fixtures.build_bphys_header_only, True, {Status.FAIL}),
     ("HS fluid baked (pass)", 18, fixtures.build_fluid_pass, True, {Status.PASS}),
     ("HS fluid missing data frame (fail)", 18, fixtures.build_fluid_missing_data_frame, True, {Status.FAIL}),
     ("HS fluid missing mesh frame (fail)", 18, fixtures.build_fluid_missing_mesh_frame, True, {Status.FAIL}),
@@ -157,6 +161,11 @@ CACHE_REGRESSION = [
     ("bphys bad magic -> no cache PASS", fixtures.build_bphys_badmagic,
      {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
     ("bphys truncated header -> no cache PASS", fixtures.build_bphys_truncated_header,
+     {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
+    # B1 regression: the fabricated 'BPHYSICS'+zeros file must never reach PASS.
+    ("bphys zero fields -> no cache PASS", fixtures.build_bphys_zerofields,
+     {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
+    ("bphys header-only -> no cache PASS", fixtures.build_bphys_header_only,
      {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
 ]
 
@@ -1568,6 +1577,15 @@ def integrity_header_tests():
     trunc = os.path.join(d, "trunc.bphys")
     with open(trunc, "wb") as fh:
         fh.write(b"BPHYSICS\x02\x00\x00\x00")  # magic present, only 12 bytes
+    # B1: valid magic + full 20-byte length but zero header fields (the exact
+    # fabricated file from the review) must be rejected.
+    zerofields = os.path.join(d, "zero.bphys")
+    with open(zerofields, "wb") as fh:
+        fh.write(b"BPHYSICS" + b"\x00" * 12)
+    # valid magic + valid non-zero fields but NO payload beyond the 20-byte header.
+    headeronly = os.path.join(d, "hdronly.bphys")
+    with open(headeronly, "wb") as fh:
+        fh.write(b"BPHYSICS" + struct.pack("<3I", 2, 81, 22))
     out.append(("integrity valid header -> True",
                 ci._bphys_header_valid(good) is True,
                 ci._bphys_header_valid(good), True))
@@ -1577,6 +1595,12 @@ def integrity_header_tests():
     out.append(("integrity truncated header -> False",
                 ci._bphys_header_valid(trunc) is False,
                 ci._bphys_header_valid(trunc), False))
+    out.append(("integrity B1 fabricated zero-fields -> False",
+                ci._bphys_header_valid(zerofields) is False,
+                ci._bphys_header_valid(zerofields), False))
+    out.append(("integrity header-only (no payload) -> False",
+                ci._bphys_header_valid(headeronly) is False,
+                ci._bphys_header_valid(headeronly), False))
 
     e = ci.CacheEntry("Obj", "Cloth", "point")
     e.baked_flag = True

@@ -237,7 +237,11 @@ def c18_files_present(ctx, mk):
                               hint="Open the bake panel to confirm it's current."))
         elif s == ci.V_COMPLETE:
             out.append(mk(Status.PASS,
-                          "All %d expected %s cache files exist and are non-empty."
+                          "All %d expected %s cache files are present and pass "
+                          "the cache-file structure check (valid header and "
+                          "payload). This confirms the files are there and "
+                          "well-formed, not that every byte of the baked data is "
+                          "numerically correct."
                           % (len(v.required), e.system), object_name=name))
         elif s == ci.V_EMPTY:
             out.append(mk(Status.FAIL,

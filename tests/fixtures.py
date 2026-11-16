@@ -638,17 +638,30 @@ def build_dpaint_missing_tail(outdir):
 
 def _corrupt_point_frame(cachedir, mode):
     """Overwrite a middle .bphys frame with content that is non-empty and
-    readable but not valid point-cache data. ``mode`` 'garbage' writes bytes with
-    no BPHYSICS magic; 'truncated' writes the magic but stops short of the full
-    20-byte header. Returns the file touched."""
+    readable but not valid point-cache data. Modes:
+      'garbage'    bytes with no BPHYSICS magic.
+      'truncated'  magic present, but fewer than the 20 header bytes.
+      'zerofields' the exact 'BPHYSICS' + 12 zero bytes fabricated file (valid
+                   magic, full 20-byte length, but totpoint=0 and data_types=0).
+      'headeronly' the real frame's valid 20-byte header with the payload
+                   stripped (valid magic + fields, but no per-point data).
+    Returns the file touched."""
     files = sorted(f for f in os.listdir(cachedir) if f.endswith(".bphys"))
     target = os.path.join(cachedir, files[len(files) // 2])
     if mode == "garbage":
         with open(target, "wb") as fh:
             fh.write(b"this is not a point-cache file, but it is not empty\n")
-    else:  # truncated header: magic present, but < 20 bytes total
+    elif mode == "truncated":
         with open(target, "wb") as fh:
-            fh.write(b"BPHYSICS\x02\x00\x00\x00")  # 12 bytes
+            fh.write(b"BPHYSICS\x02\x00\x00\x00")  # 12 bytes: partial header
+    elif mode == "zerofields":
+        with open(target, "wb") as fh:
+            fh.write(b"BPHYSICS" + b"\x00" * 12)  # 20 bytes, totpoint/data_types=0
+    else:  # headeronly: keep the real 20-byte header, drop the payload
+        with open(target, "rb") as fh:
+            header = fh.read(20)
+        with open(target, "wb") as fh:
+            fh.write(header)
     return os.path.basename(target)
 
 
@@ -664,6 +677,22 @@ def build_bphys_truncated_header(outdir):
     """Bake a cloth cache, then truncate a frame to a partial header."""
     blend = _make_cloth_blend(outdir, frame_end_cache=6, scene_end=6)
     _corrupt_point_frame(os.path.join(outdir, "blendcache_cloth"), "truncated")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_bphys_zerofields(outdir):
+    """The B1 example: a frame of 'BPHYSICS' + 12 zero bytes — valid magic, full
+    20-byte length, but zero point count and data-type mask. Must FAIL, never a
+    clean PASS."""
+    blend = _make_cloth_blend(outdir, frame_end_cache=6, scene_end=6)
+    _corrupt_point_frame(os.path.join(outdir, "blendcache_cloth"), "zerofields")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_bphys_header_only(outdir):
+    """A frame with the real, valid 20-byte header but no payload at all."""
+    blend = _make_cloth_blend(outdir, frame_end_cache=6, scene_end=6)
+    _corrupt_point_frame(os.path.join(outdir, "blendcache_cloth"), "headeronly")
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 

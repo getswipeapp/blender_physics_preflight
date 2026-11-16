@@ -20,38 +20,62 @@ Measured (cloth grid, 81 verts): `magic=BPHYSICS`, typeword `0x0000_0002` (4.2/4
 / `0x0001_0002` (5.0/5.2), totpoint `81`, data_types `22`. Soft body (42 verts):
 type `0`, totpoint `42`. Particles (count 40): type `1`, totpoint `40`.
 
-## What we validate now (zero false positives)
+## What we validate now (file structure)
 
-`cache_inspect._bphys_header_valid()` + `_scan_point_cache_files()`:
-- **Magic signature**: a present, non-empty, readable `.bphys` whose first 8
-  bytes aren't `BPHYSICS` is **not** cache data (garbage, or a foreign file
-  written to the cache path). → frame marked corrupt (`frames_badheader`).
-- **Header length**: magic present but file < 20 bytes = truncated header. →
-  corrupt.
-- These feed the existing `V_CORRUPT` verdict, so checks #17 and #18 FAIL with a
-  precise message naming the cause (0-byte vs invalid header). A genuine baked
-  frame always passes, confirmed by the real cloth/soft/particle/hair/DP bakes
-  on all four versions (349/349, no regressions, no false corrupt).
+`cache_inspect._bphys_header_valid()` + `_scan_point_cache_files()`. A present,
+non-empty, readable `.bphys` frame is treated as **structurally invalid** (→
+`frames_badheader` → `V_CORRUPT` → #17/#18 FAIL) when any of these hold:
+- **Bad magic** — first 8 bytes ≠ `BPHYSICS` (garbage or a foreign file at the path).
+- **Short header** — magic present but file < 20 bytes.
+- **Zero header fields** — `totpoint == 0` or `data_types == 0`. This catches the
+  fabricated `BPHYSICS` + 12 zero bytes file raised in review B1.
+- **No payload** — exactly the 20-byte header with nothing after it.
 
-This goes **beyond** the previous check (presence + 0-byte + first-byte-readable):
-a file can be non-empty and readable yet not be valid cache data. No competitor
-validates frame structure.
+On the four-version matrix (4.2.9/4.5.9/5.0.1/5.2.3) every real baked
+cloth/soft/particle/hair/DP frame passes this (no regressions; see the suite's
+`integrity_header_tests` and the `HS bphys …` / `bphys … no cache PASS` cases).
+We do not claim this is provably false-positive-free in general — it is validated
+against our fixtures and the real bakes, no more than that.
 
-## What we deliberately do NOT claim (the honest boundary)
+## What we DO NOT claim — verified structure ≠ verified payload (review B1)
 
-- **No "expected byte size" / full-body check.** Point-cache bodies are
-  **compressed** (variable size per frame) on 5.0+ — on 5.2 the `compression`
-  toggle is even removed from the API. So "size == points × stride" would
-  misfire. We validate only the fixed header, never the compressed body.
-- **No decode of every frame's payload.** Would require tracking Blender's
-  internal compression scheme across versions; fragile, deferred.
+This validates **file structure**, not the numerical correctness of the baked
+data. Ground truth, probed on 5.2.3 by baking real cloth, recording the deformed
+mesh at a frame, then mutating that frame's cache file and re-reading:
+
+| Mutation of one frame file | Structure check | Blender's own read |
+|---|---|---|
+| bad magic / short header / zero fields / header-only | **rejects** (FAIL) | falls back to rest |
+| **body zeroed, header intact, full size** | passes (looks valid) | **cannot load it — falls back to rest** |
+| **body truncated, header intact** | passes (looks valid) | **cannot load it — falls back to rest** |
+
+So a well-formed header with a corrupted or truncated **body** is NOT detected by
+the structure check, yet Blender still can't use it. Two hard constraints make a
+cheap payload check infeasible:
+- Point-cache **bodies are compressed and variable-size** on 5.0+ (the
+  `compression` toggle is gone from 5.2's API), so there is no "expected size" to
+  compare against, and no stride to recompute.
+- When a present frame fails to load, Blender writes **no error** to stderr and
+  leaves `point_cache.is_baked == True` — it silently renders the rest shape. So
+  there is no in-process signal, and no reference "truth" to compare an evaluated
+  frame against. A reference-free payload oracle is not reliable.
+
+Therefore `V_COMPLETE`/PASS means **"all frames present and structurally
+well-formed"**, and the #18 PASS message says so explicitly — it is NOT a claim
+that the payload bytes are numerically intact. We do not treat an un-decoded
+payload as proven healthy.
 
 ## Next deep-integrity increment (planned, not yet built)
 
-- **Stale-topology check**: compare header `totpoint` against the current
+- **Baselined per-frame hashes** — the right way to catch a corrupted/truncated
+  **body** that still has a valid header. When the user clicks Save Baseline,
+  record a hash of each cache frame file; a later scan flags any frame whose
+  bytes changed. This detects all three body-level mutations above with no false
+  positives (a hash matches or it doesn't) and no format reverse-engineering.
+  This is the honest path to "content integrity"; the current increment is
+  structure validation only.
+- **Stale-topology check** — compare header `totpoint` against the current
   object's point count; a mismatch means the cache was baked for a different
-  mesh (a real, common failure). Higher value, but higher false-positive risk
-  (modifier-stack order, particle alive-counts), so it needs its own increment
-  with explicit false-positive fixtures before shipping — per the owner's
-  "benchmark false positives" directive.
+  mesh. Higher value, higher false-positive risk (modifier-stack order, particle
+  counts), so it needs its own increment with explicit false-positive fixtures.
 - Fluid (`.vdb`/`.uni`) and GN blob integrity: separate formats, separate study.
