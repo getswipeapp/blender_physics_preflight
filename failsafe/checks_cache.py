@@ -51,6 +51,18 @@ def c17_baked(ctx, mk):
     out = []
     for e in entries:
         name = e.obj_name
+        # Dynamic Paint IMAGE output is an image sequence Failsafe doesn't read
+        # yet. Say so plainly (UNKNOWN) rather than letting it pass silently —
+        # the cardinal rule: never imply we verified something we didn't.
+        if e.kind == "dpimage":
+            out.append(mk(Status.UNKNOWN,
+                          "%s bakes an image sequence, which Failsafe doesn't "
+                          "read yet — so whether every frame is baked can't be "
+                          "verified." % e.system, object_name=name,
+                          hint="Check the surface's output images by hand, or use "
+                               "a vertex-format surface (Failsafe verifies those "
+                               "frame-by-frame)."))
+            continue
         # Rigid Body World keeps its cache in the .blend; answer from the flag —
         # but still honour the staleness flags so a baked-but-outdated RBW can't
         # get a clean PASS (R17).

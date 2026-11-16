@@ -21,7 +21,9 @@ Filename schemes proven on official Blender 4.2.23 / 4.5.15 / 5.0.1 / 5.2.3:
     a hair system with ``use_hair_dynamics`` both write this exact scheme (the
     hex is of the owning object's name, the surface/system name being empty).
     A Dynamic Paint IMAGE surface bakes an image sequence instead (not a point
-    cache) and is not yet covered.
+    cache); its frame contents aren't read yet, so it is surfaced as an explicit
+    "Couldn't verify" (UNKNOWN) rather than silently skipped, while its output
+    path is still checked for portability and cloud-sync risk.
   * Fluid (Mantaflow) bake:
         <cache_directory>/data/fluid_data_NNNN.{uni,vdb}
         <cache_directory>/config/config_NNNN.uni
@@ -886,6 +888,35 @@ def inspect_gn_bakes(obj, mod, scene):
     return out
 
 
+# ----------------------------------------------- dynamic paint (image) ------
+
+def inspect_dynamic_paint_image(obj, surface, scene):
+    """A Dynamic Paint canvas surface in IMAGE format bakes an image *sequence*
+    to ``image_output_path`` rather than a point cache. Failsafe does not yet
+    read those image files, so this returns an entry that is HONESTLY
+    unverifiable (surfaces as 'Couldn't verify'/UNKNOWN) — never a silent
+    omission that a user could mistake for 'verified'. The output *path* is still
+    genuinely checked for portability (#22) and cloud-sync risk (#24); only the
+    frame *contents* are what we can't yet confirm."""
+    e = CacheEntry(obj.name, "Dynamic Paint image output", "dpimage")
+    raw = getattr(surface, "image_output_path", "") or ""
+    e.raw_path = raw
+    e.cache_dir = _abspath(raw) if raw else None
+    e.cloud_marker = cloud_sync_marker(e.cache_dir)
+    e.uses_disk = True
+    e.memory = False
+    e.baked_determinable = True
+    e.baked_flag = None               # never assert baked/not for image output
+    e.file_check_applicable = False   # we don't read the image files (yet)
+    e.cache_range = None              # keep #19 (range) from asserting on it
+    e.frames_expected = None
+    e.portable, note = _portability(raw)
+    if note:
+        e.path_note = "Dynamic Paint image output is " + note
+    e.identity = ("dpimage", e.cache_dir)
+    return e
+
+
 # -------------------------------------------------- top-level enumerator ----
 
 def enumerate_caches(scene):
@@ -904,6 +935,15 @@ def enumerate_caches(scene):
                     entries.append(inspect_fluid_domain(obj, mod, scene))
             elif mod.type == "NODES":
                 entries.extend(inspect_gn_bakes(obj, mod, scene))
+            elif mod.type == "DYNAMIC_PAINT":
+                # VERTEX surfaces are point caches (handled above); IMAGE surfaces
+                # bake an image sequence we don't read yet — surface them as an
+                # explicit "Couldn't verify", never a silent omission.
+                cs = getattr(mod, "canvas_settings", None)
+                if cs is not None:
+                    for surf in getattr(cs, "canvas_surfaces", []) or []:
+                        if getattr(surf, "surface_format", "") == "IMAGE":
+                            entries.append(inspect_dynamic_paint_image(obj, surf, scene))
     rbw = inspect_rigidbody_world(scene)
     if rbw is not None and scene_has_rigid_bodies(scene):
         entries.append(rbw)

@@ -1599,11 +1599,55 @@ def cache_coverage_tests():
                 any(pc == surf.point_cache for pc in helper_pcs),
                 len(helper_pcs), ">=1"))
 
-    # --- DP IMAGE surface is an image sequence, not a point cache: skipped ----
-    surf.surface_format = 'IMAGE'
-    n_img = len([e for e in ci.enumerate_caches(bpy.context.scene)
-                 if e.obj_name == "DPCov"])
-    out.append(("coverage DP image surface skipped", n_img == 0, n_img, 0))
+    # --- DP IMAGE surface: surfaced as an explicit 'Couldn't verify' ----------
+    # (not a point cache, and never a silent skip that could read as verified).
+    fixtures.reset()
+    bpy.ops.mesh.primitive_grid_add(size=4)
+    di = bpy.context.active_object
+    di.name = "DPImg"
+    mi = di.modifiers.new("DP", type='DYNAMIC_PAINT')
+    with bpy.context.temp_override(active_object=di, object=di, selected_objects=[di]):
+        bpy.ops.dpaint.type_toggle(type='CANVAS')
+    si = mi.canvas_settings.canvas_surfaces[0]
+    si.surface_format = 'IMAGE'
+    img_ents = [e for e in ci.enumerate_caches(bpy.context.scene)
+                if e.obj_name == "DPImg"]
+    out.append(("coverage DP image enumerated as dpimage",
+                len(img_ents) == 1 and img_ents[0].kind == "dpimage",
+                (len(img_ents), img_ents[0].kind if img_ents else None),
+                "1 dpimage"))
+    out.append(("coverage DP image is not a point cache",
+                all(e.kind != "point" for e in img_ents),
+                [e.kind for e in img_ents], "no point"))
+    # It must show up in #17 as UNKNOWN ('Couldn't verify'), never PASS.
+    res = engine.run_all(bpy.context)
+    st17 = set(statuses_for_check(res, 17))
+    out.append(("coverage DP image is #17 UNKNOWN, never PASS",
+                Status.UNKNOWN in st17 and Status.PASS not in st17,
+                sorted(st17), "UNKNOWN without PASS"))
+
+    # --- cross-scene guard: the scanner is PER-SCENE but cache ownership spans
+    # ALL scenes, so a cache owned by another scene in the same .blend is never
+    # mis-flagged as an orphan. (Sharing a helper is not proof on its own; this
+    # exercises the actual asymmetry across scenes with real baked files.)
+    outdir = tempfile.mkdtemp(prefix="failsafe_multiscene_")
+    fixtures._make_cloth_blend(outdir)   # saves + bakes a disk cloth in scene
+    scB = bpy.data.scenes.new("SceneB_cov")
+    clothA = bpy.data.objects.get("Cloth")
+    pcA = clothA.modifiers[0].point_cache
+    identA = ci._point_cache_identity_for(clothA, pcA)
+    owned_all = ci.owned_point_cache_identities(bpy.data.scenes)
+    out.append(("coverage cross-scene cache is owned (not orphan)",
+                identA is not None and identA in owned_all,
+                (identA in owned_all) if identA is not None else None, True))
+    # Scene B's scan does not see scene A's cache as its own...
+    ents_B = ci.enumerate_caches(scB)
+    out.append(("coverage scene B scanner excludes scene A cache",
+                all(e.obj_name != "Cloth" for e in ents_B), len(ents_B), 0))
+    # ...and the orphan check run from scene B raises no false orphan.
+    orphans_from_B = ci.find_orphan_point_caches(scB)
+    out.append(("coverage no false orphan across scenes",
+                len(orphans_from_B) == 0, len(orphans_from_B), 0))
 
     return out
 
