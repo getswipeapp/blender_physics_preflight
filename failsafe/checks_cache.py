@@ -165,7 +165,7 @@ def c17_baked(ctx, mk):
         elif s in (ci.V_INCOMPLETE, ci.V_CORRUPT):
             out.append(mk(Status.FAIL,
                           "%s is marked baked, but its cache on disk is "
-                          "incomplete." % e.system,
+                          "incomplete or corrupt." % e.system,
                           object_name=name, hint="Delete the cache and re-bake."))
         elif s == ci.V_UNREADABLE:
             out.append(mk(Status.UNKNOWN,
@@ -251,9 +251,20 @@ def c18_files_present(ctx, mk):
                           % e.system, object_name=name,
                           hint="Bake the simulation before rendering."))
         elif s == ci.V_CORRUPT:
+            n_empty = len(e.frames_empty or ())
+            n_bad = len(getattr(e, "frames_badheader", None) or ())
+            if n_bad and not n_empty:
+                detail = ("%d cache file(s) aren't valid simulation data (a bad "
+                          "or truncated cache header)" % n_bad)
+            elif n_empty and not n_bad:
+                detail = "%d empty (0-byte) cache file(s)" % n_empty
+            else:
+                detail = ("%d corrupt cache file(s) (empty or an invalid header)"
+                          % (n_empty + n_bad))
             out.append(mk(Status.FAIL,
-                          "%s has %d empty (0-byte) cache file(s); those frames "
-                          "are corrupt." % (e.system, len(v.empty)),
+                          "%s has %s; those frames are corrupt and the render "
+                          "will freeze or re-simulate there."
+                          % (e.system, detail),
                           object_name=name,
                           hint="Delete the cache and re-bake."))
         elif s == ci.V_INCOMPLETE:

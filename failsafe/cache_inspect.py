@@ -367,6 +367,8 @@ class CacheEntry:
         self.frames_present = set()
         self.frames_empty = set()         # present but 0 bytes
         self.frames_unreadable = set()    # present but os.stat raised
+        self.frames_badheader = set()     # present, non-empty, but not valid
+        #                                   point-cache data (bad/truncated header)
         self.sampled = False              # frame_step > 1 (intentionally sparse)
         self.frame_step = 1
         self.external = False
@@ -441,6 +443,7 @@ def cache_status(e):
     present = set(e.frames_present or [])     # every file that exists on disk
     empty = set(e.frames_empty or [])         # exists but 0-byte
     unreadable = set(e.frames_unreadable or [])  # exists but couldn't be read
+    badheader = set(getattr(e, "frames_badheader", None) or [])  # invalid header
     if not required:
         return CacheVerdict(V_UNVERIFIABLE, [], [], [], present, required,
                             "cache frame range is empty")
@@ -451,12 +454,15 @@ def cache_status(e):
     if not present:
         state = V_EMPTY if e.baked_flag else V_NOT_BAKED
         return CacheVerdict(state, missing, [], [], present, required, "")
-    # Precedence: absent frames (clear FAIL) -> corrupt 0-byte -> missing
-    # sub-cache -> unreadable (can't verify, UNKNOWN) -> complete.
+    # Precedence: absent frames (clear FAIL) -> corrupt (0-byte or invalid
+    # header) -> missing sub-cache -> unreadable (can't verify, UNKNOWN) ->
+    # complete. A 0-byte frame and a present-but-garbage frame are both corrupt;
+    # verdict.empty stays the 0-byte list (checks read e.frames_badheader for the
+    # bad-header count, so the two causes can be named precisely).
     if missing:
         return CacheVerdict(V_INCOMPLETE, missing, sorted(empty), sorted(unreadable),
                             present, required, "")
-    if empty:
+    if empty or badheader:
         return CacheVerdict(V_CORRUPT, missing, sorted(empty), sorted(unreadable),
                             present, required, "")
     if e.components_missing:
@@ -521,10 +527,40 @@ def _file_state(path):
     return "ok"
 
 
+# A real disk point-cache FRAME file begins with this 8-byte magic, followed by a
+# 20-byte header (magic + type + totpoint + data_types, three LE uint32). This
+# layout was verified byte-for-byte identical on official Blender 4.2.9, 4.5.9,
+# 5.0.1 and 5.2.3 (only the high 16 bits of the type word differ by version, so
+# we never key on it). Validating the header lets us catch a frame file that is
+# present, non-empty and readable but is NOT valid point-cache data — garbage, a
+# truncated header, or a foreign file written to the cache path — which a plain
+# 0-byte check would wave through. We deliberately verify only the HEADER: point
+# cache bodies are compressed (variable size) on 5.0+, so an "expected byte size"
+# check would misfire. No false positives: a genuine frame always passes this.
+_BPHYS_MAGIC = b"BPHYSICS"
+_BPHYS_HEADER_LEN = 20
+
+
+def _bphys_header_valid(path):
+    """True if ``path`` looks like a valid point-cache frame (BPHYSICS magic and
+    at least a full 20-byte header), False if it is present but structurally
+    invalid (bad magic or truncated header), None if it can't be read (the caller
+    already treats unreadable frames as 'Couldn't verify')."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(len(_BPHYS_MAGIC))
+            if head != _BPHYS_MAGIC:
+                return False
+            fh.seek(0, os.SEEK_END)
+            return fh.tell() >= _BPHYS_HEADER_LEN
+    except OSError:
+        return None
+
+
 def _scan_point_cache_files(cache_dir, prefix, index, frames):
-    present, empty, unreadable = set(), set(), set()
+    present, empty, unreadable, badheader = set(), set(), set(), set()
     if not cache_dir or not os.path.isdir(cache_dir):
-        return present, empty, unreadable
+        return present, empty, unreadable, badheader
     for fr in frames:
         fn = "%s_%06d_%02d.bphys" % (prefix, fr, index)
         p = os.path.join(cache_dir, fn)
@@ -535,7 +571,15 @@ def _scan_point_cache_files(cache_dir, prefix, index, frames):
                 empty.add(fr)
             elif st == "unreadable":
                 unreadable.add(fr)
-    return present, empty, unreadable
+            else:
+                # Non-empty and readable: now confirm it is actually point-cache
+                # data, not just any non-empty file at that path.
+                hv = _bphys_header_valid(p)
+                if hv is False:
+                    badheader.add(fr)
+                elif hv is None:
+                    unreadable.add(fr)
+    return present, empty, unreadable, badheader
 
 
 def inspect_point_cache(obj, system, pc, scene):
@@ -588,7 +632,8 @@ def inspect_point_cache(obj, system, pc, scene):
     e.frame_step = step
     e.sampled = step > 1
     e.frames_expected = list(range(cs, ce + 1, step))
-    e.frames_present, e.frames_empty, e.frames_unreadable = _scan_point_cache_files(
+    (e.frames_present, e.frames_empty, e.frames_unreadable,
+     e.frames_badheader) = _scan_point_cache_files(
         cache_dir, prefix, int(getattr(pc, "index", 0)), e.frames_expected)
     e.disk_bytes = _point_cache_bytes(cache_dir, prefix, e.cache_index,
                                       e.frames_present)

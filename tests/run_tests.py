@@ -117,6 +117,11 @@ CASES = [
     ("HS hair dynamics missing last frame (fail)", 18, fixtures.build_hair_missing_tail, True, {Status.FAIL}),
     ("HS dynamic paint baked (pass)", 18, fixtures.build_dpaint_pass, True, {Status.PASS}),
     ("HS dynamic paint missing last frame (fail)", 18, fixtures.build_dpaint_missing_tail, True, {Status.FAIL}),
+    # Deep integrity: a present, non-empty, readable frame that is NOT valid
+    # point-cache data (bad magic / truncated header) is corrupt -> #18 FAIL.
+    # This is beyond the 0-byte check; the file exists and reads fine.
+    ("HS bphys bad magic -> corrupt (fail)", 18, fixtures.build_bphys_badmagic, True, {Status.FAIL}),
+    ("HS bphys truncated header -> corrupt (fail)", 18, fixtures.build_bphys_truncated_header, True, {Status.FAIL}),
     ("HS fluid baked (pass)", 18, fixtures.build_fluid_pass, True, {Status.PASS}),
     ("HS fluid missing data frame (fail)", 18, fixtures.build_fluid_missing_data_frame, True, {Status.FAIL}),
     ("HS fluid missing mesh frame (fail)", 18, fixtures.build_fluid_missing_mesh_frame, True, {Status.FAIL}),
@@ -147,6 +152,12 @@ CACHE_REGRESSION = [
      {17: {Status.FAIL}, 18: {Status.FAIL}, 20: {Status.FAIL}}, (17, 18, 19, 20)),
     ("F01 missing LAST 3 frames -> no cache PASS", fixtures.build_F01_missing_multi_tail,
      {18: {Status.FAIL}, 20: {Status.FAIL}}, (17, 18, 19, 20)),
+    # A corrupt-header frame (present but invalid) must never let a cache check
+    # report PASS: #17 and #18 FAIL, and none of #17-#20 may say PASS.
+    ("bphys bad magic -> no cache PASS", fixtures.build_bphys_badmagic,
+     {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
+    ("bphys truncated header -> no cache PASS", fixtures.build_bphys_truncated_header,
+     {17: {Status.FAIL}, 18: {Status.FAIL}}, (17, 18, 19, 20)),
 ]
 
 
@@ -1539,6 +1550,51 @@ def review_blocker_tests():
     return out
 
 
+def integrity_header_tests():
+    """Direct unit tests for the .bphys header validator and the CORRUPT verdict
+    it drives, independent of a real bake (the heavy-sim cases cover real files).
+    Proves zero false positives: a valid header passes, a clean present set is
+    COMPLETE, and only genuinely invalid data is flagged."""
+    from failsafe import cache_inspect as ci
+    import struct
+    out = []
+    d = tempfile.mkdtemp(prefix="failsafe_hdr_")
+    good = os.path.join(d, "good.bphys")
+    with open(good, "wb") as fh:
+        fh.write(b"BPHYSICS" + struct.pack("<3I", 2, 81, 22) + b"\x00" * 40)
+    bad = os.path.join(d, "bad.bphys")
+    with open(bad, "wb") as fh:
+        fh.write(b"not a cache at all, but definitely non-empty\n")
+    trunc = os.path.join(d, "trunc.bphys")
+    with open(trunc, "wb") as fh:
+        fh.write(b"BPHYSICS\x02\x00\x00\x00")  # magic present, only 12 bytes
+    out.append(("integrity valid header -> True",
+                ci._bphys_header_valid(good) is True,
+                ci._bphys_header_valid(good), True))
+    out.append(("integrity bad magic -> False",
+                ci._bphys_header_valid(bad) is False,
+                ci._bphys_header_valid(bad), False))
+    out.append(("integrity truncated header -> False",
+                ci._bphys_header_valid(trunc) is False,
+                ci._bphys_header_valid(trunc), False))
+
+    e = ci.CacheEntry("Obj", "Cloth", "point")
+    e.baked_flag = True
+    e.file_check_applicable = True
+    e.cache_dir = d
+    e.frames_expected = [1, 2, 3]
+    e.frames_present = {1, 2, 3}
+    e.frames_badheader = {2}
+    out.append(("integrity bad-header frame -> V_CORRUPT",
+                ci.cache_status(e).state == ci.V_CORRUPT,
+                ci.cache_status(e).state, ci.V_CORRUPT))
+    e.frames_badheader = set()
+    out.append(("integrity clean frames -> V_COMPLETE (no false corrupt)",
+                ci.cache_status(e).state == ci.V_COMPLETE,
+                ci.cache_status(e).state, ci.V_COMPLETE))
+    return out
+
+
 def cache_coverage_tests():
     """Hair-dynamics and Dynamic-Paint-vertex cache coverage, and the two
     correctness guards: a static-hair system is never scanned (a false FAIL risk,
@@ -1813,6 +1869,7 @@ def main():
                                    + batch_adversarial_tests()
                                    + batch_isolation_tests()
                                    + review_blocker_tests()
+                                   + integrity_header_tests()
                                    + cache_coverage_tests()
                                    + couldnt_verify_tests()):
         if ok:
@@ -1832,7 +1889,8 @@ def main():
              + len(title_tests()) + len(new_feature_tests())
              + len(baseline_tests()) + len(batch_adversarial_tests())
              + len(batch_isolation_tests()) + len(review_blocker_tests())
-             + len(cache_coverage_tests()) + len(couldnt_verify_tests()))
+             + len(integrity_header_tests()) + len(cache_coverage_tests())
+             + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

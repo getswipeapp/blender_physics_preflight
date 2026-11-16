@@ -636,6 +636,37 @@ def build_dpaint_missing_tail(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+def _corrupt_point_frame(cachedir, mode):
+    """Overwrite a middle .bphys frame with content that is non-empty and
+    readable but not valid point-cache data. ``mode`` 'garbage' writes bytes with
+    no BPHYSICS magic; 'truncated' writes the magic but stops short of the full
+    20-byte header. Returns the file touched."""
+    files = sorted(f for f in os.listdir(cachedir) if f.endswith(".bphys"))
+    target = os.path.join(cachedir, files[len(files) // 2])
+    if mode == "garbage":
+        with open(target, "wb") as fh:
+            fh.write(b"this is not a point-cache file, but it is not empty\n")
+    else:  # truncated header: magic present, but < 20 bytes total
+        with open(target, "wb") as fh:
+            fh.write(b"BPHYSICS\x02\x00\x00\x00")  # 12 bytes
+    return os.path.basename(target)
+
+
+def build_bphys_badmagic(outdir):
+    """Bake a cloth cache, then replace a frame with non-cache garbage. Blender
+    still reports the sim as baked; #17/#18 must FAIL (corrupt), not pass."""
+    blend = _make_cloth_blend(outdir, frame_end_cache=6, scene_end=6)
+    _corrupt_point_frame(os.path.join(outdir, "blendcache_cloth"), "garbage")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_bphys_truncated_header(outdir):
+    """Bake a cloth cache, then truncate a frame to a partial header."""
+    blend = _make_cloth_blend(outdir, frame_end_cache=6, scene_end=6)
+    _corrupt_point_frame(os.path.join(outdir, "blendcache_cloth"), "truncated")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
 def _make_fluid_blend(outdir, frame_end=4, use_mesh=True):
     reset()
     sc = bpy.context.scene
