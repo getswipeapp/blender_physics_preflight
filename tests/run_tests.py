@@ -111,6 +111,12 @@ CASES = [
     ("HS soft-body missing last frame (fail)", 18, fixtures.build_softbody_missing_tail, True, {Status.FAIL}),
     ("HS particle baked (pass)", 18, fixtures.build_particle_pass, True, {Status.PASS}),
     ("HS particle missing last frame (fail)", 18, fixtures.build_particle_missing_tail, True, {Status.FAIL}),
+    # Hair dynamics and Dynamic Paint vertex surfaces both write the standard
+    # .bphys point cache (verified on 5.2.3); the scanner must cover them too.
+    ("HS hair dynamics baked (pass)", 18, fixtures.build_hair_pass, True, {Status.PASS}),
+    ("HS hair dynamics missing last frame (fail)", 18, fixtures.build_hair_missing_tail, True, {Status.FAIL}),
+    ("HS dynamic paint baked (pass)", 18, fixtures.build_dpaint_pass, True, {Status.PASS}),
+    ("HS dynamic paint missing last frame (fail)", 18, fixtures.build_dpaint_missing_tail, True, {Status.FAIL}),
     ("HS fluid baked (pass)", 18, fixtures.build_fluid_pass, True, {Status.PASS}),
     ("HS fluid missing data frame (fail)", 18, fixtures.build_fluid_missing_data_frame, True, {Status.FAIL}),
     ("HS fluid missing mesh frame (fail)", 18, fixtures.build_fluid_missing_mesh_frame, True, {Status.FAIL}),
@@ -1533,6 +1539,75 @@ def review_blocker_tests():
     return out
 
 
+def cache_coverage_tests():
+    """Hair-dynamics and Dynamic-Paint-vertex cache coverage, and the two
+    correctness guards: a static-hair system is never scanned (a false FAIL risk,
+    since it has no sim cache), and a Dynamic Paint vertex cache is recognised as
+    owned so the orphan check (#25) can never flag it. Enumeration/ownership read
+    only the datablocks, so no on-disk bake is needed here (the heavy-sim cases
+    cover the real bakes)."""
+    from failsafe import cache_inspect as ci
+    out = []
+
+    # --- static hair must NOT be scanned (no cache -> no false FAIL) ----------
+    fixtures.reset()
+    bpy.ops.mesh.primitive_plane_add(size=4)
+    o = bpy.context.active_object
+    o.name = "HairCov"
+    with bpy.context.temp_override(active_object=o, object=o, selected_objects=[o]):
+        bpy.ops.object.particle_system_add()
+    psys = o.particle_systems[0]
+    psys.settings.type = 'HAIR'
+    psys.use_hair_dynamics = False
+    n_static = len([e for e in ci.enumerate_caches(bpy.context.scene)
+                    if e.obj_name == "HairCov"])
+    out.append(("coverage static hair not scanned", n_static == 0, n_static, 0))
+
+    # turning dynamics on makes it a scanned 'Hair Dynamics' cache
+    psys.use_hair_dynamics = True
+    hair_ents = [e for e in ci.enumerate_caches(bpy.context.scene)
+                 if e.obj_name == "HairCov"]
+    out.append(("coverage hair dynamics scanned", len(hair_ents) == 1,
+                len(hair_ents), 1))
+    out.append(("coverage hair labelled 'Hair Dynamics'",
+                len(hair_ents) == 1 and hair_ents[0].system == "Hair Dynamics",
+                hair_ents[0].system if hair_ents else None, "Hair Dynamics"))
+
+    # --- Dynamic Paint vertex surface: scanned AND owned (never an orphan) ----
+    fixtures.reset()
+    bpy.ops.mesh.primitive_grid_add(size=4)
+    d = bpy.context.active_object
+    d.name = "DPCov"
+    m = d.modifiers.new("DP", type='DYNAMIC_PAINT')
+    with bpy.context.temp_override(active_object=d, object=d, selected_objects=[d]):
+        bpy.ops.dpaint.type_toggle(type='CANVAS')
+    surf = m.canvas_settings.canvas_surfaces[0]
+    surf.surface_format = 'VERTEX'
+    dp_ents = [e for e in ci.enumerate_caches(bpy.context.scene)
+               if e.obj_name == "DPCov"]
+    out.append(("coverage DP vertex scanned", len(dp_ents) == 1, len(dp_ents), 1))
+    out.append(("coverage DP labelled 'Dynamic Paint'",
+                len(dp_ents) == 1 and dp_ents[0].system == "Dynamic Paint",
+                dp_ents[0].system if dp_ents else None, "Dynamic Paint"))
+    # The scanner and the orphan-ownership set read the SAME helper, so a DP
+    # vertex cache the scanner reports on can never be flagged as an orphan.
+    # Prove the structural invariant directly (independent of save/bake state,
+    # which the heavy-sim cases already exercise): the surface's point cache
+    # flows through _iter_object_point_caches, which feeds both consumers.
+    helper_pcs = [pc for _label, pc in ci._iter_object_point_caches(d)]
+    out.append(("coverage DP vertex feeds scanner+orphan via one helper",
+                any(pc == surf.point_cache for pc in helper_pcs),
+                len(helper_pcs), ">=1"))
+
+    # --- DP IMAGE surface is an image sequence, not a point cache: skipped ----
+    surf.surface_format = 'IMAGE'
+    n_img = len([e for e in ci.enumerate_caches(bpy.context.scene)
+                 if e.obj_name == "DPCov"])
+    out.append(("coverage DP image surface skipped", n_img == 0, n_img, 0))
+
+    return out
+
+
 def couldnt_verify_tests():
     """Every 'Couldn't verify' a user sees must carry a plain reason (message) AND
     a next action (hint). And the contract must hold: the displayed word is
@@ -1694,6 +1769,7 @@ def main():
                                    + batch_adversarial_tests()
                                    + batch_isolation_tests()
                                    + review_blocker_tests()
+                                   + cache_coverage_tests()
                                    + couldnt_verify_tests()):
         if ok:
             passed += 1
@@ -1712,7 +1788,7 @@ def main():
              + len(title_tests()) + len(new_feature_tests())
              + len(baseline_tests()) + len(batch_adversarial_tests())
              + len(batch_isolation_tests()) + len(review_blocker_tests())
-             + len(couldnt_verify_tests()))
+             + len(cache_coverage_tests()) + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

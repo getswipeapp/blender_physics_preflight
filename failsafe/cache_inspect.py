@@ -12,11 +12,16 @@ compares the files on disk against the *entire* required frame range. Checks
 (e.g. #18 saying "files present" while a trailing frame is missing).
 
 Filename schemes proven on official Blender 4.2.23 / 4.5.15 / 5.0.1 / 5.2.3:
-  * Point cache (Cloth, Soft Body, Particles), disk mode:
+  * Point cache (Cloth, Soft Body, Particles, Hair dynamics, Dynamic Paint
+    vertex surfaces), disk mode:
         blendcache_<blendbasename>/<HEX(name)>_<frame:06d>_<index:02d>.bphys
     where HEX(name) is the ASCII/UTF-8 bytes of the cache name (or, when the
     cache name is empty, the object name) as uppercase hex. Example: object
-    "Plane" -> 506C616E65.
+    "Plane" -> 506C616E65. Verified on 5.2.3: a Dynamic Paint VERTEX surface and
+    a hair system with ``use_hair_dynamics`` both write this exact scheme (the
+    hex is of the owning object's name, the surface/system name being empty).
+    A Dynamic Paint IMAGE surface bakes an image sequence instead (not a point
+    cache) and is not yet covered.
   * Fluid (Mantaflow) bake:
         <cache_directory>/data/fluid_data_NNNN.{uni,vdb}
         <cache_directory>/config/config_NNNN.uni
@@ -210,6 +215,58 @@ def _point_cache_identity_for(obj, pc):
     return (prefix.upper(), int(getattr(pc, "index", 0)))
 
 
+def _iter_object_point_caches(obj):
+    """Yield ``(system_label, point_cache)`` for every point-cache-backed
+    simulation on ``obj``: Cloth, Soft Body, emitter Particles, Hair dynamics,
+    and Dynamic Paint *vertex* surfaces.
+
+    This is the single source of truth shared by ``enumerate_caches`` (what the
+    scanner reports on) and ``owned_point_cache_identities`` (what the orphan
+    check treats as live). Routing both through here means the orphan check (#25)
+    can never flag a cache the scanner itself inspects. Read-only.
+
+    Gating notes (verified on Blender 5.2.3):
+      * Hair particle systems only have a sim cache when ``use_hair_dynamics`` is
+        on — a static-hair system has no cache, so flagging it would be a false
+        FAIL. (``use_hair_dynamics`` lives on the ParticleSystem, not its
+        settings.)
+      * Dynamic Paint stores a VERTEX surface in a standard ``.bphys`` point
+        cache; an IMAGE surface bakes an image sequence instead and is not a
+        point cache, so it is skipped here.
+    """
+    for mod in obj.modifiers:
+        if mod.type == "CLOTH":
+            pc = getattr(mod, "point_cache", None)
+            if pc is not None:
+                yield ("Cloth", pc)
+        elif mod.type == "SOFT_BODY":
+            pc = getattr(mod, "point_cache", None)
+            if pc is not None:
+                yield ("Soft Body", pc)
+        elif mod.type == "DYNAMIC_PAINT":
+            cs = getattr(mod, "canvas_settings", None)
+            if cs is not None:
+                for surf in getattr(cs, "canvas_surfaces", []) or []:
+                    if getattr(surf, "surface_format", "") != "VERTEX":
+                        continue
+                    pc = getattr(surf, "point_cache", None)
+                    if pc is not None:
+                        yield ("Dynamic Paint", pc)
+    if obj.type == "MESH":
+        for psys in obj.particle_systems:
+            st = psys.settings
+            if st is None:
+                continue
+            if st.type == "EMITTER":
+                pc = getattr(psys, "point_cache", None)
+                if pc is not None:
+                    yield ("Particles", pc)
+            elif st.type == "HAIR" and bool(getattr(psys, "use_hair_dynamics", False)):
+                pc = getattr(psys, "point_cache", None)
+                if pc is not None:
+                    yield ("Hair Dynamics", pc)
+
+
 def owned_point_cache_identities(scenes):
     """The ``(prefix, index)`` identity of every default-location disk point cache
     across ALL the given scenes. Using every scene (not just the active one) means
@@ -218,18 +275,7 @@ def owned_point_cache_identities(scenes):
     owned = set()
     for scene in scenes:
         for obj in scene.objects:
-            pcs = []
-            for mod in obj.modifiers:
-                if mod.type in ("CLOTH", "SOFT_BODY"):
-                    pc = getattr(mod, "point_cache", None)
-                    if pc is not None:
-                        pcs.append(pc)
-            if obj.type == "MESH":
-                for psys in obj.particle_systems:
-                    pc = getattr(psys, "point_cache", None)
-                    if pc is not None:
-                        pcs.append(pc)
-            for pc in pcs:
+            for _system, pc in _iter_object_point_caches(obj):
                 ident = _point_cache_identity_for(obj, pc)
                 if ident is not None:
                     owned.add(ident)
@@ -846,30 +892,18 @@ def enumerate_caches(scene):
     """Return a list[CacheEntry] for every simulation cache in the scene."""
     entries = []
     for obj in scene.objects:
+        # Point-cache-backed sims (Cloth, Soft Body, Particles, Hair dynamics,
+        # Dynamic Paint vertex surfaces) all share one enumerator so the scanner
+        # and the orphan check stay in lock-step.
+        for system, pc in _iter_object_point_caches(obj):
+            entries.append(inspect_point_cache(obj, system, pc, scene))
+        # Everything else is inspected by its own specialised path.
         for mod in obj.modifiers:
-            if mod.type == "CLOTH":
-                pc = getattr(mod, "point_cache", None)
-                if pc is not None:
-                    entries.append(inspect_point_cache(obj, "Cloth", pc, scene))
-            elif mod.type == "SOFT_BODY":
-                pc = getattr(mod, "point_cache", None)
-                if pc is not None:
-                    entries.append(inspect_point_cache(obj, "Soft Body", pc, scene))
-            elif mod.type == "FLUID":
+            if mod.type == "FLUID":
                 if getattr(mod, "fluid_type", "") == "DOMAIN" and getattr(mod, "domain_settings", None):
                     entries.append(inspect_fluid_domain(obj, mod, scene))
             elif mod.type == "NODES":
                 entries.extend(inspect_gn_bakes(obj, mod, scene))
-        # Particle systems
-        if obj.type == "MESH":
-            for psys in obj.particle_systems:
-                st = psys.settings
-                if st is None:
-                    continue
-                if st.type == "EMITTER":
-                    pc = getattr(psys, "point_cache", None)
-                    if pc is not None:
-                        entries.append(inspect_point_cache(obj, "Particles", pc, scene))
     rbw = inspect_rigidbody_world(scene)
     if rbw is not None and scene_has_rigid_bodies(scene):
         entries.append(rbw)

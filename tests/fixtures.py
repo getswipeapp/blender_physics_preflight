@@ -565,6 +565,77 @@ def build_particle_missing_tail(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+def _make_hair_blend(outdir, frame_end=6):
+    """Create, save and disk-bake a hair-dynamics sim (the particle point cache
+    written when ``use_hair_dynamics`` is on). Returns the blend path."""
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_plane_add(size=4)
+    o = bpy.context.active_object
+    o.name = "HairObj"
+    with bpy.context.temp_override(active_object=o, object=o, selected_objects=[o]):
+        bpy.ops.object.particle_system_add()
+    psys = o.particle_systems[0]
+    psys.settings.type = 'HAIR'
+    psys.settings.count = 20
+    psys.use_hair_dynamics = True
+    pc = psys.point_cache
+    pc.frame_start, pc.frame_end = 1, frame_end
+    blend = os.path.join(outdir, "hair.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    pc.use_disk_cache = True
+    with bpy.context.temp_override(point_cache=pc, scene=sc, active_object=o, object=o):
+        bpy.ops.ptcache.bake(bake=True)
+    bpy.ops.wm.save_mainfile()
+    return blend
+
+
+def build_hair_pass(outdir):
+    _make_hair_blend(outdir)
+
+
+def build_hair_missing_tail(outdir):
+    blend = _make_hair_blend(outdir)
+    _delete_point_frame(os.path.join(outdir, "blendcache_hair"), "last")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def _make_dpaint_blend(outdir, frame_end=6):
+    """Create, save and disk-bake a Dynamic Paint *vertex* canvas surface (which
+    uses a standard .bphys point cache). Returns the blend path."""
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_grid_add(size=4)
+    o = bpy.context.active_object
+    o.name = "DPCanvas"
+    m = o.modifiers.new("DP", type='DYNAMIC_PAINT')
+    with bpy.context.temp_override(active_object=o, object=o, selected_objects=[o]):
+        bpy.ops.dpaint.type_toggle(type='CANVAS')
+    surf = m.canvas_settings.canvas_surfaces[0]
+    surf.surface_format = 'VERTEX'
+    pc = surf.point_cache
+    pc.frame_start, pc.frame_end = 1, frame_end
+    blend = os.path.join(outdir, "dpaint.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    pc.use_disk_cache = True
+    with bpy.context.temp_override(point_cache=pc, scene=sc, active_object=o, object=o):
+        bpy.ops.ptcache.bake(bake=True)
+    bpy.ops.wm.save_mainfile()
+    return blend
+
+
+def build_dpaint_pass(outdir):
+    _make_dpaint_blend(outdir)
+
+
+def build_dpaint_missing_tail(outdir):
+    blend = _make_dpaint_blend(outdir)
+    _delete_point_frame(os.path.join(outdir, "blendcache_dpaint"), "last")
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
 def _make_fluid_blend(outdir, frame_end=4, use_mesh=True):
     reset()
     sc = bpy.context.scene

@@ -28,7 +28,7 @@ Already built and confirmed in source (these were WRONGLY listed as gaps from me
 **Bottom line: on the simulation/physics-cache lane we already MATCH or BEAT Cache Guardian and Cache Commander, with a real exhaustive-frame moat none of them have.** The expansion is now about (a) finishing a few real gaps in our own lane, (b) widening into the general-preflight lane to beat the generalists too, and (c) adding things nobody has.
 
 ## Verified REAL gaps (confirmed absent in source)
-1. Hair-particle caches and Dynamic Paint canvas caches — not enumerated (only emitter particles, cloth, soft body, fluid, rigid body, GN).
+1. ~~Hair-particle caches and Dynamic Paint canvas caches — not enumerated.~~ ✅ DONE (2026-11-16): hair dynamics (`use_hair_dynamics`) and Dynamic Paint VERTEX surfaces now enumerated through a shared `_iter_object_point_caches` helper that also feeds the orphan check (fixed a latent false-orphan bug for DP caches). Filename scheme empirically verified on 5.2.3 (standard `.bphys`). **Still open:** Dynamic Paint IMAGE-format surfaces (image sequence to `image_output_path`, not a point cache) — own follow-up increment.
 2. Deep cache **content** integrity — today only checks presence + 0-byte + 1-byte-readable; no `.bphys`/fluid header parsing. **Nobody does this — leadership opportunity.**
 3. HTML report — only text + JSON today (Cache Commander ships HTML).
 4. Persistent **dismissal** of intentional findings — state is transient (Triage persists it).
@@ -40,9 +40,9 @@ Already built and confirmed in source (these were WRONGLY listed as gaps from me
 ## The plan (recommended order: win our lane → widen → go beyond → repairs)
 
 ### PHASE 1 — Finish & extend our own lane (read-only). Beat every cache tool outright.
-- Add **hair-particle** + **Dynamic Paint** cache coverage (enumerator branches).
+- ✅ **Hair-particle + Dynamic Paint vertex cache coverage** (2026-11-16). Follow-up: Dynamic Paint IMAGE-sequence surfaces.
+- ✅ **HTML report** (2026-11-16).
 - **Deep content integrity**: parse `.bphys` / fluid cache headers to detect truncated/garbage frames, not just 0-byte. (Beyond every competitor.)
-- **HTML report** (self-contained, offline, verdict-first) alongside text/JSON.
 - **Persistent dismissal** of intentional findings (stored in scene props, like Triage; shown as "acknowledged").
 - Polish: extend jump-to-fix to #24–26; fix stale docstring.
 - Every item ships with failure fixtures + tests + cross-version check.
