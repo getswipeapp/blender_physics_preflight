@@ -53,6 +53,8 @@ def _parse_args(argv):
             continue
         if a in ("--json", "-j"):
             opts["format"] = "json"
+        elif a in ("--html",):
+            opts["format"] = "html"
         elif a in ("--text", "-t"):
             opts["format"] = "text"
         elif a in ("--strict", "-s"):
@@ -101,6 +103,7 @@ _HELP = (
     "Failsafe headless check\n"
     "  --text            human-readable report (default)\n"
     "  --json            machine-readable JSON report\n"
+    "  --html            self-contained HTML report (single file; batch uses text/json)\n"
     "  --strict          treat WARNING as blocking (exit 1)\n"
     "  --batch <folder>  scan every .blend in a folder (recursively)\n"
     "  --timeout <secs>  per-file timeout in isolated batch mode (default 300)\n"
@@ -150,6 +153,8 @@ def _scan_current(context, opts):
         entries = []
     if opts["format"] == "json":
         out = report.build_json_report(results, entries=entries)
+    elif opts["format"] == "html":
+        out = report.build_html_report(results, entries=entries)
     else:
         out = report.build_text_report(results, entries=entries)
     return verdict_exit_code(results, opts["strict"]), out

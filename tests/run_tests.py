@@ -816,6 +816,34 @@ def new_feature_tests():
     out.append(("A7 JSON includes new checks 24 & 25",
                 {24, 25} <= ids, sorted(ids)[-3:] if ids else [], "24,25 present"))
 
+    # --- A8 build_html_report: self-contained, escaped, verdict-first -------
+    html_blob = report.build_html_report(results)
+    out.append(("A8 HTML is a string", isinstance(html_blob, str),
+                type(html_blob).__name__, "str"))
+    out.append(("A8 HTML has doctype", html_blob.startswith("<!DOCTYPE html>"),
+                html_blob[:15], "<!DOCTYPE html>"))
+    for needle in ("<title>Failsafe report</title>", 'class="verdict',
+                   "<style>", "</html>"):
+        out.append(("A8 HTML contains %r" % needle, needle in html_blob,
+                    needle in html_blob, True))
+    # Self-contained: no external CSS/JS/fonts/images to fetch.
+    for bad in ("http://", "https://", "src=", "<link", "<script"):
+        out.append(("A8 HTML has no external %r" % bad, bad not in html_blob,
+                    bad not in html_blob, True))
+    # Escaping: a hostile finding must never inject raw markup.
+    hostile = engine.Result(1, "x", engine.GROUP_SETUP, Status.FAIL,
+                            "<script>alert(1)</script>", object_name="<b>o</b>")
+    esc = report.build_html_report([hostile])
+    out.append(("A8 HTML escapes message",
+                "<script>alert" not in esc and "&lt;script&gt;" in esc,
+                "<script>alert" not in esc, True))
+    out.append(("A8 HTML escapes object name",
+                "<b>o</b>" not in esc and "&lt;b&gt;o&lt;/b&gt;" in esc,
+                "<b>o</b>" not in esc, True))
+    # Verdict banner reflects the worst status present.
+    out.append(("A8 HTML FAIL -> v-fail banner",
+                'class="verdict v-fail"' in esc, 'v-fail' in esc, True))
+
     # --- A6 CLI exit codes --------------------------------------------------
     def R(status, cid=1):
         m = next(mm for mm in engine.CHECKS if mm.id == cid)
