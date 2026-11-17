@@ -64,7 +64,7 @@ def main():
         _finish()
         return
     check("extension imports (installed+enabled)", installed, os.path.dirname(pkg.__file__))
-    check("26 checks registered", len(eng.CHECKS) == 26, len(eng.CHECKS))
+    check("27 checks registered", len(eng.CHECKS) == 27, len(eng.CHECKS))
     check("Save Baseline operator registered", hasattr(bpy.types, "FAILSAFE_OT_save_baseline"))
     check("Export JSON operator registered", hasattr(bpy.types, "FAILSAFE_OT_export_json"))
     check('label(UNKNOWN) == "Couldn\'t verify"',
@@ -144,7 +144,7 @@ def main():
           "UNKNOWN" in (jd.get("summary") or {}))
     check("Export JSON never emits the display word 'Couldn't verify'",
           "Couldn't verify" not in blob)
-    check("Export JSON has 26 checks", len(jd.get("checks", [])) == 26, len(jd.get("checks", [])))
+    check("Export JSON has 27 checks", len(jd.get("checks", [])) == 27, len(jd.get("checks", [])))
 
     # --- "Couldn't verify" carries reason + next action --------------------
     os.remove(bpath)  # no baseline -> #26 UNKNOWN with reason+hint

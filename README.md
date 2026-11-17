@@ -59,7 +59,7 @@ one corrupt or hanging `.blend` can't take the whole run down — it's recorded 
 an error and the batch keeps going, preserving every good file's result. Use
 `--in-process` for the faster single-process scan when you don't need isolation.
 
-## The 26 checks
+## The 27 checks
 
 ### Physics Setup
 | # | Check |
@@ -94,6 +94,7 @@ an error and the batch keeps going, preserving every good file's result. Use
 | 24 | Cache sitting in a cloud-synced folder (Dropbox, OneDrive, Google Drive, iCloud…) — can be locked or only partly downloaded at render time |
 | 25 | Potentially unclaimed cache files no simulation in any scene of the `.blend` owns (ownership checked across all scenes; often from renamed/deleted sims) — flagged to review before deleting, since a shared folder may hold another `.blend`'s data |
 | 26 | Simulation settings changed since you saved a **baseline** (opt-in; compares against an external sidecar file, never written into your `.blend`) |
+| 27 | Baked cache files changed since you saved a **baseline** (opt-in, on-demand per-frame SHA-256; detects a change — a match means the bytes are unchanged, never that the cache is valid; reads every cache byte, so it runs only when you click Verify Cache Hashes) |
 
 Covered cache systems: Cloth, Soft Body, Rigid Body World, Particles, Fluid
 (Mantaflow), and Geometry Nodes simulation zones with **disk** bakes.
@@ -153,7 +154,7 @@ failsafe/        the extension (this folder is what gets zipped)
   cli.py                  headless entry point (exit codes, --json, --batch)
   batch.py                crash/hang-isolated batch (one subprocess per file)
   checks_setup.py         checks 1–16
-  checks_cache.py         checks 17–26
+  checks_cache.py         checks 17–27
   operators.py / ui.py / report.py / handlers.py / help_text.py
 tests/
   fixtures.py             pass/fail scene builders
