@@ -127,6 +127,15 @@ def main():
     check("Save Baseline replaces on explicit overwrite",
           "FINISHED" in r2 and sha(bpath) != h0, list(r2))
 
+    # --- B2: direct CAPTURE must NOT force an overwrite (review blocker) -----
+    # A baseline exists now; a direct (EXEC_DEFAULT) cache-hash CAPTURE without the
+    # overwrite opt-in must refuse and leave the sidecar byte-identical.
+    hb2 = sha(bpath)
+    rc = bpy.ops.failsafe.cache_hash('EXEC_DEFAULT', mode='CAPTURE',
+                                     overwrite=False)
+    check("B2: direct CAPTURE refuses silent overwrite (CANCELLED + preserved)",
+          "CANCELLED" in rc and sha(bpath) == hb2, list(rc))
+
     # --- Export JSON: valid, machine UNKNOWN kept, display word absent ------
     for t in list(bpy.data.texts):
         if t.name.startswith("failsafe_report"):

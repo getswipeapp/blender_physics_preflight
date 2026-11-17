@@ -304,8 +304,12 @@ def owned_point_cache_identities(scenes):
 
 
 PointCacheFiles = collections.namedtuple(
-    "PointCacheFiles", "identity system obj_name sub_name cache_dir files")
-# files: list of (frame:int, index:int, abspath:str) for frames present on disk.
+    "PointCacheFiles",
+    "identity system obj_name sub_name cache_dir files required")
+# files:    list of (frame:int, index:int, abspath:str) for frames present on disk.
+# required: list[int] of EVERY frame the cache range demands (range(cs, ce+1, step)),
+#           present or not — so a hash verification can tell when a baseline covers
+#           only part of the required range and must NOT report a clean PASS (B3).
 
 
 def iter_point_cache_files(scenes):
@@ -335,14 +339,15 @@ def iter_point_cache_files(scenes):
                 ce = int(getattr(pc, "frame_end", scene.frame_end))
                 step = int(getattr(pc, "frame_step", 1) or 1)
                 files = []
-                for fr in range(cs, ce + 1, step):
+                required = list(range(cs, ce + 1, step))
+                for fr in required:
                     p = os.path.join(
                         cache_dir, "%s_%06d_%02d.bphys" % (prefix, fr, index))
                     if os.path.isfile(p):
                         files.append((fr, index, p))
                 identity = "%s::%s::%s::%s" % (scene.name, obj.name, system, sub)
                 yield PointCacheFiles(identity, system, obj.name, sub,
-                                      cache_dir, files)
+                                      cache_dir, files, required)
 
 
 def find_orphan_point_caches(scene, entries=None):

@@ -49,21 +49,25 @@ class Cancelled(Exception):
     """Raised out of hashing when a supplied ``cancel()`` callback returns True."""
 
 
-def hash_file(path, chunk=CHUNK, cancel=None, progress=None):
-    """Stream a cryptographic hash of one file.
+def hash_file_iter(path, chunk=CHUNK, cancel=None):
+    """Stream a cryptographic hash of one file, yielding control between blocks.
 
-    Returns ``(hexdigest, size)`` on success, ``None`` if the file can't be
-    opened/stat'd, or :data:`VOLATILE` if its size or mtime changed between the
-    stat before and after the read (i.e. it was being written while we hashed it).
+    Yields ``("progress", nbytes)`` after each ``chunk``-sized block it reads, and
+    finally ``("result", res)`` where ``res`` is ``(hexdigest, size)`` on success,
+    ``None`` if the file can't be opened/stat'd, or :data:`VOLATILE` if its size or
+    mtime changed between the stat before and after the read.
 
-    Reads in ``chunk``-sized blocks so a multi-GB cache file never loads whole.
-    ``cancel`` (if given) is polled before each block and raises
-    :class:`Cancelled` when it returns True. ``progress`` (if given) is called
-    with the byte count of each block, so a driver can advance a bar."""
+    Yielding PER BLOCK (not per whole file) is what lets a modal GUI driver redraw
+    and re-poll for an Esc *while a single multi-gigabyte file is being hashed* —
+    without it, one huge file froze the UI and its cancel went unseen until the
+    file finished (review M1). ``cancel`` (if given) is polled before each block
+    and raises :class:`Cancelled` when it returns True — so a stopped run never
+    reads the next block."""
     try:
         st0 = os.stat(path)
     except OSError:
-        return None
+        yield ("result", None)
+        return
     h = hashlib.new(ALGO)
     read = 0
     try:
@@ -76,20 +80,43 @@ def hash_file(path, chunk=CHUNK, cancel=None, progress=None):
                     break
                 h.update(block)
                 read += len(block)
-                if progress is not None:
-                    progress(len(block))
+                yield ("progress", len(block))
     except OSError:
-        return None
+        yield ("result", None)
+        return
     try:
         st1 = os.stat(path)
     except OSError:
-        return None
+        yield ("result", None)
+        return
     # A torn read (size/mtime moved, or we read a different number of bytes than
     # the file claimed) must not be trusted as an authoritative fingerprint.
     if read != st0.st_size or st1.st_size != st0.st_size \
             or st1.st_mtime_ns != st0.st_mtime_ns:
-        return VOLATILE
-    return h.hexdigest(), st0.st_size
+        yield ("result", VOLATILE)
+        return
+    yield ("result", (h.hexdigest(), st0.st_size))
+
+
+def hash_file(path, chunk=CHUNK, cancel=None, progress=None):
+    """Blocking cryptographic hash of one file (drives :func:`hash_file_iter`).
+
+    Returns ``(hexdigest, size)`` on success, ``None`` if the file can't be
+    opened/stat'd, or :data:`VOLATILE` if it changed under us during the read.
+
+    Reads in ``chunk``-sized blocks so a multi-GB cache file never loads whole.
+    ``cancel`` (if given) is polled before each block and raises
+    :class:`Cancelled`. ``progress`` (if given) is called with the byte count of
+    each block, so a driver can advance a bar. The CLI and tests use this blocking
+    form; the GUI drives :func:`hash_file_iter` to stay responsive."""
+    res = None
+    for ev in hash_file_iter(path, chunk=chunk, cancel=cancel):
+        if ev[0] == "progress":
+            if progress is not None:
+                progress(ev[1])
+        else:
+            res = ev[1]
+    return res
 
 
 def _relkey(abspath, blend_dir):
@@ -134,7 +161,14 @@ def capture_iter(scenes, blend_dir, cancel=None):
         for (_fr, _idx, p) in rec.files:
             if cancel is not None and cancel():
                 raise Cancelled()
-            res = hash_file(p, cancel=cancel)
+            # Drive the per-block iterator so a huge frame file yields control
+            # (redraw + Esc) between blocks instead of blocking the UI (M1).
+            res = None
+            for ev in hash_file_iter(p, cancel=cancel):
+                if ev[0] == "progress":
+                    yield ("chunk", done)
+                else:
+                    res = ev[1]
             done += 1
             if res is None:
                 yield ("file", done)
@@ -175,6 +209,8 @@ def capture_steps(scenes, blend_dir, cancel=None):
         for ev in capture_iter(scenes, blend_dir, cancel=cancel):
             if ev[0] == "file":
                 yield ("file", ev[1])
+            elif ev[0] == "chunk":
+                yield ("chunk", ev[1])   # mid-file tick -> driver redraws (M1)
             elif ev[0] == "result":
                 manifest = ev[1]
     except Cancelled:
@@ -195,13 +231,14 @@ def capture_total_files(scenes):
 # Per-sim verification outcome. Lists hold frame NUMBERS (ints) for messaging.
 SimVerify = collections.namedtuple(
     "SimVerify", "identity system obj_name state matched changed missing "
-                 "unreadable new")
+                 "unreadable new uncovered")
 
 # sim states
-S_UNCHANGED = "UNCHANGED"     # every baselined frame present and byte-identical
+S_UNCHANGED = "UNCHANGED"     # every REQUIRED frame baselined, present and identical
 S_CHANGED = "CHANGED"         # at least one frame's bytes differ from the baseline
 S_DRIFT = "DRIFT"             # frame set differs (missing/new) but none changed
 S_UNREADABLE = "UNREADABLE"   # some frames couldn't be read -> can't verify
+S_INCOMPLETE_REF = "INCOMPLETE_REF"  # some REQUIRED frames were never baselined (B3)
 S_NO_REF = "NO_REF"           # sim present now, but not in the baseline hashes
 S_EMPTY_REF = "EMPTY_REF"     # baseline recorded this sim but with no usable frame
 S_GONE = "GONE"               # sim in the baseline, not in the scene now
@@ -211,14 +248,19 @@ def _nice(identity):
     return identity.replace("::", " — ")
 
 
-def _sim_state(matched, changed, missing, unreadable, new):
+def _sim_state(matched, changed, missing, unreadable, new, uncovered):
     # A confirmed byte change is the most actionable fact, so it leads even when
-    # some other frames couldn't be read. Nothing here maps an unreadable/missing
-    # reference to a PASS — the cardinal 'no false PASS' rule.
+    # some other frames couldn't be read. Nothing here maps an unreadable / missing
+    # / unbaselined reference to a PASS — the cardinal 'no false PASS' rule.
     if changed:
         return S_CHANGED
     if unreadable:
         return S_UNREADABLE
+    # A baseline that never covered every required frame cannot certify the sim as
+    # unchanged, even if every frame it DID record still matches (review B3). This
+    # must beat S_UNCHANGED so an incomplete baseline never reads as a clean PASS.
+    if uncovered:
+        return S_INCOMPLETE_REF
     if missing or new:
         return S_DRIFT
     if matched:
@@ -265,7 +307,7 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
             cur[_relkey(p, blend_dir)] = (fr, p)
         if saved is None:
             out.append(SimVerify(rec.identity, rec.system, rec.obj_name,
-                                 S_NO_REF, [], [], [], [], []))
+                                 S_NO_REF, [], [], [], [], [], []))
             continue
         saved_frames = saved.get("frames", {}) if isinstance(saved, dict) else {}
         matched, changed, missing, unreadable, new = [], [], [], [], []
@@ -278,7 +320,14 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
             if cancel is not None and cancel():
                 raise Cancelled()
             fr, p = cur[key]
-            res = hash_file(p, cancel=cancel)
+            # Per-block iteration so a huge frame file stays cancellable and the
+            # GUI redraws between blocks (M1).
+            res = None
+            for ev in hash_file_iter(p, cancel=cancel):
+                if ev[0] == "progress":
+                    yield ("chunk", done)
+                else:
+                    res = ev[1]
             if res is None or res is VOLATILE:
                 unreadable.append(fr)
             elif res[0] == (meta.get("sha256") if isinstance(meta, dict) else None):
@@ -290,18 +339,25 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
         for key, (fr, _p) in cur.items():
             if key not in saved_frames:
                 new.append(fr)        # a frame present now that wasn't baselined
-        state = _sim_state(matched, changed, missing, unreadable, new)
+        # Required frames (the whole cache range) that the baseline never recorded
+        # a hash for — the integrity of those frames is simply unverifiable, so the
+        # sim can't be a clean PASS no matter how well the baselined frames match
+        # (review B3). Frames the baseline DID record are 'covered'.
+        baselined = set(_frames_of(saved_frames.keys()))
+        uncovered = sorted(f for f in (rec.required or []) if f not in baselined)
+        state = _sim_state(matched, changed, missing, unreadable, new, uncovered)
         out.append(SimVerify(rec.identity, rec.system, rec.obj_name, state,
                              sorted(matched), sorted(changed),
                              sorted(_frames_of(missing)), sorted(unreadable),
-                             sorted(new)))
+                             sorted(new), uncovered))
     # Sims the baseline knew about but which aren't in the scene now.
     for ident, saved in saved_sims.items():
         if ident in seen:
             continue
         sysname = saved.get("system", "") if isinstance(saved, dict) else ""
         objname = saved.get("obj_name", "") if isinstance(saved, dict) else ""
-        out.append(SimVerify(ident, sysname, objname, S_GONE, [], [], [], [], []))
+        out.append(SimVerify(ident, sysname, objname, S_GONE,
+                             [], [], [], [], [], []))
     yield ("result", out)
 
 
@@ -346,7 +402,14 @@ R_UNREADABLE = "unreadable"    # sidecar exists but won't parse
 R_SCHEMA = "schema"            # sidecar from a different Failsafe schema
 R_FOREIGN = "foreign"          # sidecar was saved for a different .blend
 R_NO_SECTION = "no_section"    # sidecar has no cache-hash section (older save)
+R_ERROR = "error"              # verification itself failed to run (B1)
 R_OK = "ok"
+
+# States that mean a REQUESTED verification did not actually complete a per-sim
+# comparison. When the user asked to verify (CLI --verify-hashes), reaching any of
+# these must NOT be reported as a clean exit 0 — see cli.verify_floor (B1).
+INCOMPLETE_STATES = frozenset({R_UNSAVED, R_NO_BASELINE, R_NO_SECTION,
+                               R_UNREADABLE, R_SCHEMA, R_FOREIGN, R_ERROR})
 
 
 def _resolve_manifest():
@@ -416,6 +479,8 @@ def build_report_steps(scenes, cancel=None):
         for ev in verify_sims_iter(scenes, manifest, blend_dir, cancel=cancel):
             if ev[0] == "file":
                 yield ("file", ev[1])
+            elif ev[0] == "chunk":
+                yield ("chunk", ev[1])   # mid-file tick -> driver redraws (M1)
             elif ev[0] == "result":
                 sims = ev[1]
     except Cancelled:

@@ -151,20 +151,42 @@ def aggregate_exit(codes):
 
 def _hash_report(opts):
     """Compute the on-demand cache-hash verification when --verify-hashes is set,
-    else None. Isolated so a hashing error never aborts the whole scan."""
+    else None. Isolated so a hashing error never aborts the whole scan — but a
+    requested verification that fails must NOT masquerade as 'not run' (which would
+    permit a false exit 0, review B1). On error we return an R_ERROR report, which
+    #27 renders as 'Couldn't verify' and verify_floor escalates the exit code."""
     if not opts.get("verify_hashes"):
         return None
+    from . import cachehash
     try:
         import bpy
-        from . import cachehash
         return cachehash.build_report(list(bpy.data.scenes))
-    except Exception:
-        return None
+    except Exception as exc:
+        return cachehash.HashReport(cachehash.R_ERROR, str(exc)[:200], [], False)
+
+
+def verify_floor(report, requested):
+    """The minimum exit code the CLI must honour after a cache-hash verification.
+
+    When the user asked to verify (``--verify-hashes``) but the verification did
+    not actually complete a per-sim comparison — no baseline, unreadable/foreign/
+    wrong-schema sidecar, an internal error, or a cancel — the scan must NOT report
+    a clean exit 0 just because #27 had nothing to compare (review B1). Returns
+    EXIT_UNVERIFIED as a floor in those cases, else EXIT_CLEAN (verification ran;
+    its findings flow through #27 and the normal verdict). ``requested`` False (or
+    no report) imposes no floor."""
+    from . import cachehash
+    if not requested or report is None:
+        return EXIT_CLEAN
+    if report.cancelled or report.state != cachehash.R_OK:
+        return EXIT_UNVERIFIED
+    return EXIT_CLEAN
 
 
 def _scan_current(context, opts):
     """Scan the open scene. Returns (exit_code, output_string)."""
-    results = engine.run_all(context, hash_verify=_hash_report(opts))
+    hr = _hash_report(opts)
+    results = engine.run_all(context, hash_verify=hr)
     from . import cache_inspect as ci
     try:
         entries = ci.enumerate_caches(context.scene)
@@ -176,7 +198,10 @@ def _scan_current(context, opts):
         out = report.build_html_report(results, entries=entries)
     else:
         out = report.build_text_report(results, entries=entries)
-    return verdict_exit_code(results, opts["strict"]), out
+    # A requested-but-failed verification must never yield a clean exit 0 (B1).
+    code = aggregate_exit([verdict_exit_code(results, opts["strict"]),
+                           verify_floor(hr, opts.get("verify_hashes"))])
+    return code, out
 
 
 def _list_blend_files(folder):
@@ -218,12 +243,15 @@ def run_batch(folder, opts):
             if "FINISHED" not in res:
                 raise RuntimeError("could not open (result: %s)"
                                    % ", ".join(sorted(res)))
-            results = engine.run_all(bpy.context, hash_verify=_hash_report(opts))
+            hr = _hash_report(opts)
+            results = engine.run_all(bpy.context, hash_verify=hr)
             try:
                 entries = ci.enumerate_caches(bpy.context.scene)
             except Exception:
                 entries = []
-            code = verdict_exit_code(results, opts["strict"])
+            # A requested-but-failed verification floors this file's code (B1).
+            code = aggregate_exit([verdict_exit_code(results, opts["strict"]),
+                                   verify_floor(hr, opts.get("verify_hashes"))])
             data = _json.loads(report.build_json_report(results, entries=entries))
             per_file.append({"file": f, "exit": code,
                              "overall": data["overall"],

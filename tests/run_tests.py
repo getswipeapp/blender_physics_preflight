@@ -1977,9 +1977,12 @@ def cache_hash_tests():
     out.append(("hash no baseline -> #27 not PASS and state NO_BASELINE",
                 rep.state == ch.R_NO_BASELINE and Status.PASS not in allst,
                 (rep.state, allst), ch.R_NO_BASELINE))
-    # settings-only baseline (no cache-hash section)
+    # settings-only baseline (no cache-hash section). Delete the carried baseline
+    # first: a settings re-save now PRESERVES an existing hash section (M2), so a
+    # genuinely section-less baseline has to start fresh.
     dst = _copy_open("nosection")
-    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(), overwrite=True)
+    os.remove(bl.default_baseline_path())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path())
     rep = ch.build_report(list(bpy.data.scenes))
     worst, allst, _ = _27(rep)
     out.append(("hash no section -> #27 not PASS and state NO_SECTION",
@@ -2040,6 +2043,229 @@ def cache_hash_tests():
     except ch.Cancelled:
         raised = True
     out.append(("hash cancelled capture raises Cancelled", raised, raised, True))
+
+    return out
+
+
+def hash_blocker_tests():
+    """Regression tests for the second-round independent review of #27, written to
+    REPRODUCE each defect first:
+
+      B1 — a requested CLI/batch verification that can't run must return nonzero,
+           never a silent clean exit 0.
+      B2 — direct (EXEC_DEFAULT) CAPTURE must not force an overwrite; it must
+           refuse an existing baseline unless the user opted in.
+      B3 — a baseline that covers only part of the required frame range must never
+           report that sim as a clean PASS.
+      M1 — hashing yields control per block (not per whole file), so a big file
+           stays cancellable / the UI responsive.
+      M2 — a settings-only Save Baseline must not discard previously captured
+           cache hashes."""
+    import json as _json
+    import shutil
+    from failsafe import (cachehash as ch, baseline as bl, cache_inspect as ci,
+                          cli, batch)
+    out = []
+    tmp = tempfile.mkdtemp(prefix="failsafe_blk_")
+
+    def _sv(report, system):
+        for s in report.sims:
+            if s.system == system:
+                return s
+        return None
+
+    # ---- M1: per-BLOCK streaming (not per-file) --------------------------
+    big = os.path.join(tmp, "big.bin")
+    with open(big, "wb") as fh:
+        fh.write(b"Z" * (16 * 50))         # 50 blocks at chunk=16
+    evs = list(ch.hash_file_iter(big, chunk=16))
+    prog = [e for e in evs if e[0] == "progress"]
+    res = [e for e in evs if e[0] == "result"]
+    out.append(("M1 hash_file_iter yields many per-block progress events",
+                len(prog) >= 40 and len(res) == 1, len(prog), ">=40"))
+    out.append(("M1 streamed digest equals the blocking digest",
+                res and res[0][1] == ch.hash_file(big), bool(res), True))
+    # a cancel that fires on the 3rd poll stops early (mid-file cancellation).
+    seen = {"n": 0}
+
+    def _c3():
+        seen["n"] += 1
+        return seen["n"] >= 3
+    try:
+        list(ch.hash_file_iter(big, chunk=16, cancel=_c3))
+        raised = False
+    except ch.Cancelled:
+        raised = True
+    out.append(("M1 mid-file cancel raises before reading the whole file",
+                raised and seen["n"] <= 4, (raised, seen["n"]), "early"))
+
+    # ---- build one clean baked two-sim project to reuse ------------------
+    src = os.path.join(tmp, "src")
+    os.makedirs(src, exist_ok=True)
+    fixtures._make_two_sim_blend(src, frame_end=6)
+    full_manifest = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=full_manifest)
+
+    def _open_copy(tag):
+        dst = os.path.join(tmp, "p_" + tag)
+        shutil.copytree(src, dst)
+        bpy.ops.wm.open_mainfile(filepath=os.path.join(dst, "twosim.blend"))
+        return dst
+
+    # M1: the step generators surface per-block 'chunk' ticks to the driver.
+    _open_copy("steps")
+    step_tags = [ev[0] for ev in ch.build_report_steps(list(bpy.data.scenes))]
+    out.append(("M1 build_report_steps emits mid-file 'chunk' ticks",
+                "chunk" in step_tags, set(step_tags), "has 'chunk'"))
+
+    # ---- B1: requested verification that can't run -> nonzero exit -------
+    # (a) unit: verify_floor floors only a REQUESTED, incomplete verification.
+    good = ch.HashReport(ch.R_OK, "", [], False)
+    out.append(("B1 floor: R_OK + requested -> clean",
+                cli.verify_floor(good, True) == cli.EXIT_CLEAN,
+                cli.verify_floor(good, True), cli.EXIT_CLEAN))
+    for st in (ch.R_NO_BASELINE, ch.R_NO_SECTION, ch.R_UNSAVED, ch.R_SCHEMA,
+               ch.R_FOREIGN, ch.R_ERROR):
+        r = ch.HashReport(st, "", [], False)
+        out.append(("B1 floor: %s + requested -> unverified" % st,
+                    cli.verify_floor(r, True) == cli.EXIT_UNVERIFIED,
+                    cli.verify_floor(r, True), cli.EXIT_UNVERIFIED))
+        out.append(("B1 floor: %s + NOT requested -> no floor" % st,
+                    cli.verify_floor(r, False) == cli.EXIT_CLEAN,
+                    cli.verify_floor(r, False), cli.EXIT_CLEAN))
+    cancelled = ch.HashReport(ch.R_OK, "", [], True)
+    out.append(("B1 floor: cancelled + requested -> unverified",
+                cli.verify_floor(cancelled, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(cancelled, True), cli.EXIT_UNVERIFIED))
+
+    # (b) end-to-end: a settings-only baseline (no cache-hash section) means a
+    #     requested verification CAN'T run. Pre-fix this returned exit 0; it must
+    #     now be nonzero, while NOT requesting verification is unaffected.
+    _open_copy("b1_nosection")
+    os.remove(bl.default_baseline_path())                # drop carried hashes (M2)
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path())  # settings only
+    rep = ch.build_report(list(bpy.data.scenes))
+    code_plain, _ = cli.run(argv=["--text"])
+    code_verify, _ = cli.run(argv=["--verify-hashes", "--text"])
+    out.append(("B1 e2e: no cache-hash section -> R_NO_SECTION",
+                rep.state == ch.R_NO_SECTION, rep.state, ch.R_NO_SECTION))
+    out.append(("B1 e2e: requested verify -> NONZERO exit (not a false clean)",
+                code_verify != cli.EXIT_CLEAN, code_verify, "!= 0"))
+    out.append(("B1 e2e: requested verify floors to unverified",
+                code_verify == cli.EXIT_UNVERIFIED, code_verify,
+                cli.EXIT_UNVERIFIED))
+    # a fully matching cache-hash baseline verifies and stays clean.
+    _open_copy("b1_ok")
+    code_ok, _ = cli.run(argv=["--verify-hashes", "--text"])
+    out.append(("B1 e2e: complete matching baseline -> clean exit 0",
+                code_ok == cli.EXIT_CLEAN, code_ok, cli.EXIT_CLEAN))
+    # (c) batch wiring: the isolated child actually runs + floors the verification.
+    argv = batch.build_child_argv("blender", "x.blend", verify_hashes=True,
+                                  source_root="/src")
+    expr = argv[-1]
+    out.append(("B1 batch: child runs hash verification when requested",
+                "build_report" in expr and "verify_floor" in expr, True, True))
+    argv0 = batch.build_child_argv("blender", "x.blend", verify_hashes=False,
+                                   source_root="/src")
+    out.append(("B1 batch: child skips verification when not requested",
+                "_verify = False" in argv0[-1], True, True))
+
+    # ---- B3: incomplete baseline coverage must never PASS ----------------
+    # Delete a required frame file BEFORE capture, so the baseline covers only part
+    # of the required range. Every covered frame still matches — pre-fix that made
+    # the sim a clean PASS. It must now be 'Couldn't verify', never PASS.
+    dst = _open_copy("b3_incomplete")
+    cdir = os.path.join(dst, "blendcache_twosim")
+    cloth_pre = fixtures.prefix_of("ClothP")
+    cfiles = sorted(os.path.join(cdir, f) for f in os.listdir(cdir)
+                    if f.startswith(cloth_pre) and f.endswith(".bphys"))
+    os.remove(cfiles[-1])                                # drop the top frame
+    partial = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=partial)
+    rep = ch.build_report(list(bpy.data.scenes))
+    cs = _sv(rep, "Cloth")
+    ss = _sv(rep, "Soft Body")
+    out.append(("B3 incomplete coverage -> cloth INCOMPLETE_REF (not UNCHANGED)",
+                cs is not None and cs.state == ch.S_INCOMPLETE_REF,
+                getattr(cs, "state", None), ch.S_INCOMPLETE_REF))
+    out.append(("B3 incomplete coverage reports the uncovered frame",
+                cs is not None and len(cs.uncovered) >= 1,
+                getattr(cs, "uncovered", None), ">=1"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    cloth27 = [r.status for r in results
+               if r.check_id == 27 and r.object_name == "ClothP"]
+    out.append(("B3 incomplete coverage -> #27 UNKNOWN, never PASS",
+                Status.UNKNOWN in cloth27 and Status.PASS not in cloth27,
+                cloth27, "UNKNOWN, no PASS"))
+    # the untouched, fully-covered sim is still a TRUE pass (not over-corrected).
+    out.append(("B3 fully-covered sibling sim still UNCHANGED (true PASS kept)",
+                ss is not None and ss.state == ch.S_UNCHANGED,
+                getattr(ss, "state", None), ch.S_UNCHANGED))
+
+    # ---- M2: settings-only Save Baseline preserves captured hashes -------
+    dst = _open_copy("m2_preserve")
+    p = bl.default_baseline_path()
+    before = _json.load(open(p))
+    out.append(("M2 precondition: baseline has cache hashes",
+                isinstance(before.get("cache_hashes"), dict)
+                and bool(before["cache_hashes"].get("sims")), True, True))
+    bl.save_baseline(bpy.context.scene, p, overwrite=True)   # settings only
+    after = _json.load(open(p))
+    out.append(("M2 settings re-save KEEPS the cache-hash section",
+                isinstance(after.get("cache_hashes"), dict)
+                and bool(after["cache_hashes"].get("sims")),
+                "cache_hashes" in after, True))
+    out.append(("M2 preserved hashes are the same manifest",
+                after.get("cache_hashes") == before.get("cache_hashes"),
+                True, True))
+    # a foreign existing baseline's hashes are NOT grafted onto this file.
+    dst = _open_copy("m2_foreign")
+    p = bl.default_baseline_path()
+    d = _json.load(open(p))
+    d["file"] = "/elsewhere/other.blend"
+    _json.dump(d, open(p, "w"))
+    bl.save_baseline(bpy.context.scene, p, overwrite=True)   # settings only
+    after2 = _json.load(open(p))
+    out.append(("M2 foreign baseline's hashes are dropped, not grafted",
+                "cache_hashes" not in after2, after2.get("cache_hashes"), None))
+
+    # ---- B2: direct CAPTURE must not force an overwrite ------------------
+    # Needs the real operator, so register the add-on for this block only.
+    dst = _open_copy("b2_overwrite")
+    registered = False
+    try:
+        failsafe.register()
+        registered = True
+    except Exception as exc:
+        out.append(("B2 operator registered for test", False, repr(exc), True))
+    if registered:
+        try:
+            path = bl.default_baseline_path()
+
+            def _sha(fp):
+                import hashlib
+                h = hashlib.sha256()
+                with open(fp, "rb") as f:
+                    for ch_ in iter(lambda: f.read(65536), b""):
+                        h.update(ch_)
+                return h.hexdigest()
+            h0 = _sha(path)
+            r1 = bpy.ops.failsafe.cache_hash('EXEC_DEFAULT', mode='CAPTURE',
+                                             overwrite=False)
+            out.append(("B2 direct CAPTURE refuses to overwrite silently",
+                        "CANCELLED" in r1 and _sha(path) == h0, list(r1),
+                        "CANCELLED + file unchanged"))
+            r2 = bpy.ops.failsafe.cache_hash('EXEC_DEFAULT', mode='CAPTURE',
+                                             overwrite=True)
+            out.append(("B2 direct CAPTURE writes when overwrite is opted in",
+                        "FINISHED" in r2, list(r2), "FINISHED"))
+        finally:
+            try:
+                failsafe.unregister()
+            except Exception:
+                pass
 
     return out
 
@@ -2208,6 +2434,7 @@ def main():
                                    + integrity_header_tests()
                                    + cache_coverage_tests()
                                    + cache_hash_tests()
+                                   + hash_blocker_tests()
                                    + couldnt_verify_tests()):
         if ok:
             passed += 1
@@ -2227,7 +2454,8 @@ def main():
              + len(baseline_tests()) + len(batch_adversarial_tests())
              + len(batch_isolation_tests()) + len(review_blocker_tests())
              + len(integrity_header_tests()) + len(cache_coverage_tests())
-             + len(cache_hash_tests()) + len(couldnt_verify_tests()))
+             + len(cache_hash_tests()) + len(hash_blocker_tests())
+             + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

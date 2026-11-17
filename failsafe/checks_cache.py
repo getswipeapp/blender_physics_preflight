@@ -910,6 +910,14 @@ def c27_cache_hashes(ctx, mk):
                    "The baseline was saved for a different file ('%s'), so its "
                    "cache hashes don't describe this scene." % report.detail,
                    hint="Click Save Baseline to record a baseline for this file.")]
+    if st == ch.R_ERROR:
+        # The verification was requested but couldn't actually run (e.g. an
+        # internal error building the comparison). Never silently 'not run' / PASS.
+        return [mk(Status.UNKNOWN,
+                   "Cache-file hash verification couldn't be completed (%s)."
+                   % (report.detail or "internal error"),
+                   hint="Try 'Verify Cache Hashes' again; if it keeps failing, "
+                        "re-save the baseline.")]
 
     # st == R_OK: render the per-sim comparison.
     out = []
@@ -957,6 +965,23 @@ def c27_cache_hashes(ctx, mk):
                 "verified against the baseline." % (nice, len(sv.unreadable)),
                 object_name=obj,
                 hint="Check file permissions or re-bake, then verify again."))
+        elif sv.state == ch.S_INCOMPLETE_REF:
+            sample = ", ".join(str(f) for f in sv.uncovered[:8])
+            more = ("" if len(sv.uncovered) <= 8
+                    else " …(+%d more)" % (len(sv.uncovered) - 8))
+            matched_note = (" The %d baselined frame(s) that WERE recorded still "
+                            "match." % len(sv.matched)) if sv.matched else ""
+            out.append(mk(Status.UNKNOWN,
+                "%s: %d required cache frame(s) have no hash in the baseline — "
+                "frame(s) %s%s — so their integrity can't be verified. The "
+                "baseline was saved before a full bake, or didn't cover the whole "
+                "range.%s This is NOT a clean result: some required frames were "
+                "never fingerprinted." % (nice, len(sv.uncovered), sample, more,
+                                          matched_note),
+                object_name=obj,
+                hint="Bake the full frame range, then click Save Baseline again "
+                     "with 'Include cache hashes' so every required frame is "
+                     "recorded."))
         elif sv.state == ch.S_NO_REF:
             out.append(mk(Status.UNKNOWN,
                 "%s has baked files but no cache-hash reference in the baseline "

@@ -123,6 +123,38 @@ Honesty constraints, all enforced and tested:
   (`.vdb`/`.uni`) and GN blobs are the next hashing sub-increment (their file
   layouts differ and need their own study).
 
+### Hardening — review M3 (2026-11-17), certified 4 versions
+
+A second independent pass found five real safety/accuracy gaps in the #27
+implementation above; all fixed, each with a regression test that reproduces the
+defect first (`tests/run_tests.py::hash_blocker_tests`):
+
+  - **B1 — requested verification could exit 0 after failing.** `--verify-hashes`
+    now *floors* the CLI exit to "unverified" (2) whenever the requested
+    verification can't actually run (no baseline / no section / unreadable /
+    wrong-schema / foreign / internal error / cancelled) — single scan AND the
+    isolated `--batch` path (the child subprocess now genuinely runs and floors
+    the verification instead of silently ignoring the flag). See
+    `cli.verify_floor` and `batch.build_child_argv(verify_hashes=...)`.
+  - **B2 — direct CAPTURE forced an overwrite.** `bpy.ops.failsafe.cache_hash`'s
+    EXEC_DEFAULT path hard-coded `overwrite=True`, silently replacing an existing
+    baseline. It now honours the opt-in and refuses (CANCELLED, nothing written)
+    unless the user set Overwrite — matching the modal path and Save Baseline.
+  - **B3 — an incomplete baseline could still PASS.** A baseline covering only
+    part of the required frame range (e.g. 249 of 250 frames) reported the sim
+    UNCHANGED/PASS even though a required frame was never fingerprinted. Verify now
+    computes `uncovered` required frames and returns the new `S_INCOMPLETE_REF`
+    state (→ #27 "Couldn't verify", never PASS). `iter_point_cache_files` carries
+    the full `required` range for this. A fully-covered sibling sim still PASSes.
+  - **M1 — a multi-GB file wasn't cancellable / blocked the UI.** Hashing now
+    streams via `hash_file_iter`, yielding per 1 MiB block; the modal driver's
+    budget is per-block, so Blender redraws and sees an Esc within a few blocks
+    even mid-file (previously one huge file ran to completion before any event).
+  - **M2 — a settings Save Baseline discarded captured hashes.** A settings-only
+    re-save now carries forward an existing `cache_hashes` section (same file,
+    readable) instead of silently dropping it; the operator says "existing cache
+    hashes kept". A foreign baseline's hashes are not grafted on.
+
 ## Next deep-integrity increments (planned, not yet built)
 
 - **Cache-hash coverage for fluid + Geometry Nodes** — extend the #27 manifest to

@@ -260,6 +260,9 @@ class FAILSAFE_OT_save_baseline(Operator):
                         "A baseline already exists. Tick 'Overwrite' to replace "
                         "it — nothing was written.")
             return {"CANCELLED"}
+        # If the baseline we're overwriting carries captured cache hashes, they are
+        # preserved (M2) — tell the user so it's never a silent change.
+        kept_hashes = existed and baseline_mod._existing_cache_hashes(path) is not None
         try:
             baseline_mod.save_baseline(context.scene, path,
                                        overwrite=self.overwrite)
@@ -270,9 +273,11 @@ class FAILSAFE_OT_save_baseline(Operator):
         self.overwrite = False
         self.report(
             {"INFO"},
-            "Settings baseline %s next to your .blend as '%s'. Your .blend was "
+            "Settings baseline %s next to your .blend as '%s'%s. Your .blend was "
             "not modified." % ("updated" if existed else "saved",
-                               os.path.basename(path)))
+                               os.path.basename(path),
+                               " (existing cache hashes kept)" if kept_hashes
+                               else ""))
         return {"FINISHED"}
 
 
@@ -310,7 +315,11 @@ class FAILSAFE_OT_cache_hash(Operator):
     _total = 0
     _done = 0
     _cancel = False
-    _STEP_BUDGET = 4     # files hashed per timer tick — small, so the UI breathes
+    # Generator steps consumed per timer tick. A step is now one file completion
+    # OR one streamed block (M1), so this also bounds the bytes hashed before the
+    # modal hands control back to Blender (~budget × CHUNK worst case). Kept small
+    # so the UI breathes and a cancel is seen within a few blocks even mid-file.
+    _STEP_BUDGET = 32
 
     # -- shared helpers ----------------------------------------------------
     def _label(self):
@@ -336,9 +345,23 @@ class FAILSAFE_OT_cache_hash(Operator):
                         "Cache-hash baseline cancelled — nothing was written.")
             return {"CANCELLED"}
         path = baseline_mod.default_baseline_path()
+        if not path:
+            self.report({"ERROR"},
+                        "Save your .blend first — the baseline is written next "
+                        "to it.")
+            return {"CANCELLED"}
+        # Honour the overwrite opt-in: a capture must NEVER silently replace an
+        # existing baseline (review B2). save_baseline raises FileExistsError when
+        # one exists and overwrite is False.
         try:
             baseline_mod.save_baseline(context.scene, path,
-                                       overwrite=True, cache_hashes=manifest)
+                                       overwrite=self.overwrite,
+                                       cache_hashes=manifest)
+        except FileExistsError:
+            self.report({"WARNING"},
+                        "A baseline already exists. Tick 'Overwrite' to replace "
+                        "it — nothing was written.")
+            return {"CANCELLED"}
         except Exception as exc:
             self.report({"ERROR"}, "Couldn't write the baseline: %s" % exc)
             return {"CANCELLED"}
@@ -392,6 +415,21 @@ class FAILSAFE_OT_cache_hash(Operator):
         self._cancel = False
         if self.mode == "CAPTURE":
             from . import cache_inspect as ci
+            # Direct execution (EXEC_DEFAULT / headless) must enforce the same
+            # overwrite authorization as the modal path — it must NOT force an
+            # overwrite (review B2). Refuse up front when a baseline exists and the
+            # caller hasn't opted in, so we never even hash before refusing.
+            path = baseline_mod.default_baseline_path()
+            if not path:
+                self.report({"ERROR"},
+                            "Save your .blend first — the baseline is written "
+                            "next to it.")
+                return {"CANCELLED"}
+            if os.path.isfile(path) and not self.overwrite:
+                self.report({"WARNING"},
+                            "A baseline already exists. Tick 'Overwrite' to "
+                            "replace it — nothing was written.")
+                return {"CANCELLED"}
             try:
                 manifest = cachehash_mod.capture(list(bpy.data.scenes),
                                                  ci.blend_dir())
@@ -445,6 +483,13 @@ class FAILSAFE_OT_cache_hash(Operator):
                 if tag == "total":
                     self._total = val
                 elif tag == "file":
+                    self._done = val
+                elif tag == "chunk":
+                    # A mid-file block tick (M1): count it toward this tick's
+                    # budget and bank the running file count. The bounded budget
+                    # means a multi-GB file hands control back to Blender every few
+                    # blocks, so the UI redraws and an Esc is seen promptly instead
+                    # of waiting for the whole file to finish.
                     self._done = val
                 elif tag == "cancelled":       # capture, stopped
                     return self._dispatch_done(context, None, True)

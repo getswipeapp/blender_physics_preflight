@@ -305,8 +305,11 @@ def save_baseline(scene, path, overwrite=False, cache_hashes=None):
 
     ``cache_hashes`` is the OPTIONAL per-frame cache-hash manifest from
     ``cachehash.capture`` (#27). When None (the default), only the settings and
-    timing references are written, exactly as before — so a plain Save Baseline is
-    unchanged and a hash section is added only when the user asked for one."""
+    timing references are (re)written — a plain Save Baseline — BUT any cache-hash
+    section already in the baseline being overwritten is CARRIED FORWARD rather
+    than silently dropped (review M2). So re-saving the settings baseline never
+    throws away the per-frame hashes the user captured separately; only an explicit
+    cache-hash capture replaces them."""
     if os.path.exists(path) and not overwrite:
         raise FileExistsError(
             "a baseline already exists at %s (pass overwrite=True to replace it)"
@@ -321,9 +324,37 @@ def save_baseline(scene, path, overwrite=False, cache_hashes=None):
     }
     if cache_hashes is not None:
         data["cache_hashes"] = cache_hashes
+    else:
+        # Settings-only save over an existing baseline: never silently discard a
+        # previously captured cache-hash section (M2). Carry it forward so #27
+        # keeps its references. Only kept when the old baseline is readable and was
+        # saved for THIS file (basename match), so we never graft another project's
+        # hashes onto this one.
+        carried = _existing_cache_hashes(path)
+        if carried is not None:
+            data["cache_hashes"] = carried
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
     return path
+
+
+def _existing_cache_hashes(path):
+    """The usable ``cache_hashes`` manifest already stored at ``path``, or None.
+
+    Returns None when there is no readable baseline there, when it was saved for a
+    different file (basename differs from the current .blend), or when it holds no
+    usable cache-hash section — so a settings re-save only ever preserves hashes
+    that genuinely belong to this project."""
+    try:
+        data = load_baseline(path)
+    except ValueError:
+        return None
+    if foreign_file_name(data, bpy.data.filepath):
+        return None
+    section = data.get("cache_hashes")
+    if isinstance(section, dict) and section.get("sims"):
+        return section
+    return None
 
 
 def load_baseline(path):

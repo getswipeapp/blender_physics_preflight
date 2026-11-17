@@ -51,15 +51,22 @@ def _child_import_base():
     return __package__ or "failsafe"
 
 
-def build_child_argv(blender_bin, blend_file, strict=False, source_root=None):
+def build_child_argv(blender_bin, blend_file, strict=False, source_root=None,
+                     verify_hashes=False):
     """Command line that scans ONE ``.blend`` in a fresh, isolated Blender and
     prints its JSON result between markers.
 
     ``source_root`` (running from source / tests) is put on the child's
     ``sys.path`` with ``--factory-startup`` so ``import failsafe`` resolves to our
-    source; otherwise the installed extension is imported (the render-farm case)."""
+    source; otherwise the installed extension is imported (the render-farm case).
+
+    ``verify_hashes`` makes the child actually run the on-demand cache-hash
+    verification against that file's own baseline and floor its exit code when the
+    verification couldn't complete — so ``--batch --verify-hashes`` is honoured
+    per file instead of being silently ignored (review B1)."""
     base = _child_import_base()
     strict_py = "True" if strict else "False"
+    verify_py = "True" if verify_hashes else "False"
     path_inject = ("import sys; sys.path.insert(0, %r)\n" % source_root
                    if source_root else "")
     expr = (
@@ -67,17 +74,20 @@ def build_child_argv(blender_bin, blend_file, strict=False, source_root=None):
         "import json\n"
         "import bpy\n"
         "from %s import engine as _e, report as _r, cli as _c, "
-        "cache_inspect as _ci\n"
-        "_res = _e.run_all(bpy.context)\n"
+        "cache_inspect as _ci, cachehash as _ch\n"
+        "_verify = %s\n"
+        "_hr = _ch.build_report(list(bpy.data.scenes)) if _verify else None\n"
+        "_res = _e.run_all(bpy.context, hash_verify=_hr)\n"
         "try:\n"
         "    _entries = _ci.enumerate_caches(bpy.context.scene)\n"
         "except Exception:\n"
         "    _entries = []\n"
-        "_code = _c.verdict_exit_code(_res, %s)\n"
+        "_code = _c.aggregate_exit([_c.verdict_exit_code(_res, %s), "
+        "_c.verify_floor(_hr, _verify)])\n"
         "_data = json.loads(_r.build_json_report(_res, entries=_entries))\n"
         "_data['exit'] = _code\n"
         "print(%r + json.dumps(_data) + %r)\n"
-        % (path_inject, base, strict_py, _MARK_START, _MARK_END)
+        % (path_inject, base, verify_py, strict_py, _MARK_START, _MARK_END)
     )
     argv = [blender_bin, "-b", blend_file]
     if source_root:
@@ -112,13 +122,15 @@ def _extract_json(stdout):
 
 
 def scan_file_isolated(blend_file, blender_bin, timeout=DEFAULT_TIMEOUT,
-                       strict=False, source_root=None, runner=subprocess_runner):
+                       strict=False, source_root=None, runner=subprocess_runner,
+                       verify_hashes=False):
     """Scan one ``.blend`` in its own subprocess. Returns a per-file dict that is
     always defined — a crash, a hang, or an unreadable file become a recorded
     error (exit 3), never a silent pass and never an exception that aborts the
     batch."""
     argv = build_child_argv(blender_bin, blend_file, strict=strict,
-                            source_root=source_root)
+                            source_root=source_root,
+                            verify_hashes=verify_hashes)
     try:
         rc, out, err = runner(argv, timeout)
     except subprocess.TimeoutExpired:
@@ -217,7 +229,8 @@ def run_isolated_batch(folder, opts, blender_bin=None, timeout=DEFAULT_TIMEOUT,
     for f in files:
         pf = scan_file_isolated(f, blender_bin, timeout=timeout,
                                 strict=opts.get("strict", False),
-                                source_root=source_root, runner=runner)
+                                source_root=source_root, runner=runner,
+                                verify_hashes=opts.get("verify_hashes", False))
         per_file.append(pf)
         codes.append(pf["exit"])
     agg = cli.aggregate_exit(codes)
