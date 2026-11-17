@@ -86,4 +86,11 @@ HELP = {
          "written into your .blend). It can only tell you settings changed since "
          "that baseline was saved — not since the bake — so save the baseline "
          "right after baking for it to mean the most."),
+    27: ("This fingerprints every baked cache frame (a SHA-256 of the file) when "
+         "you save a baseline, then re-checks the files later to tell you whether "
+         "any changed. A match means the bytes are unchanged since the baseline — "
+         "not that the cache is correct or will render. A mismatch means the file "
+         "changed, which is exactly what a deliberate re-bake does, so it flags a "
+         "change without calling it damage. It reads every cache byte, so it runs "
+         "only when you click Verify Cache Hashes (not on every quick scan)."),
 }

@@ -1748,6 +1748,302 @@ def cache_coverage_tests():
     return out
 
 
+def cache_hash_tests():
+    """Baselined per-frame SHA-256 cache hashing (#27, review M2).
+
+    Proves the honest contract end-to-end on real baked caches:
+      * a match reports 'bytes unchanged', never 'cache valid';
+      * a changed file reports 'changed since baseline', framed as possibly a
+        re-bake — never flatly 'corrupt';
+      * a baseline saved AFTER damage still 'matches' the damaged bytes (so a
+        match is not a validity oracle);
+      * missing / no-section / no-baseline / wrong-schema / foreign / not-run can
+        NEVER produce a PASS;
+      * the baseline keys each sim independently (multi-sim project);
+      * a project relocation (whole folder moved) still verifies;
+      * streaming helpers: digest correctness, unreadable -> None, a file changing
+        mid-read -> VOLATILE, and a cancelled capture raises (writing nothing)."""
+    import json as _json
+    import shutil
+    import hashlib
+    from failsafe import cachehash as ch, baseline as bl, cache_inspect as ci
+    out = []
+    tmp = tempfile.mkdtemp(prefix="failsafe_hash_")
+
+    # ---- streaming-helper units (no bake needed) --------------------------
+    g = os.path.join(tmp, "g.bin")
+    with open(g, "wb") as fh:
+        fh.write(b"hello world" * 100)
+    res = ch.hash_file(g)
+    out.append(("hash digest matches hashlib",
+                bool(res) and res[0] == hashlib.sha256(b"hello world" * 100).hexdigest(),
+                res[0] if res else None,
+                hashlib.sha256(b"hello world" * 100).hexdigest()))
+    out.append(("hash size reported", bool(res) and res[1] == 1100,
+                res[1] if res else None, 1100))
+    out.append(("hash missing file -> None",
+                ch.hash_file(os.path.join(tmp, "nope.bin")) is None,
+                ch.hash_file(os.path.join(tmp, "nope.bin")), None))
+    # mid-read change -> VOLATILE (truncate the file from a progress callback).
+    vol = os.path.join(tmp, "vol.bin")
+    with open(vol, "wb") as fh:
+        fh.write(b"A" * 8192)
+    _st = {"hit": False}
+
+    def _shrink(_n):
+        if not _st["hit"]:
+            _st["hit"] = True
+            with open(vol, "wb") as fh2:
+                fh2.write(b"B" * 4)
+    vres = ch.hash_file(vol, chunk=16, progress=_shrink)
+    out.append(("hash file changing mid-read -> VOLATILE",
+                vres is ch.VOLATILE, vres, ch.VOLATILE))
+
+    # ---- build one clean, baked, baselined two-sim project ----------------
+    src = os.path.join(tmp, "src")
+    os.makedirs(src, exist_ok=True)
+    fixtures._make_two_sim_blend(src, frame_end=6)
+    manifest = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=manifest)
+    n_sims = len(manifest.get("sims", {}))
+    out.append(("capture recorded both sims", n_sims == 2, n_sims, 2))
+
+    cachedir = os.path.join(src, "blendcache_twosim")
+    cloth_pre = fixtures.prefix_of("ClothP")
+    soft_pre = fixtures.prefix_of("SoftC")
+
+    def _frames(prefix):
+        if not os.path.isdir(cachedir):
+            return []
+        return sorted(os.path.join(cachedir, f) for f in os.listdir(cachedir)
+                      if f.startswith(prefix) and f.endswith(".bphys"))
+
+    def _sv(report, system):
+        for s in report.sims:
+            if s.system == system:
+                return s
+        return None
+
+    def _copy_open(tag):
+        dst = os.path.join(tmp, "p_" + tag)
+        shutil.copytree(src, dst)
+        bpy.ops.wm.open_mainfile(filepath=os.path.join(dst, "twosim.blend"))
+        return dst
+
+    def _27(report):
+        results = engine.run_all(bpy.context, hash_verify=report)
+        return (worst_for_check(results, 27), statuses_for_check(results, 27),
+                results)
+
+    # (1) unchanged -> both PASS; message says 'unchanged' AND 'NOT proof'.
+    _copy_open("pass")
+    rep = ch.build_report(list(bpy.data.scenes))
+    cs, ss = _sv(rep, "Cloth"), _sv(rep, "Soft Body")
+    out.append(("hash unchanged: cloth UNCHANGED",
+                cs is not None and cs.state == ch.S_UNCHANGED,
+                getattr(cs, "state", None), ch.S_UNCHANGED))
+    out.append(("hash unchanged: soft UNCHANGED",
+                ss is not None and ss.state == ch.S_UNCHANGED,
+                getattr(ss, "state", None), ch.S_UNCHANGED))
+    worst, allst, results = _27(rep)
+    out.append(("hash unchanged -> #27 PASS", worst == Status.PASS, worst,
+                Status.PASS))
+    msg = " ".join(r.message for r in results if r.check_id == 27)
+    out.append(("hash PASS says bytes unchanged", "unchanged" in msg.lower(),
+                True, True))
+    out.append(("hash PASS never claims validity ('NOT proof')",
+                "not proof" in msg.lower(), True, True))
+
+    # (2) a changed BODY byte in the soft sim only -> soft CHANGED, cloth
+    #     UNCHANGED; #27 WARNING, framed as possibly a re-bake (not 'corrupt').
+    dst = _copy_open("changed")
+    sframes = sorted(os.path.join(dst, "blendcache_twosim", f)
+                     for f in os.listdir(os.path.join(dst, "blendcache_twosim"))
+                     if f.startswith(soft_pre))
+    tgt = sframes[len(sframes) // 2]
+    with open(tgt, "r+b") as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        off = 30 if size > 31 else size - 1
+        fh.seek(off)
+        b = fh.read(1)
+        fh.seek(off)
+        fh.write(bytes([b[0] ^ 0xFF]))
+    rep = ch.build_report(list(bpy.data.scenes))
+    cs, ss = _sv(rep, "Cloth"), _sv(rep, "Soft Body")
+    out.append(("hash changed: soft CHANGED",
+                ss is not None and ss.state == ch.S_CHANGED,
+                getattr(ss, "state", None), ch.S_CHANGED))
+    out.append(("hash changed: cloth still UNCHANGED (independent keys)",
+                cs is not None and cs.state == ch.S_UNCHANGED,
+                getattr(cs, "state", None), ch.S_UNCHANGED))
+    worst, allst, results = _27(rep)
+    out.append(("hash changed -> #27 worst is WARNING (not FAIL)",
+                worst == Status.WARNING, worst, Status.WARNING))
+    # The CHANGED soft sim must never PASS; the genuinely-unchanged cloth sim may
+    # (that's a true pass, not a false one — only the changed sim is the concern).
+    soft_statuses = [r.status for r in results
+                     if r.check_id == 27 and r.object_name == "SoftC"]
+    out.append(("hash changed: the changed sim never PASS",
+                Status.PASS not in soft_statuses, soft_statuses, "no PASS"))
+    wmsg = " ".join(r.message for r in results
+                    if r.check_id == 27 and r.status == Status.WARNING).lower()
+    out.append(("hash changed msg says 'changed since the baseline'",
+                "changed since the baseline" in wmsg, True, True))
+    out.append(("hash changed msg frames a re-bake, not flat 'corrupt'",
+                "re-bake" in wmsg, True, True))
+
+    # (3) pre-existing damage baselined -> a match is still reported, proving a
+    #     match is NOT a validity claim. Damage a frame, THEN baseline it, THEN
+    #     verify: it 'matches' the damaged bytes.
+    dst = _copy_open("predamage")
+    pframes = sorted(os.path.join(dst, "blendcache_twosim", f)
+                     for f in os.listdir(os.path.join(dst, "blendcache_twosim"))
+                     if f.startswith(soft_pre))
+    victim = pframes[len(pframes) // 2]
+    with open(victim, "r+b") as fh:
+        fh.seek(0, os.SEEK_END)
+        sz = fh.tell()
+        o2 = 28 if sz > 29 else sz - 1
+        fh.seek(o2)
+        bb = fh.read(1)
+        fh.seek(o2)
+        fh.write(bytes([bb[0] ^ 0xAA]))
+    manifest2 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=manifest2)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ss = _sv(rep, "Soft Body")
+    out.append(("hash pre-damage baselined -> still UNCHANGED (match != valid)",
+                ss is not None and ss.state == ch.S_UNCHANGED,
+                getattr(ss, "state", None), ch.S_UNCHANGED))
+
+    # (4) a baselined frame deleted -> DRIFT (missing); never PASS for that sim.
+    dst = _copy_open("missing")
+    cframes = sorted(os.path.join(dst, "blendcache_twosim", f)
+                     for f in os.listdir(os.path.join(dst, "blendcache_twosim"))
+                     if f.startswith(cloth_pre))
+    os.remove(cframes[len(cframes) // 2])
+    rep = ch.build_report(list(bpy.data.scenes))
+    cs = _sv(rep, "Cloth")
+    out.append(("hash missing frame -> cloth DRIFT",
+                cs is not None and cs.state == ch.S_DRIFT,
+                getattr(cs, "state", None), ch.S_DRIFT))
+    worst, allst, results = _27(rep)
+    out.append(("hash missing: #27 is WARNING, never PASS for the sim",
+                Status.PASS not in [r.status for r in results
+                                    if r.check_id == 27 and r.object_name == "ClothP"],
+                None, "no PASS"))
+
+    # (5) genuine re-bake with a changed sim -> bytes differ -> CHANGED.
+    dst = _copy_open("rebake")
+    o = bpy.data.objects.get("ClothP")
+    pc = o.modifiers["Cloth"].point_cache
+    o.location.z += 2.0
+    with bpy.context.temp_override(point_cache=pc, scene=bpy.context.scene,
+                                   active_object=o, object=o):
+        try:
+            bpy.ops.ptcache.free_bake()
+        except Exception:
+            pass
+        bpy.ops.ptcache.bake(bake=True)
+    rep = ch.build_report(list(bpy.data.scenes))
+    cs = _sv(rep, "Cloth")
+    out.append(("hash genuine re-bake -> cloth CHANGED",
+                cs is not None and cs.state in (ch.S_CHANGED, ch.S_DRIFT),
+                getattr(cs, "state", None), ch.S_CHANGED))
+
+    # (6) project relocation (whole folder copied elsewhere) -> still UNCHANGED.
+    reloc = os.path.join(tmp, "moved_away", "nested")
+    os.makedirs(os.path.dirname(reloc), exist_ok=True)
+    shutil.copytree(src, reloc)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(reloc, "twosim.blend"))
+    rep = ch.build_report(list(bpy.data.scenes))
+    cs, ss = _sv(rep, "Cloth"), _sv(rep, "Soft Body")
+    out.append(("hash relocation: cloth UNCHANGED after moving the project",
+                cs is not None and cs.state == ch.S_UNCHANGED,
+                getattr(cs, "state", None), ch.S_UNCHANGED))
+    out.append(("hash relocation: soft UNCHANGED after moving the project",
+                ss is not None and ss.state == ch.S_UNCHANGED,
+                getattr(ss, "state", None), ch.S_UNCHANGED))
+
+    # (7) gating states: none may PASS.
+    # no baseline at all
+    dst = _copy_open("nobase")
+    os.remove(bl.default_baseline_path())
+    rep = ch.build_report(list(bpy.data.scenes))
+    worst, allst, _ = _27(rep)
+    out.append(("hash no baseline -> #27 not PASS and state NO_BASELINE",
+                rep.state == ch.R_NO_BASELINE and Status.PASS not in allst,
+                (rep.state, allst), ch.R_NO_BASELINE))
+    # settings-only baseline (no cache-hash section)
+    dst = _copy_open("nosection")
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(), overwrite=True)
+    rep = ch.build_report(list(bpy.data.scenes))
+    worst, allst, _ = _27(rep)
+    out.append(("hash no section -> #27 not PASS and state NO_SECTION",
+                rep.state == ch.R_NO_SECTION and Status.PASS not in allst,
+                (rep.state, allst), ch.R_NO_SECTION))
+    # a schema-5 settings baseline must still be VALID for #23/#26 (compat).
+    out.append(("schema 5 accepted by schema_ok (compat preserved)",
+                bl.schema_ok({"schema": bl.BASELINE_SCHEMA}) is True,
+                bl.schema_ok({"schema": bl.BASELINE_SCHEMA}), True))
+    # wrong schema
+    dst = _copy_open("schema")
+    p = bl.default_baseline_path()
+    with open(p) as fh:
+        data = _json.load(fh)
+    data["schema"] = 99
+    with open(p, "w") as fh:
+        _json.dump(data, fh)
+    rep = ch.build_report(list(bpy.data.scenes))
+    worst, allst, _ = _27(rep)
+    out.append(("hash wrong schema -> #27 UNKNOWN, never PASS",
+                rep.state == ch.R_SCHEMA and worst == Status.UNKNOWN
+                and Status.PASS not in allst, (rep.state, worst), ch.R_SCHEMA))
+    # foreign file
+    dst = _copy_open("foreign")
+    p = bl.default_baseline_path()
+    with open(p) as fh:
+        data = _json.load(fh)
+    data["file"] = "/somewhere/else/other_project.blend"
+    with open(p, "w") as fh:
+        _json.dump(data, fh)
+    rep = ch.build_report(list(bpy.data.scenes))
+    worst, allst, _ = _27(rep)
+    out.append(("hash foreign file -> #27 UNKNOWN, never PASS",
+                rep.state == ch.R_FOREIGN and Status.PASS not in allst,
+                (rep.state, allst), ch.R_FOREIGN))
+
+    # (8) a plain quick scan (no verification run) -> #27 NA 'not run', not PASS.
+    _copy_open("notrun")
+    results = engine.run_all(bpy.context)   # no hash_verify
+    worst = worst_for_check(results, 27)
+    allst = statuses_for_check(results, 27)
+    nmsg = " ".join(r.message for r in results if r.check_id == 27).lower()
+    out.append(("hash not-run -> #27 NA, never PASS",
+                worst == Status.NA and Status.PASS not in allst, worst, Status.NA))
+    out.append(("hash not-run msg says it hasn't been run",
+                "hasn't been run" in nmsg or "has not been run" in nmsg, True, True))
+
+    # (9) a cancelled capture raises Cancelled (so the operator writes nothing).
+    _copy_open("cancel")
+    cnt = {"n": 0}
+
+    def _cancel():
+        cnt["n"] += 1
+        return cnt["n"] > 1
+    try:
+        ch.capture(list(bpy.data.scenes), ci.blend_dir(), cancel=_cancel)
+        raised = False
+    except ch.Cancelled:
+        raised = True
+    out.append(("hash cancelled capture raises Cancelled", raised, raised, True))
+
+    return out
+
+
 def couldnt_verify_tests():
     """Every 'Couldn't verify' a user sees must carry a plain reason (message) AND
     a next action (hint). And the contract must hold: the displayed word is
@@ -1911,6 +2207,7 @@ def main():
                                    + review_blocker_tests()
                                    + integrity_header_tests()
                                    + cache_coverage_tests()
+                                   + cache_hash_tests()
                                    + couldnt_verify_tests()):
         if ok:
             passed += 1
@@ -1930,7 +2227,7 @@ def main():
              + len(baseline_tests()) + len(batch_adversarial_tests())
              + len(batch_isolation_tests()) + len(review_blocker_tests())
              + len(integrity_header_tests()) + len(cache_coverage_tests())
-             + len(couldnt_verify_tests()))
+             + len(cache_hash_tests()) + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

@@ -714,6 +714,42 @@ def build_bphys_wrongtype(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+def prefix_of(name):
+    """The uppercase-hex cache filename prefix Blender uses for an object/cache
+    name (matches cache_inspect._hex_name)."""
+    return "".join("%02X" % b for b in name.encode())
+
+
+def _make_two_sim_blend(outdir, frame_end=6):
+    """Create, save and disk-bake TWO sims in one scene (a cloth plane and a soft-
+    body cube) so the cache-hash tests can prove the baseline keys each sim
+    independently. Both write into the single ``blendcache_twosim`` folder, told
+    apart by their filename prefix. Returns the blend path."""
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_plane_add(size=2, location=(0, 0, 3))
+    o1 = bpy.context.active_object
+    o1.name = "ClothP"
+    m1 = o1.modifiers.new("Cloth", "CLOTH")
+    pc1 = m1.point_cache
+    pc1.frame_start, pc1.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(3, 0, 3))
+    o2 = bpy.context.active_object
+    o2.name = "SoftC"
+    m2 = o2.modifiers.new("Soft", "SOFT_BODY")
+    pc2 = m2.point_cache
+    pc2.frame_start, pc2.frame_end = 1, frame_end
+    blend = os.path.join(outdir, "twosim.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    pc1.use_disk_cache = True
+    pc2.use_disk_cache = True
+    _bake_point_cache(pc1, o1)
+    _bake_point_cache(pc2, o2)
+    bpy.ops.wm.save_mainfile()
+    return blend
+
+
 def _make_fluid_blend(outdir, frame_end=4, use_mesh=True):
     reset()
     sc = bpy.context.scene

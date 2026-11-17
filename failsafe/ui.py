@@ -195,6 +195,14 @@ class FAILSAFE_PT_panel(Panel):
         row = layout.row(align=True)
         row.operator("failsafe.save_baseline", icon="FILE_TICK")
 
+        # Opt-in cache-file hashing (#27) — kept off the quick scan because it
+        # reads every baked byte. One button records a hash baseline; the other
+        # re-checks the files against it (both read-only except the explicit save).
+        row = layout.row(align=True)
+        row.operator("failsafe.cache_hash", text="Verify Cache Hashes",
+                     icon="FILE_REFRESH").mode = "VERIFY"
+        row.operator("failsafe.cache_hash", text="", icon="FILE_CACHE").mode = "CAPTURE"
+
         # Opt-in: check automatically at the start of each render.
         prefs = _get_prefs(context)
         if prefs is not None:

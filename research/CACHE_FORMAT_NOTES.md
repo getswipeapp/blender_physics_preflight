@@ -35,7 +35,11 @@ non-empty, readable `.bphys` frame is treated as **structurally invalid** (→
   type of the simulation that **owns** this cache. We compare only against the
   owner's known type (Cloth=2, Soft Body=0, Particles=1, Dynamic Paint=5,
   verified on real bakes across all four versions), never a guessed universal
-  set, so an unforeseen-but-valid type is never rejected.
+  set. An owner kind we have not mapped skips the type check rather than being
+  rejected. Scope note (review M1 follow-up): this is validated for the sim kinds
+  and Blender versions we have baked and byte-inspected and for our fixtures — it
+  is not a guarantee about every future Blender variant or every unusual-but-valid
+  cache; it is the tested compatibility scope, not a universal proof.
 
 **Hair Dynamics is intentionally exempt from the type check.** A hair-dynamics
 cache is *mixed*: frame 0 is a particle frame (type 1, `totpoint` = strand count)
@@ -80,26 +84,50 @@ well-formed"**, and the #18 PASS message says so explicitly — it is NOT a clai
 that the payload bytes are numerically intact. We do not treat an un-decoded
 payload as proven healthy.
 
-## Next deep-integrity increment (planned, not yet built)
+## Baselined per-frame hashes — SHIPPED (2026-11-16, review M2)
 
-- **Baselined per-frame hashes** — the planned way to catch a corrupted/truncated
-  **body** that still has a valid header. When the user clicks Save Baseline,
-  record a SHA-256 of each cache frame file keyed to a stable simulation identity,
-  frame number and project context; a later scan compares and reports per frame.
-  Important honesty constraints (review M2):
-    - A mismatch means **"cache file changed since the baseline,"** NOT
-      automatically "corrupt." A deliberate re-bake legitimately changes the
-      bytes — it is a *detected change*, which may be expected.
-    - A match means **"bytes unchanged since the baseline,"** NEVER "content is
-      valid." If the baseline was saved *after* the cache was already damaged, the
-      hash faithfully records the damaged bytes and will keep matching them.
-    - So hashing is a **change-detection** tool, not a validity oracle, and it is
-      only as trustworthy as the moment the baseline was taken. It is NOT
-      "no false positives": an intentional re-bake is a true change that is not a
-      defect.
-    - A missing / stale / incomplete / unreadable baseline cannot produce PASS.
-  This is complementary to — not a substitute for — actually having Blender decode
-  the frame. Both are worth building; neither alone proves a cache is usable.
+Catches a corrupted/truncated **body** that still has a valid header — the gap
+the structural check above can't close. Implemented in `cachehash.py` + check
+**#27** ("Cache files unchanged since the baseline"), certified on all four
+versions.
+
+How it works:
+  - Save Baseline *with cache hashes* streams a SHA-256 of every present point-
+    cache frame file into the external sidecar (schema 5, optional `cache_hashes`
+    section), keyed by the sim's stable `Scene::Owner::System::Sub` identity and
+    the file's **project-relative** path + frame number. Reads only; the one write
+    is the sidecar, never the .blend.
+  - A later verification re-hashes and compares. It is run ON DEMAND (the "Verify
+    Cache Hashes" button, or the CLI `--verify-hashes` flag), NOT on every quick
+    scan, because it reads every cache byte — a quick scan must never freeze on
+    gigabytes. The GUI runs it in a modal operator that streams one file per step
+    with progress and Esc-cancel; the normal scan reports "#27 hasn't been run".
+
+Honesty constraints, all enforced and tested:
+    - A mismatch is **"cache file changed since the baseline,"** NOT automatically
+      "corrupt." A deliberate re-bake legitimately rewrites the bytes — a
+      *detected change*, which may be expected. The #27 message says so.
+    - A match is **"bytes unchanged since the baseline,"** NEVER "content valid."
+      Verified by a test that damages a frame, baselines the damaged bytes, then
+      gets a clean "unchanged" — proving a match is not a validity oracle.
+    - So hashing is **change detection**, only as trustworthy as the moment the
+      baseline was taken. NOT "no false positives" (a re-bake is a true change
+      that isn't a defect).
+    - Missing / no-section / no-baseline / wrong-schema / foreign / unreadable /
+      not-run can never PASS (each has a test forbidding PASS).
+    - Edge cases covered by tests: genuine re-bake, multi-sim keying, project
+      relocation (whole folder moved), a file changing mid-read (-> VOLATILE,
+      skipped), and a cancelled capture (raises, writes nothing).
+  Complementary to — not a substitute for — having Blender decode the frame
+  (kept deliberately separate). Scope: **point caches** (.bphys) for now; fluid
+  (`.vdb`/`.uni`) and GN blobs are the next hashing sub-increment (their file
+  layouts differ and need their own study).
+
+## Next deep-integrity increments (planned, not yet built)
+
+- **Cache-hash coverage for fluid + Geometry Nodes** — extend the #27 manifest to
+  the Mantaflow sub-caches and GN blobs (multi-file-per-frame layouts, separate
+  from the one-file-per-frame `.bphys` scheme).
 - **Stale-topology check** — compare header `totpoint` against the current
   object's point count; a mismatch means the cache was baked for a different
   mesh. Higher value, higher false-positive risk (modifier-stack order, particle

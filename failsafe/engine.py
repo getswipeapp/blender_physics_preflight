@@ -170,25 +170,32 @@ class ScanContext:
     every check.
     """
 
-    __slots__ = ("scene", "_dg", "_failsafe_caches")
+    __slots__ = ("scene", "_dg", "_failsafe_caches", "hash_verify")
 
-    def __init__(self, context):
+    def __init__(self, context, hash_verify=None):
         self.scene = context.scene
         self._dg = context.evaluated_depsgraph_get()
         self._failsafe_caches = None
+        # Precomputed cache-hash verification (cachehash.HashReport) for #27, or
+        # None when the caller didn't run the (expensive, on-demand) hashing. #27
+        # reports "not run" rather than implying anything was verified.
+        self.hash_verify = hash_verify
 
     def evaluated_depsgraph_get(self):
         return self._dg
 
 
-def run_all(context):
+def run_all(context, hash_verify=None):
     """Run every registered check. Returns a flat list[Result].
 
     A check that raises is reported as a single UNKNOWN result rather than
     aborting the whole scan — one broken check must never hide the others.
-    """
+
+    ``hash_verify`` is an optional precomputed ``cachehash.HashReport`` for the
+    on-demand cache-hash check (#27); the normal quick scan passes None, so #27
+    reports that hashing hasn't been run rather than freezing on gigabytes."""
     import traceback
-    ctx = ScanContext(context)
+    ctx = ScanContext(context, hash_verify=hash_verify)
     results = []
     for meta in CHECKS:
         mk = _mk(meta)

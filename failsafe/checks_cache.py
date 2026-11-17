@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Simulation-cache checks (17-23).
+"""Simulation-cache checks (17-27).
 
 The headline differentiator: we never trust Blender's "baked" flags. We look at
 the files on disk and report UNKNOWN wherever the truth cannot be established
@@ -18,6 +18,7 @@ import bpy
 from .engine import check, Status, GROUP_CACHE
 from . import cache_inspect as ci
 from . import baseline as bl
+from . import cachehash as ch
 
 
 def _caches(ctx):
@@ -822,4 +823,160 @@ def c26_settings_baseline(ctx, mk):
                    "of key settings, not every property, and this is not proof the "
                    "bake itself is good.)"
                    % (matched, "" if matched == 1 else "s"))]
+    return out
+
+
+# -------------------------------------------------------------------- 27 ----
+def _has_disk_point_caches(entries):
+    return any(e.kind == "point" and not e.memory and e.file_check_applicable
+               for e in entries)
+
+
+@check(27, "Cache files unchanged since the baseline", GROUP_CACHE,
+       name_warn="Cache files changed since the baseline",
+       name_bad="Cache files changed since the baseline",
+       name_unknown="Cache files couldn't be verified against the baseline",
+       name_na="Cache-file hash verification")
+def c27_cache_hashes(ctx, mk):
+    """Compare each baked point-cache frame file, byte for byte, against a saved
+    baseline of SHA-256 hashes (review M2). This is **change detection**, not a
+    validity oracle:
+
+      * A match means the file's BYTES are unchanged since the baseline was saved
+        — never that the cache is valid or will render (a baseline taken after the
+        cache was already damaged records, and keeps matching, the damage).
+      * A mismatch means the file CHANGED since the baseline — not automatically
+        'corrupt'. A deliberate re-bake legitimately rewrites it; Failsafe detects
+        the change but can't say whether it was intended.
+      * A missing / unreadable / absent reference can never PASS.
+
+    Hashing gigabytes is expensive, so it does NOT run on every quick scan: the
+    reporting here reads a precomputed result (``ctx.hash_verify``) produced on
+    demand by the 'Verify Cache Hashes' button or the CLI's ``--verify-hashes``.
+    When no verification has been run, the check explains how to run it rather
+    than implying anything was checked. Read-only throughout."""
+    entries = _caches(ctx)
+    if not _has_disk_point_caches(entries):
+        return []   # nothing with on-disk frame files to hash: stay silent
+
+    report = getattr(ctx, "hash_verify", None)
+    if report is None:
+        # The quick scan deliberately skipped hashing. Say so plainly — never a
+        # PASS or a silent omission.
+        return [mk(Status.NA,
+                   "Cache-file hash verification hasn't been run. It reads every "
+                   "baked frame (which can be gigabytes), so it runs only when you "
+                   "ask.",
+                   hint="Click 'Verify Cache Hashes' to check every frame against "
+                        "the baseline, or run the CLI with --verify-hashes.")]
+
+    st = report.state
+    if report.cancelled:
+        return [mk(Status.UNKNOWN,
+                   "Cache-file hash verification was cancelled before it finished, "
+                   "so the result is incomplete.",
+                   hint="Run 'Verify Cache Hashes' again and let it complete.")]
+    if st == ch.R_UNSAVED:
+        return [mk(Status.NA,
+                   "The file isn't saved, so there's no baseline to hash-verify "
+                   "against.",
+                   hint="Save the .blend, bake, then Save Baseline with cache "
+                        "hashes.")]
+    if st == ch.R_NO_BASELINE:
+        return [mk(Status.NA,
+                   "No baseline has been saved, so cache files can't be hash-"
+                   "verified.",
+                   hint="Right after a good bake, click Save Baseline and tick "
+                        "'Include cache hashes'.")]
+    if st == ch.R_NO_SECTION:
+        return [mk(Status.NA,
+                   "The saved baseline has no cache-hash reference (it was saved "
+                   "without them), so files can't be hash-verified.",
+                   hint="Click Save Baseline again with 'Include cache hashes' "
+                        "ticked.")]
+    if st == ch.R_UNREADABLE:
+        return [mk(Status.UNKNOWN,
+                   "The baseline file couldn't be read (%s), so cache files can't "
+                   "be hash-verified." % report.detail,
+                   hint="Re-save it with Save Baseline, or delete the file.")]
+    if st == ch.R_SCHEMA:
+        return [mk(Status.UNKNOWN,
+                   "The baseline was written by a different version of Failsafe "
+                   "(schema %s), so its cache hashes can't be compared safely."
+                   % report.detail,
+                   hint="Click Save Baseline again to write a fresh one.")]
+    if st == ch.R_FOREIGN:
+        return [mk(Status.UNKNOWN,
+                   "The baseline was saved for a different file ('%s'), so its "
+                   "cache hashes don't describe this scene." % report.detail,
+                   hint="Click Save Baseline to record a baseline for this file.")]
+
+    # st == R_OK: render the per-sim comparison.
+    out = []
+    unchanged = 0
+    for sv in report.sims:
+        nice = ch._nice(sv.identity)
+        obj = sv.obj_name or None
+        if sv.state == ch.S_UNCHANGED:
+            unchanged += 1
+            out.append(mk(Status.PASS,
+                "%s: all %d baselined cache frame(s) are byte-for-byte unchanged "
+                "since the baseline was saved. This only confirms the files "
+                "haven't changed on disk — it is NOT proof the baked data is "
+                "correct or that the cache will render."
+                % (nice, len(sv.matched)), object_name=obj))
+        elif sv.state == ch.S_CHANGED:
+            sample = ", ".join(str(f) for f in sv.changed[:8])
+            more = "" if len(sv.changed) <= 8 else " …(+%d more)" % (len(sv.changed) - 8)
+            extra = ""
+            if sv.unreadable:
+                extra += " (%d more couldn't be read)" % len(sv.unreadable)
+            if sv.missing:
+                extra += " (%d baselined frame(s) also missing)" % len(sv.missing)
+            out.append(mk(Status.WARNING,
+                "%s: %d cache file(s) changed since the baseline — frame(s) %s%s.%s "
+                "This is what you'd expect after a deliberate re-bake; Failsafe "
+                "detects the change but can't tell a re-bake from damage."
+                % (nice, len(sv.changed), sample, more, extra),
+                object_name=obj,
+                hint="If you didn't re-bake since Save Baseline, treat the cache "
+                     "as suspect and re-bake. If you did, click Save Baseline "
+                     "again to update the reference."))
+        elif sv.state == ch.S_DRIFT:
+            out.append(mk(Status.WARNING,
+                "%s: the cache frame set differs from the baseline (%d baselined "
+                "frame(s) missing, %d new frame(s)), though the frames in common "
+                "are byte-for-byte unchanged. Usually a re-bake over a different "
+                "range." % (nice, len(sv.missing), len(sv.new)),
+                object_name=obj,
+                hint="If this range is intentional, click Save Baseline again to "
+                     "update the reference."))
+        elif sv.state == ch.S_UNREADABLE:
+            out.append(mk(Status.UNKNOWN,
+                "%s: %d cache file(s) couldn't be read, so this sim can't be "
+                "verified against the baseline." % (nice, len(sv.unreadable)),
+                object_name=obj,
+                hint="Check file permissions or re-bake, then verify again."))
+        elif sv.state == ch.S_NO_REF:
+            out.append(mk(Status.UNKNOWN,
+                "%s has baked files but no cache-hash reference in the baseline "
+                "(added or renamed after it was saved), so they can't be verified."
+                % nice, object_name=obj,
+                hint="Click Save Baseline again with 'Include cache hashes'."))
+        elif sv.state == ch.S_EMPTY_REF:
+            out.append(mk(Status.UNKNOWN,
+                "%s is in the baseline but no usable frame hashes were recorded "
+                "for it, so it can't be verified." % nice, object_name=obj,
+                hint="Click Save Baseline again after the bake finishes."))
+        elif sv.state == ch.S_GONE:
+            out.append(mk(Status.UNKNOWN,
+                "%s is in the baseline but isn't in the scene now, so there's "
+                "nothing to verify for it." % nice,
+                hint="Update the baseline if you meant to remove it."))
+
+    if not out:
+        return []
+    # If nothing drew a non-PASS line and at least one sim verified unchanged,
+    # the PASS lines above already carry the honest wording; otherwise the mixed
+    # results stand on their own.
     return out

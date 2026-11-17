@@ -39,7 +39,7 @@ EXIT_USAGE = 3
 def _parse_args(argv):
     """Parse the args that follow ``--`` on the Blender command line."""
     opts = {"format": "text", "strict": False, "batch": None,
-            "isolated": True, "timeout": 300}
+            "isolated": True, "timeout": 300, "verify_hashes": False}
     expect_batch = False
     expect_timeout = False
     for a in argv:
@@ -69,6 +69,10 @@ def _parse_args(argv):
             # Opt out of per-file subprocess isolation (faster, but one bad file
             # can crash the whole batch). Isolation is the default for farms.
             opts["isolated"] = False
+        elif a == "--verify-hashes":
+            # Re-hash every baked frame and compare to the baseline (#27). Off by
+            # default because it reads every cache byte (can be gigabytes).
+            opts["verify_hashes"] = True
         elif a == "--timeout":
             expect_timeout = True
         elif a.startswith("--timeout="):
@@ -108,6 +112,8 @@ _HELP = (
     "  --batch <folder>  scan every .blend in a folder (recursively)\n"
     "  --timeout <secs>  per-file timeout in isolated batch mode (default 300)\n"
     "  --in-process      batch in one process (faster; NOT crash-isolated)\n"
+    "  --verify-hashes   also re-hash every baked frame vs the baseline (#27;\n"
+    "                    reads every cache byte — can be slow on big caches)\n"
     "  --help            this message\n"
     "Exit codes: 0 clean, 1 blocking (FAIL), 2 unverified (UNKNOWN), 3 usage.\n"
     "Batch mode must be run WITHOUT a .blend on the command line, e.g.\n"
@@ -143,9 +149,22 @@ def aggregate_exit(codes):
     return worst
 
 
+def _hash_report(opts):
+    """Compute the on-demand cache-hash verification when --verify-hashes is set,
+    else None. Isolated so a hashing error never aborts the whole scan."""
+    if not opts.get("verify_hashes"):
+        return None
+    try:
+        import bpy
+        from . import cachehash
+        return cachehash.build_report(list(bpy.data.scenes))
+    except Exception:
+        return None
+
+
 def _scan_current(context, opts):
     """Scan the open scene. Returns (exit_code, output_string)."""
-    results = engine.run_all(context)
+    results = engine.run_all(context, hash_verify=_hash_report(opts))
     from . import cache_inspect as ci
     try:
         entries = ci.enumerate_caches(context.scene)
@@ -199,7 +218,7 @@ def run_batch(folder, opts):
             if "FINISHED" not in res:
                 raise RuntimeError("could not open (result: %s)"
                                    % ", ".join(sorted(res)))
-            results = engine.run_all(bpy.context)
+            results = engine.run_all(bpy.context, hash_verify=_hash_report(opts))
             try:
                 entries = ci.enumerate_caches(bpy.context.scene)
             except Exception:

@@ -4,12 +4,14 @@ one user-initiated write action — Save Baseline."""
 import os
 
 import bpy
-from bpy.props import StringProperty, CollectionProperty, BoolProperty, IntProperty
+from bpy.props import (StringProperty, CollectionProperty, BoolProperty,
+                       IntProperty, EnumProperty)
 from bpy.types import Operator, PropertyGroup
 
 from . import engine
 from . import report as report_mod
 from . import baseline as baseline_mod
+from . import cachehash as cachehash_mod
 
 
 class FAILSAFE_ResultItem(PropertyGroup):
@@ -274,6 +276,193 @@ class FAILSAFE_OT_save_baseline(Operator):
         return {"FINISHED"}
 
 
+class FAILSAFE_OT_cache_hash(Operator):
+    """On-demand cache-file hashing (review M2) — the heavy, streamed work kept
+    OFF the quick scan so it never freezes the UI.
+
+    Two modes, one modal driver (streams one frame file per step, redraws between
+    steps, and stops on Esc):
+
+      * VERIFY  — re-hash every baked frame and compare to the baseline, then
+        re-run the scan so check #27 shows the result. Read-only.
+      * CAPTURE — hash every baked frame and write them into the baseline sidecar
+        (a full Save Baseline with cache hashes). The one write path, external
+        sidecar only, never the .blend. Asks before overwriting an existing one.
+    """
+    bl_idname = "failsafe.cache_hash"
+    bl_label = "Cache Hash"
+    bl_options = {"REGISTER"}
+
+    mode: EnumProperty(
+        items=[("VERIFY", "Verify Cache Hashes",
+                "Check every baked frame against the saved baseline"),
+               ("CAPTURE", "Save Cache Hash Baseline",
+                "Record a SHA-256 of every baked frame into the baseline")],
+        default="VERIFY")
+    overwrite: BoolProperty(
+        name="Overwrite the existing baseline",
+        description="Replace the baseline already saved for this file",
+        default=False)
+
+    # per-run state (not Blender props)
+    _timer = None
+    _gen = None
+    _total = 0
+    _done = 0
+    _cancel = False
+    _STEP_BUDGET = 4     # files hashed per timer tick — small, so the UI breathes
+
+    # -- shared helpers ----------------------------------------------------
+    def _label(self):
+        head = ("Verifying cache hashes" if self.mode == "VERIFY"
+                else "Hashing cache for baseline")
+        if self._total:
+            return "Failsafe: %s %d/%d (Esc to cancel)" % (
+                head, self._done, self._total)
+        return "Failsafe: %s… (Esc to cancel)" % head
+
+    def _make_gen(self, context):
+        scenes = list(bpy.data.scenes)
+        if self.mode == "CAPTURE":
+            from . import cache_inspect as ci
+            return cachehash_mod.capture_steps(
+                scenes, ci.blend_dir(), cancel=lambda: self._cancel)
+        return cachehash_mod.build_report_steps(
+            scenes, cancel=lambda: self._cancel)
+
+    def _finish_capture(self, context, manifest, cancelled):
+        if cancelled:
+            self.report({"WARNING"},
+                        "Cache-hash baseline cancelled — nothing was written.")
+            return {"CANCELLED"}
+        path = baseline_mod.default_baseline_path()
+        try:
+            baseline_mod.save_baseline(context.scene, path,
+                                       overwrite=True, cache_hashes=manifest)
+        except Exception as exc:
+            self.report({"ERROR"}, "Couldn't write the baseline: %s" % exc)
+            return {"CANCELLED"}
+        n = sum(len(s.get("frames", {})) for s in manifest.get("sims", {}).values())
+        # Refresh the panel (settings/timing checks), hashes show on next Verify.
+        results = engine.run_all(context)
+        _store_results(context.window_manager, results)
+        self.report({"INFO"},
+                    "Saved a baseline with %d cache-frame hash(es) next to your "
+                    ".blend. Your .blend was not modified." % n)
+        return {"FINISHED"}
+
+    def _finish_verify(self, context, report):
+        results = engine.run_all(context, hash_verify=report)
+        _store_results(context.window_manager, results)
+        if report.cancelled:
+            self.report({"WARNING"},
+                        "Cache-hash verification cancelled before it finished.")
+            return {"CANCELLED"}
+        if report.state != cachehash_mod.R_OK:
+            self.report({"INFO"},
+                        "Cache-hash verification: see check #27 for details.")
+            return {"FINISHED"}
+        changed = sum(1 for s in report.sims if s.state == cachehash_mod.S_CHANGED)
+        unchanged = sum(1 for s in report.sims
+                        if s.state == cachehash_mod.S_UNCHANGED)
+        self.report({"INFO"},
+                    "Cache-hash verification done: %d sim(s) unchanged, %d "
+                    "changed since the baseline." % (unchanged, changed))
+        return {"FINISHED"}
+
+    def _cleanup(self, context):
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        try:
+            context.workspace.status_text_set(None)
+        except Exception:
+            pass
+
+    def _dispatch_done(self, context, payload, cancelled):
+        self._cleanup(context)
+        if self.mode == "CAPTURE":
+            return self._finish_capture(context, payload or {"sims": {}}, cancelled)
+        # VERIFY: build_report_steps always yields a HashReport (cancelled flag set
+        # when it was stopped), so payload is the report.
+        return self._finish_verify(context, payload)
+
+    # -- blocking fallback (headless / direct exec) ------------------------
+    def execute(self, context):
+        self._cancel = False
+        if self.mode == "CAPTURE":
+            from . import cache_inspect as ci
+            try:
+                manifest = cachehash_mod.capture(list(bpy.data.scenes),
+                                                 ci.blend_dir())
+            except cachehash_mod.Cancelled:
+                return {"CANCELLED"}
+            return self._finish_capture(context, manifest, False)
+        report = cachehash_mod.build_report(list(bpy.data.scenes))
+        return self._finish_verify(context, report)
+
+    # -- modal driver ------------------------------------------------------
+    def invoke(self, context, event):
+        # CAPTURE writes a file: guard the unsaved case and confirm overwrite,
+        # exactly like Save Baseline.
+        if self.mode == "CAPTURE":
+            path = baseline_mod.default_baseline_path()
+            if not path:
+                self.report({"ERROR"},
+                            "Save your .blend first — the baseline is written next "
+                            "to it.")
+                return {"CANCELLED"}
+            if os.path.isfile(path) and not self.overwrite:
+                return context.window_manager.invoke_props_dialog(self)
+        self._cancel = False
+        self._done = 0
+        self._total = 0
+        self._gen = self._make_gen(context)
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.01, window=context.window)
+        wm.modal_handler_add(self)
+        try:
+            context.workspace.status_text_set(self._label())
+        except Exception:
+            pass
+        return {"RUNNING_MODAL"}
+
+    def draw(self, context):
+        col = self.layout.column()
+        col.label(text="A baseline already exists for this file.", icon="ERROR")
+        col.label(text="Saving cache hashes will replace it.")
+        col.prop(self, "overwrite")
+
+    def modal(self, context, event):
+        if event.type == "ESC" and event.value == "PRESS":
+            self._cancel = True
+        if event.type != "TIMER":
+            return {"RUNNING_MODAL"}
+        try:
+            for _ in range(self._STEP_BUDGET):
+                tag, *rest = next(self._gen)
+                val = rest[0] if rest else None
+                if tag == "total":
+                    self._total = val
+                elif tag == "file":
+                    self._done = val
+                elif tag == "cancelled":       # capture, stopped
+                    return self._dispatch_done(context, None, True)
+                elif tag == "done":            # capture manifest or verify report
+                    return self._dispatch_done(context, val, False)
+        except StopIteration:
+            return self._dispatch_done(context, None, False)
+        except Exception as exc:
+            self._cleanup(context)
+            self.report({"ERROR"}, "Cache-hash run failed: %s" % exc)
+            return {"CANCELLED"}
+        try:
+            context.workspace.status_text_set(self._label())
+        except Exception:
+            pass
+        return {"RUNNING_MODAL"}
+
+
 class FAILSAFE_OT_toggle_detail(Operator):
     bl_idname = "failsafe.toggle_detail"
     bl_label = "Toggle Finding Detail"
@@ -317,6 +506,7 @@ classes = (
     FAILSAFE_OT_export_report,
     FAILSAFE_OT_export_json,
     FAILSAFE_OT_save_baseline,
+    FAILSAFE_OT_cache_hash,
     FAILSAFE_OT_toggle_detail,
     FAILSAFE_OT_set_filter,
 )

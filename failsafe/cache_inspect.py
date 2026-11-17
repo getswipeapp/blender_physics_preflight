@@ -218,15 +218,22 @@ def _point_cache_identity_for(obj, pc):
     return (prefix.upper(), int(getattr(pc, "index", 0)))
 
 
-def _iter_object_point_caches(obj):
-    """Yield ``(system_label, point_cache)`` for every point-cache-backed
+def _iter_object_point_caches_named(obj):
+    """Yield ``(system_label, sub_name, point_cache)`` for every point-cache-backed
     simulation on ``obj``: Cloth, Soft Body, emitter Particles, Hair dynamics,
     and Dynamic Paint *vertex* surfaces.
 
     This is the single source of truth shared by ``enumerate_caches`` (what the
-    scanner reports on) and ``owned_point_cache_identities`` (what the orphan
-    check treats as live). Routing both through here means the orphan check (#25)
-    can never flag a cache the scanner itself inspects. Read-only.
+    scanner reports on), ``owned_point_cache_identities`` (what the orphan check
+    treats as live) and ``iter_point_cache_files`` (what the cache-hash baseline
+    fingerprints). Routing them all through here means the orphan check (#25) can
+    never flag a cache the scanner inspects, and the hash baseline can never key a
+    sim differently from the scanner. Read-only.
+
+    ``sub_name`` is the owning modifier / particle-system / surface name. It only
+    disambiguates two sims on one object; it is NOT used to locate files (the
+    on-disk prefix is the hex of the cache or object name), so it is safe for it to
+    be a human label.
 
     Gating notes (verified on Blender 5.2.3):
       * Hair particle systems only have a sim cache when ``use_hair_dynamics`` is
@@ -241,11 +248,11 @@ def _iter_object_point_caches(obj):
         if mod.type == "CLOTH":
             pc = getattr(mod, "point_cache", None)
             if pc is not None:
-                yield ("Cloth", pc)
+                yield ("Cloth", mod.name, pc)
         elif mod.type == "SOFT_BODY":
             pc = getattr(mod, "point_cache", None)
             if pc is not None:
-                yield ("Soft Body", pc)
+                yield ("Soft Body", mod.name, pc)
         elif mod.type == "DYNAMIC_PAINT":
             cs = getattr(mod, "canvas_settings", None)
             if cs is not None:
@@ -254,7 +261,7 @@ def _iter_object_point_caches(obj):
                         continue
                     pc = getattr(surf, "point_cache", None)
                     if pc is not None:
-                        yield ("Dynamic Paint", pc)
+                        yield ("Dynamic Paint", getattr(surf, "name", "") or mod.name, pc)
     if obj.type == "MESH":
         for psys in obj.particle_systems:
             st = psys.settings
@@ -263,11 +270,22 @@ def _iter_object_point_caches(obj):
             if st.type == "EMITTER":
                 pc = getattr(psys, "point_cache", None)
                 if pc is not None:
-                    yield ("Particles", pc)
+                    yield ("Particles", psys.name, pc)
             elif st.type == "HAIR" and bool(getattr(psys, "use_hair_dynamics", False)):
                 pc = getattr(psys, "point_cache", None)
                 if pc is not None:
-                    yield ("Hair Dynamics", pc)
+                    yield ("Hair Dynamics", psys.name, pc)
+
+
+def _iter_object_point_caches(obj):
+    """``(system_label, point_cache)`` for every point cache on ``obj``.
+
+    Thin wrapper over :func:`_iter_object_point_caches_named` that drops the
+    sub-name, for the callers (scanner, orphan check) that don't need it. Keeping
+    one underlying walk means those callers and the hash baseline can never drift.
+    """
+    for system, _sub, pc in _iter_object_point_caches_named(obj):
+        yield (system, pc)
 
 
 def owned_point_cache_identities(scenes):
@@ -283,6 +301,48 @@ def owned_point_cache_identities(scenes):
                 if ident is not None:
                     owned.add(ident)
     return owned
+
+
+PointCacheFiles = collections.namedtuple(
+    "PointCacheFiles", "identity system obj_name sub_name cache_dir files")
+# files: list of (frame:int, index:int, abspath:str) for frames present on disk.
+
+
+def iter_point_cache_files(scenes):
+    """Yield a :class:`PointCacheFiles` for every DISK-backed point cache across
+    ``scenes`` (cloth, soft body, particles, hair dynamics, DP vertex surfaces).
+
+    ``identity`` is the relocation-stable ``Scene::Owner::System::Sub`` string
+    (object/sim NAMES, which don't change when a project folder moves), matching
+    the settings-baseline identity scheme. ``files`` lists only the frames that
+    actually exist on disk, each as ``(frame, index, abspath)``, reconstructed
+    from the same ``<prefix>_<frame:06d>_<index:02d>.bphys`` scheme the scanner
+    reads — so the cache-hash baseline and the scanner never disagree about which
+    files a sim owns. Memory caches (no files) are skipped. Read-only."""
+    for scene in scenes:
+        for obj in scene.objects:
+            for system, sub, pc in _iter_object_point_caches_named(obj):
+                external = bool(getattr(pc, "use_external", False))
+                disk = bool(getattr(pc, "use_disk_cache", False)) or external
+                if not disk:
+                    continue  # memory cache: nothing on disk to hash
+                cache_dir, prefix, _raw = _point_cache_dir_and_prefix(
+                    obj, pc, external)
+                if not cache_dir:
+                    continue
+                index = int(getattr(pc, "index", 0) or 0)
+                cs = int(getattr(pc, "frame_start", scene.frame_start))
+                ce = int(getattr(pc, "frame_end", scene.frame_end))
+                step = int(getattr(pc, "frame_step", 1) or 1)
+                files = []
+                for fr in range(cs, ce + 1, step):
+                    p = os.path.join(
+                        cache_dir, "%s_%06d_%02d.bphys" % (prefix, fr, index))
+                    if os.path.isfile(p):
+                        files.append((fr, index, p))
+                identity = "%s::%s::%s::%s" % (scene.name, obj.name, system, sub)
+                yield PointCacheFiles(identity, system, obj.name, sub,
+                                      cache_dir, files)
 
 
 def find_orphan_point_caches(scene, entries=None):
@@ -556,8 +616,12 @@ _BPHYS_HEADER_LEN = 20
 # official Blender 4.2.9, 4.5.9, 5.0.1 and 5.2.3. Keyed by the human ``system``
 # label we assign in enumeration. We validate a frame's type ONLY against the
 # type of the simulation that owns the cache — never against a guessed universal
-# set — so an unforeseen-but-valid type can never be rejected: an unmapped owner
-# (``.get`` -> None) simply skips the type check.
+# set. The mapping below covers the sim kinds and Blender versions we have
+# actually baked and byte-inspected (4.2.9/4.5.9/5.0.1/5.2.3); it is not a proof
+# about every future Blender variant. An owner we don't map (``.get`` -> None)
+# simply skips the type check, so a sim kind we haven't characterised is not
+# rejected — but we only *claim* correctness for the owner types and versions
+# listed here, verified by the fixtures and real bakes.
 #
 # Hair Dynamics is DELIBERATELY omitted: a hair-dynamics cache is mixed — frame 0
 # is a particle frame (type 1) while the simulated frames are a cloth solve

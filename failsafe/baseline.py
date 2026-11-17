@@ -26,7 +26,8 @@ import time
 import bpy
 
 
-BASELINE_SCHEMA = 4   # 4: adds per-scene frame-rate / timing reference (#23)
+BASELINE_SCHEMA = 5   # 4: per-scene frame-rate/timing reference (#23).
+#                       5: adds an OPTIONAL per-frame cache-hash section (#27).
 
 # Reserved key inside a fingerprint dict listing any identities that collided
 # while capturing (so #26 can report "Couldn't verify" instead of silently
@@ -292,7 +293,7 @@ def default_baseline_path():
     return os.path.join(d, base + ".failsafe-baseline.json")
 
 
-def save_baseline(scene, path, overwrite=False):
+def save_baseline(scene, path, overwrite=False, cache_hashes=None):
     """Write the baseline JSON. User-initiated only. Returns the path written.
 
     This is the ONE action in the whole add-on that writes a file, and it writes
@@ -300,7 +301,12 @@ def save_baseline(scene, path, overwrite=False):
 
     It never writes automatically and never silently replaces an existing
     baseline: if ``path`` already exists and ``overwrite`` is False, it raises
-    ``FileExistsError`` so the caller (the operator) can ask the user first."""
+    ``FileExistsError`` so the caller (the operator) can ask the user first.
+
+    ``cache_hashes`` is the OPTIONAL per-frame cache-hash manifest from
+    ``cachehash.capture`` (#27). When None (the default), only the settings and
+    timing references are written, exactly as before — so a plain Save Baseline is
+    unchanged and a hash section is added only when the user asked for one."""
     if os.path.exists(path) and not overwrite:
         raise FileExistsError(
             "a baseline already exists at %s (pass overwrite=True to replace it)"
@@ -313,6 +319,8 @@ def save_baseline(scene, path, overwrite=False):
         "fingerprints": capture_fingerprints(scene),
         "scene_timing": capture_scene_timing(),
     }
+    if cache_hashes is not None:
+        data["cache_hashes"] = cache_hashes
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
     return path
@@ -333,14 +341,15 @@ def load_baseline(path):
     return data
 
 
-# Baseline schemas whose `fingerprints` block this build can still compare. The
-# 3 -> 4 bump only ADDED a per-scene `scene_timing` section; the settings
-# fingerprint format is unchanged, so a schema-3 baseline a customer saved before
-# upgrading is still valid for the settings-drift check (#26) and must not be
-# voided. A newer/unknown schema is still rejected. (#23's timing comparison
-# separately needs the scene_timing section, which only schema >= 4 writes, so an
-# older baseline simply reads there as 'tracking not set up', never a false PASS.)
-FINGERPRINT_COMPAT_SCHEMAS = (3, 4)
+# Baseline schemas whose `fingerprints` block this build can still compare. Each
+# bump only ADDED a section (4: `scene_timing`; 5: `cache_hashes`) and left the
+# settings fingerprint format unchanged, so a schema-3 or -4 baseline a customer
+# saved before upgrading stays valid for the settings-drift check (#26) and must
+# not be voided. A newer/unknown schema is still rejected. The per-section checks
+# each need their own section — #23 needs `scene_timing` (schema >= 4), #27 needs
+# `cache_hashes` (schema >= 5) — and simply read 'tracking not set up' when it is
+# absent from an older baseline, never a false PASS.
+FINGERPRINT_COMPAT_SCHEMAS = (3, 4, 5)
 
 
 def schema_ok(data):
