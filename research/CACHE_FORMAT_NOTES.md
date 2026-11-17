@@ -155,6 +155,35 @@ defect first (`tests/run_tests.py::hash_blocker_tests`):
     readable) instead of silently dropping it; the operator says "existing cache
     hashes kept". A foreign baseline's hashes are not grafted on.
 
+#### Re-review (2026-11-17, M3 round 2) — B4/B5 + wording, certified 4 versions
+
+The same reviewer accepted B1/B2/B3/M1/M2 and found two deeper ways a *requested*
+verification could look clean without fully verifying the reference:
+
+  - **B4 — a changed file masked incomplete verification.** `_sim_state` ranks
+    CHANGED above UNREADABLE/INCOMPLETE_REF, so a sim with a changed frame AND
+    never-fingerprinted (or unreadable) frames showed only a WARNING — and
+    `verdict_exit_code` rolls each check to its worst status, where WARNING
+    outranks UNKNOWN, so `--verify-hashes` could still exit 0. Fix: (1) #27 now
+    emits the masked uncovered/unreadable frames as their own "Couldn't verify"
+    lines in ADDITION to the change (both disclosed); (2) `cli.verify_floor` now
+    inspects the per-sim outcomes (`uncovered`/`unreadable`/unresolved states) and
+    floors the exit to *unverified* — it is the authority, precisely because the
+    per-check verdict collapse can hide an UNKNOWN under a WARNING.
+  - **B5 — a gone simulation was suppressed.** `c27_cache_hashes` returned `[]`
+    whenever the *current* scene had no applicable disk point cache — hiding
+    `S_GONE` references from the baseline (e.g. the user removed/disabled the last
+    baked sim). Fix: the early silent-return now only applies when NO verification
+    was requested; once a report exists, every sim outcome (incl. `S_GONE`) is
+    rendered, and `verify_floor` treats a gone/unresolved reference as not-clean.
+  - **Wording:** every hint that pointed at a nonexistent "Include cache hashes"
+    checkbox now points at the real **Save Cache Hash Baseline** button.
+  - **Responsiveness acceptance** strengthened to a multi-MB file hashed at the
+    real 1 MiB chunk with a mid-file cancel (the per-block + bounded-modal-budget
+    mechanism). A literal interactive multi-GB Esc drag isn't CI-automatable; the
+    per-block yield contract + the modal's per-block budget + the mid-file cancel
+    test together establish the property.
+
 ## Next deep-integrity increments (planned, not yet built)
 
 - **Cache-hash coverage for fluid + Geometry Nodes** — extend the #27 manifest to

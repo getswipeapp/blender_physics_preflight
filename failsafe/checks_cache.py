@@ -832,6 +832,12 @@ def _has_disk_point_caches(entries):
                for e in entries)
 
 
+# The real capture workflow: a dedicated button (CAPTURE mode of the cache-hash
+# operator), NOT a checkbox on Save Baseline. Keep every hint pointing at it.
+_CAP_HINT = ("Click 'Save Cache Hash Baseline' (the cache-file button next to "
+             "'Verify Cache Hashes') after a full bake.")
+
+
 @check(27, "Cache files unchanged since the baseline", GROUP_CACHE,
        name_warn="Cache files changed since the baseline",
        name_bad="Cache files changed since the baseline",
@@ -856,13 +862,14 @@ def c27_cache_hashes(ctx, mk):
     When no verification has been run, the check explains how to run it rather
     than implying anything was checked. Read-only throughout."""
     entries = _caches(ctx)
-    if not _has_disk_point_caches(entries):
-        return []   # nothing with on-disk frame files to hash: stay silent
-
     report = getattr(ctx, "hash_verify", None)
+    has_disk = _has_disk_point_caches(entries)
+
     if report is None:
-        # The quick scan deliberately skipped hashing. Say so plainly — never a
-        # PASS or a silent omission.
+        # No verification run. If there's nothing on disk to hash either, stay
+        # silent; otherwise say plainly that it hasn't run — never a silent PASS.
+        if not has_disk:
+            return []
         return [mk(Status.NA,
                    "Cache-file hash verification hasn't been run. It reads every "
                    "baked frame (which can be gigabytes), so it runs only when you "
@@ -880,20 +887,18 @@ def c27_cache_hashes(ctx, mk):
         return [mk(Status.NA,
                    "The file isn't saved, so there's no baseline to hash-verify "
                    "against.",
-                   hint="Save the .blend, bake, then Save Baseline with cache "
-                        "hashes.")]
+                   hint="Save the .blend and bake, then " + _CAP_HINT)]
     if st == ch.R_NO_BASELINE:
         return [mk(Status.NA,
                    "No baseline has been saved, so cache files can't be hash-"
                    "verified.",
-                   hint="Right after a good bake, click Save Baseline and tick "
-                        "'Include cache hashes'.")]
+                   hint=_CAP_HINT)]
     if st == ch.R_NO_SECTION:
         return [mk(Status.NA,
                    "The saved baseline has no cache-hash reference (it was saved "
-                   "without them), so files can't be hash-verified.",
-                   hint="Click Save Baseline again with 'Include cache hashes' "
-                        "ticked.")]
+                   "with a plain Settings Baseline), so files can't be hash-"
+                   "verified.",
+                   hint=_CAP_HINT)]
     if st == ch.R_UNREADABLE:
         return [mk(Status.UNKNOWN,
                    "The baseline file couldn't be read (%s), so cache files can't "
@@ -920,6 +925,31 @@ def c27_cache_hashes(ctx, mk):
                         "re-save the baseline.")]
 
     # st == R_OK: render the per-sim comparison.
+    #
+    # A sim can have more than one problem at once (e.g. a changed frame AND some
+    # required frames that were never fingerprinted). The headline state names the
+    # most actionable one, but we must ALSO disclose any masked unreadable /
+    # never-covered frames (review B4) — each as its own 'Couldn't verify' line, so
+    # a requested verification is never reported clean while coverage is partial.
+    def _supplements(sv, nice, obj):
+        extra = []
+        if sv.uncovered and sv.state != ch.S_INCOMPLETE_REF:
+            s = ", ".join(str(f) for f in sv.uncovered[:8])
+            m = ("" if len(sv.uncovered) <= 8
+                 else " …(+%d more)" % (len(sv.uncovered) - 8))
+            extra.append(mk(Status.UNKNOWN,
+                "%s: %d required cache frame(s) were never recorded in the "
+                "baseline — frame(s) %s%s — so their integrity can't be verified, "
+                "even though other frames were checked. Coverage is incomplete."
+                % (nice, len(sv.uncovered), s, m), object_name=obj, hint=_CAP_HINT))
+        if sv.unreadable and sv.state != ch.S_UNREADABLE:
+            extra.append(mk(Status.UNKNOWN,
+                "%s: %d cache file(s) couldn't be read, so those frames can't be "
+                "verified against the baseline." % (nice, len(sv.unreadable)),
+                object_name=obj,
+                hint="Check file permissions or re-bake, then verify again."))
+        return extra
+
     out = []
     unchanged = 0
     for sv in report.sims:
@@ -936,9 +966,9 @@ def c27_cache_hashes(ctx, mk):
         elif sv.state == ch.S_CHANGED:
             sample = ", ".join(str(f) for f in sv.changed[:8])
             more = "" if len(sv.changed) <= 8 else " …(+%d more)" % (len(sv.changed) - 8)
+            # unreadable / uncovered are disclosed as their own lines below; here
+            # only note baselined frames now missing (part of the change story).
             extra = ""
-            if sv.unreadable:
-                extra += " (%d more couldn't be read)" % len(sv.unreadable)
             if sv.missing:
                 extra += " (%d baselined frame(s) also missing)" % len(sv.missing)
             out.append(mk(Status.WARNING,
@@ -947,9 +977,10 @@ def c27_cache_hashes(ctx, mk):
                 "detects the change but can't tell a re-bake from damage."
                 % (nice, len(sv.changed), sample, more, extra),
                 object_name=obj,
-                hint="If you didn't re-bake since Save Baseline, treat the cache "
-                     "as suspect and re-bake. If you did, click Save Baseline "
-                     "again to update the reference."))
+                hint="If you didn't re-bake since you saved the baseline, treat "
+                     "the cache as suspect and re-bake. If you did, re-save the "
+                     "cache-hash baseline to update the reference."))
+            out.extend(_supplements(sv, nice, obj))
         elif sv.state == ch.S_DRIFT:
             out.append(mk(Status.WARNING,
                 "%s: the cache frame set differs from the baseline (%d baselined "
@@ -965,6 +996,7 @@ def c27_cache_hashes(ctx, mk):
                 "verified against the baseline." % (nice, len(sv.unreadable)),
                 object_name=obj,
                 hint="Check file permissions or re-bake, then verify again."))
+            out.extend(_supplements(sv, nice, obj))   # disclose any masked gaps
         elif sv.state == ch.S_INCOMPLETE_REF:
             sample = ", ".join(str(f) for f in sv.uncovered[:8])
             more = ("" if len(sv.uncovered) <= 8
@@ -979,25 +1011,24 @@ def c27_cache_hashes(ctx, mk):
                 "never fingerprinted." % (nice, len(sv.uncovered), sample, more,
                                           matched_note),
                 object_name=obj,
-                hint="Bake the full frame range, then click Save Baseline again "
-                     "with 'Include cache hashes' so every required frame is "
-                     "recorded."))
+                hint="Bake the full frame range, then " + _CAP_HINT))
         elif sv.state == ch.S_NO_REF:
             out.append(mk(Status.UNKNOWN,
                 "%s has baked files but no cache-hash reference in the baseline "
                 "(added or renamed after it was saved), so they can't be verified."
-                % nice, object_name=obj,
-                hint="Click Save Baseline again with 'Include cache hashes'."))
+                % nice, object_name=obj, hint=_CAP_HINT))
         elif sv.state == ch.S_EMPTY_REF:
             out.append(mk(Status.UNKNOWN,
                 "%s is in the baseline but no usable frame hashes were recorded "
                 "for it, so it can't be verified." % nice, object_name=obj,
-                hint="Click Save Baseline again after the bake finishes."))
+                hint="After a full bake, " + _CAP_HINT))
         elif sv.state == ch.S_GONE:
             out.append(mk(Status.UNKNOWN,
-                "%s is in the baseline but isn't in the scene now, so there's "
-                "nothing to verify for it." % nice,
-                hint="Update the baseline if you meant to remove it."))
+                "%s is in the baseline but its simulation is gone from the scene "
+                "now (removed, renamed, or its cache disabled), so this saved "
+                "reference is left unresolved — not a clean verification." % nice,
+                hint="If you meant to remove it, re-save the cache-hash baseline "
+                     "to drop the stale reference."))
 
     if not out:
         return []

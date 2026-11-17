@@ -2270,6 +2270,190 @@ def hash_blocker_tests():
     return out
 
 
+def hash_edge_tests():
+    """Regression tests for the M3 RE-REVIEW edge cases (B4, B5) and the
+    strengthened responsiveness/cancel acceptance — each reproduces the defect
+    first:
+
+      B4 — a changed-file WARNING must not hide never-fingerprinted (uncovered) or
+           unreadable frames; both must be disclosed AND the requested verify must
+           not exit 0.
+      B5 — a baselined simulation that is GONE from the scene must still be
+           reported (not suppressed because the scene now has no disk point cache)
+           and must not yield a clean verification exit.
+      M1+ — hashing is per-block at the REAL 1 MiB chunk on a multi-MB file, and a
+            mid-file cancel stops within a block (the mechanism the modal relies
+            on for large-file responsiveness + Escape)."""
+    import shutil
+    from failsafe import (cachehash as ch, baseline as bl, cache_inspect as ci,
+                          cli)
+    out = []
+    tmp = tempfile.mkdtemp(prefix="failsafe_edge_")
+
+    def _sv(report, system):
+        for s in report.sims:
+            if s.system == system:
+                return s
+        return None
+
+    def _c27(report):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        results = engine.run_all(bpy.context, hash_verify=report)
+        return [r for r in results if r.check_id == 27]
+
+    # ---- B4 (synthetic): a CHANGED sim that also has unreadable + uncovered ---
+    # frames must disclose BOTH, and the floor must be 'unverified'.
+    chg_unread = ch.HashReport(ch.R_OK, "", [ch.SimVerify(
+        "Scene::Cube::Cloth::Cloth", "Cloth", "Cube", ch.S_CHANGED,
+        [1, 2], [3], [], [5], [], [])], False)
+    r1 = _c27(chg_unread)
+    sts1 = {r.status for r in r1}
+    out.append(("B4 changed+unreadable discloses WARNING and UNKNOWN both",
+                Status.WARNING in sts1 and Status.UNKNOWN in sts1, sorted(sts1),
+                "WARNING+UNKNOWN"))
+    out.append(("B4 changed+unreadable floors requested verify to unverified",
+                cli.verify_floor(chg_unread, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(chg_unread, True), cli.EXIT_UNVERIFIED))
+
+    chg_uncov = ch.HashReport(ch.R_OK, "", [ch.SimVerify(
+        "Scene::Cube::Cloth::Cloth", "Cloth", "Cube", ch.S_CHANGED,
+        [1, 2], [3], [], [], [6], [6])], False)
+    r2 = _c27(chg_uncov)
+    sts2 = {r.status for r in r2}
+    umsg = " ".join(r.message for r in r2 if r.status == Status.UNKNOWN).lower()
+    out.append(("B4 changed+uncovered discloses WARNING and UNKNOWN both",
+                Status.WARNING in sts2 and Status.UNKNOWN in sts2, sorted(sts2),
+                "WARNING+UNKNOWN"))
+    out.append(("B4 changed+uncovered UNKNOWN names incomplete coverage",
+                "never recorded" in umsg or "incomplete" in umsg, True, True))
+    out.append(("B4 changed+uncovered floors requested verify to unverified",
+                cli.verify_floor(chg_uncov, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(chg_uncov, True), cli.EXIT_UNVERIFIED))
+    # verdict_exit_code rolls each check up to its WORST status, and WARNING
+    # outranks UNKNOWN — so the per-check verdict alone would MASK the coverage gap
+    # as exit 0. That collapse is exactly why verify_floor (which inspects the sim
+    # outcomes directly), not the plain verdict, is the authority for B4/B5.
+    out.append(("B4 plain verdict masks the gap -> verify_floor is the authority",
+                cli.verdict_exit_code(r2) == cli.EXIT_CLEAN,
+                cli.verdict_exit_code(r2), cli.EXIT_CLEAN))
+
+    # ---- B5 (synthetic): an S_GONE sim must be reported, not suppressed -------
+    gone = ch.HashReport(ch.R_OK, "", [ch.SimVerify(
+        "Scene::Cube::Cloth::Cloth", "Cloth", "Cube", ch.S_GONE,
+        [], [], [], [], [], [])], False)
+    rg = _c27(gone)                         # empty scene -> no disk caches at all
+    out.append(("B5 S_GONE reported even with no current disk caches",
+                len(rg) >= 1 and all(r.status == Status.UNKNOWN for r in rg),
+                [(r.status) for r in rg], ">=1 UNKNOWN"))
+    out.append(("B5 S_GONE floors requested verify to unverified",
+                cli.verify_floor(gone, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(gone, True), cli.EXIT_UNVERIFIED))
+
+    # ---- M1+ : per-block streaming on a real 1 MiB chunk, mid-file cancel -----
+    big = os.path.join(tmp, "big5.bin")
+    with open(big, "wb") as fh:
+        fh.write(b"\xa5" * (5 * ch.CHUNK + 123))     # ~5 real 1-MiB blocks
+    blocks = [e for e in ch.hash_file_iter(big) if e[0] == "progress"]
+    out.append(("M1+ multi-MB file streams in real 1 MiB blocks (>=5)",
+                len(blocks) >= 5, len(blocks), ">=5"))
+    hit = {"n": 0}
+
+    def _cancel_block2():
+        hit["n"] += 1
+        return hit["n"] >= 2
+    try:
+        list(ch.hash_file_iter(big, cancel=_cancel_block2))
+        raised = False
+    except ch.Cancelled:
+        raised = True
+    out.append(("M1+ mid-file cancel on a multi-MB file stops within a block",
+                raised and hit["n"] <= 3, (raised, hit["n"]), "early stop"))
+
+    # ---- B5 (end-to-end): disable ALL disk caches, keep the baseline ----------
+    src = os.path.join(tmp, "src")
+    os.makedirs(src, exist_ok=True)
+    fixtures._make_two_sim_blend(src, frame_end=6)
+    manifest = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=manifest)
+
+    dst = os.path.join(tmp, "p_gone")
+    shutil.copytree(src, dst)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(dst, "twosim.blend"))
+    for nm in ("ClothP", "SoftC"):
+        o = bpy.data.objects.get(nm)
+        if o is not None:
+            bpy.data.objects.remove(o, do_unlink=True)
+    rep = ch.build_report(list(bpy.data.scenes))
+    gone_states = [s.state for s in rep.sims]
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    r27 = [r for r in results if r.check_id == 27]
+    out.append(("B5 e2e: both baselined sims report S_GONE",
+                gone_states.count(ch.S_GONE) == 2, gone_states, "2 x S_GONE"))
+    out.append(("B5 e2e: #27 still surfaces the gone refs (not suppressed)",
+                len(r27) >= 2 and all(r.status == Status.UNKNOWN for r in r27),
+                [(r.status) for r in r27], ">=2 UNKNOWN"))
+    out.append(("B5 e2e: #27 worst is UNKNOWN, never PASS",
+                worst_for_check(results, 27) == Status.UNKNOWN
+                and Status.PASS not in statuses_for_check(results, 27),
+                worst_for_check(results, 27), Status.UNKNOWN))
+    code_v, _ = cli.run(argv=["--verify-hashes", "--text"])
+    out.append(("B5 e2e: requested verify with gone refs -> nonzero exit",
+                code_v == cli.EXIT_UNVERIFIED, code_v, cli.EXIT_UNVERIFIED))
+
+    # ---- B4 (end-to-end): restore a frame that was never baselined + change ---
+    # another -> CHANGED headline must still disclose the uncovered frame and exit
+    # nonzero (pre-fix this exited 0 because only a WARNING was reported).
+    dst = os.path.join(tmp, "p_b4")
+    shutil.copytree(src, dst)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(dst, "twosim.blend"))
+    cdir = os.path.join(dst, "blendcache_twosim")
+    cloth_pre = fixtures.prefix_of("ClothP")
+    cfiles = sorted(os.path.join(cdir, f) for f in os.listdir(cdir)
+                    if f.startswith(cloth_pre) and f.endswith(".bphys"))
+    top = cfiles[-1]
+    with open(top, "rb") as fh:
+        top_bytes = fh.read()
+    os.remove(top)                                   # baseline won't cover it
+    partial = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=partial)
+    with open(top, "wb") as fh:                       # restore the uncovered frame
+        fh.write(top_bytes)
+    mid = cfiles[len(cfiles) // 2]                    # change a DIFFERENT frame
+    with open(mid, "r+b") as fh:
+        fh.seek(0, os.SEEK_END)
+        sz = fh.tell()
+        o = 30 if sz > 31 else sz - 1
+        fh.seek(o)
+        b = fh.read(1)
+        fh.seek(o)
+        fh.write(bytes([b[0] ^ 0xFF]))
+    rep = ch.build_report(list(bpy.data.scenes))
+    cs = _sv(rep, "Cloth")
+    out.append(("B4 e2e: cloth headline is CHANGED with uncovered frames present",
+                cs is not None and cs.state == ch.S_CHANGED and bool(cs.uncovered),
+                (getattr(cs, "state", None), getattr(cs, "uncovered", None)),
+                "CHANGED + uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    cloth27 = {r.status for r in results
+               if r.check_id == 27 and r.object_name == "ClothP"}
+    out.append(("B4 e2e: cloth discloses BOTH WARNING (change) and UNKNOWN (gap)",
+                Status.WARNING in cloth27 and Status.UNKNOWN in cloth27,
+                sorted(cloth27), "WARNING+UNKNOWN"))
+    code_b4, _ = cli.run(argv=["--verify-hashes", "--text"])
+    out.append(("B4 e2e: requested verify -> nonzero despite the WARNING change",
+                code_b4 == cli.EXIT_UNVERIFIED, code_b4, cli.EXIT_UNVERIFIED))
+
+    # ---- wording: no finding or hint mentions the nonexistent checkbox --------
+    from failsafe import help_text
+    allhint = " ".join(h for h in help_text.HELP.values())
+    out.append(("wording: HELP has no 'Include cache hashes' checkbox",
+                "Include cache hashes" not in allhint, True, True))
+
+    return out
+
+
 def couldnt_verify_tests():
     """Every 'Couldn't verify' a user sees must carry a plain reason (message) AND
     a next action (hint). And the contract must hold: the displayed word is
@@ -2435,6 +2619,7 @@ def main():
                                    + cache_coverage_tests()
                                    + cache_hash_tests()
                                    + hash_blocker_tests()
+                                   + hash_edge_tests()
                                    + couldnt_verify_tests()):
         if ok:
             passed += 1
@@ -2455,7 +2640,7 @@ def main():
              + len(batch_isolation_tests()) + len(review_blocker_tests())
              + len(integrity_header_tests()) + len(cache_coverage_tests())
              + len(cache_hash_tests()) + len(hash_blocker_tests())
-             + len(couldnt_verify_tests()))
+             + len(hash_edge_tests()) + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

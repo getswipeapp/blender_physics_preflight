@@ -169,17 +169,32 @@ def verify_floor(report, requested):
     """The minimum exit code the CLI must honour after a cache-hash verification.
 
     When the user asked to verify (``--verify-hashes``) but the verification did
-    not actually complete a per-sim comparison — no baseline, unreadable/foreign/
-    wrong-schema sidecar, an internal error, or a cancel — the scan must NOT report
-    a clean exit 0 just because #27 had nothing to compare (review B1). Returns
-    EXIT_UNVERIFIED as a floor in those cases, else EXIT_CLEAN (verification ran;
-    its findings flow through #27 and the normal verdict). ``requested`` False (or
-    no report) imposes no floor."""
-    from . import cachehash
+    not fully resolve every saved reference, the scan must NOT report a clean exit
+    0 (reviews B1/B4/B5). That covers two layers:
+
+      * the report never reached a per-sim comparison — no baseline, unreadable /
+        foreign / wrong-schema sidecar, an internal error, or a cancel (B1); and
+      * it DID compare (``R_OK``) but some simulation outcome is unresolved — a
+        reference whose frames couldn't be read, required frames that were never
+        fingerprinted, a sim with no / empty reference, or a baselined sim that is
+        gone from the scene (B5). A changed-file WARNING must never let one of
+        these slip out as exit 0 (B4).
+
+    Returns EXIT_UNVERIFIED as a floor in those cases, else EXIT_CLEAN (every
+    reference resolved; a detected change is a WARNING, not an error). ``requested``
+    False (or no report) imposes no floor."""
+    from . import cachehash as ch
     if not requested or report is None:
         return EXIT_CLEAN
-    if report.cancelled or report.state != cachehash.R_OK:
+    if report.cancelled or report.state != ch.R_OK:
         return EXIT_UNVERIFIED
+    unresolved = {ch.S_UNREADABLE, ch.S_INCOMPLETE_REF, ch.S_NO_REF,
+                  ch.S_EMPTY_REF, ch.S_GONE}
+    for sv in report.sims:
+        # sv.uncovered / sv.unreadable catch frames masked under a CHANGED (or
+        # other) headline state; the state set catches whole-sim gaps.
+        if sv.state in unresolved or sv.uncovered or sv.unreadable:
+            return EXIT_UNVERIFIED
     return EXIT_CLEAN
 
 
