@@ -184,6 +184,34 @@ verification could look clean without fully verifying the reference:
     per-block yield contract + the modal's per-block budget + the mid-file cancel
     test together establish the property.
 
+#### Re-review (2026-11-18, M3 round 3) — B6/B7, certified 4 versions
+
+Third pass accepted B4/B5/wording and found two more false-clean paths:
+
+  - **B6 — vanished baselined files didn't block the CLI.** `verify_sims` records
+    baselined frames now gone from disk in `sv.missing`, but `cli.verify_floor`
+    only checked `uncovered`/`unreadable` and didn't treat `S_DRIFT` as unresolved
+    — so shortening a cache range (fingerprint 1–250, keep 1–200) left 50 saved
+    references unverifiable yet `--verify-hashes` exited 0. Fix: `verify_floor` now
+    floors on `sv.missing` and `S_DRIFT` too, and #27 discloses the vanished frames
+    as their own "Couldn't verify" line (for CHANGED+missing) or in the DRIFT
+    message. GUI and CLI agree.
+  - **B7 — an invalid saved digest was mistaken for a change.** The comparison did
+    `res[0] == meta["sha256"]` without checking the stored value is a real digest,
+    so `{"sha256": null}` (or wrong-length / non-hex / wrong-algorithm) read as a
+    *changed* frame → a false WARNING that could exit 0. Fix: a new `_valid_digest`
+    gate routes unusable saved digests into a dedicated `bad_ref` bucket →
+    `S_BAD_REF` (UNKNOWN, "the saved reference itself is broken", never a changed
+    WARNING); a wrong top-level `algo` is gated as `R_ALGO`. `verify_floor` floors
+    on both. Legitimate re-bake WARNINGs (valid digest, different bytes) are
+    preserved and still exit 0 (non-strict).
+
+Note on the exit model: `verdict_exit_code` rolls each check to its worst status
+and WARNING outranks UNKNOWN, so a mixed CHANGED+gap check can read as WARNING —
+which is exactly why `cli.verify_floor`, inspecting the per-sim outcomes directly,
+is the exit authority for a requested verification (B4/B6/B7), not the plain
+verdict.
+
 ## Next deep-integrity increments (planned, not yet built)
 
 - **Cache-hash coverage for fluid + Geometry Nodes** — extend the #27 manifest to

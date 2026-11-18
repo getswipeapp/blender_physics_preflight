@@ -915,6 +915,13 @@ def c27_cache_hashes(ctx, mk):
                    "The baseline was saved for a different file ('%s'), so its "
                    "cache hashes don't describe this scene." % report.detail,
                    hint="Click Save Baseline to record a baseline for this file.")]
+    if st == ch.R_ALGO:
+        return [mk(Status.UNKNOWN,
+                   "The baseline's cache hashes use a different algorithm (%s) "
+                   "than this build verifies with, so they can't be compared."
+                   % report.detail,
+                   hint="Re-save the cache-hash baseline with this version of "
+                        "Failsafe.")]
     if st == ch.R_ERROR:
         # The verification was requested but couldn't actually run (e.g. an
         # internal error building the comparison). Never silently 'not run' / PASS.
@@ -931,23 +938,40 @@ def c27_cache_hashes(ctx, mk):
     # most actionable one, but we must ALSO disclose any masked unreadable /
     # never-covered frames (review B4) — each as its own 'Couldn't verify' line, so
     # a requested verification is never reported clean while coverage is partial.
+    def _sample(nums):
+        s = ", ".join(str(f) for f in nums[:8])
+        return s + ("" if len(nums) <= 8 else " …(+%d more)" % (len(nums) - 8))
+
     def _supplements(sv, nice, obj):
         extra = []
         if sv.uncovered and sv.state != ch.S_INCOMPLETE_REF:
-            s = ", ".join(str(f) for f in sv.uncovered[:8])
-            m = ("" if len(sv.uncovered) <= 8
-                 else " …(+%d more)" % (len(sv.uncovered) - 8))
             extra.append(mk(Status.UNKNOWN,
                 "%s: %d required cache frame(s) were never recorded in the "
-                "baseline — frame(s) %s%s — so their integrity can't be verified, "
+                "baseline — frame(s) %s — so their integrity can't be verified, "
                 "even though other frames were checked. Coverage is incomplete."
-                % (nice, len(sv.uncovered), s, m), object_name=obj, hint=_CAP_HINT))
+                % (nice, len(sv.uncovered), _sample(sv.uncovered)),
+                object_name=obj, hint=_CAP_HINT))
         if sv.unreadable and sv.state != ch.S_UNREADABLE:
             extra.append(mk(Status.UNKNOWN,
                 "%s: %d cache file(s) couldn't be read, so those frames can't be "
                 "verified against the baseline." % (nice, len(sv.unreadable)),
                 object_name=obj,
                 hint="Check file permissions or re-bake, then verify again."))
+        if sv.bad_ref and sv.state != ch.S_BAD_REF:
+            extra.append(mk(Status.UNKNOWN,
+                "%s: %d baselined frame(s) have an unusable recorded hash, so they "
+                "can't be verified (the baseline may be corrupted) — frame(s) %s."
+                % (nice, len(sv.bad_ref), _sample(sv.bad_ref)),
+                object_name=obj,
+                hint="Re-save the cache-hash baseline to record valid hashes."))
+        if sv.missing and sv.state != ch.S_DRIFT:
+            extra.append(mk(Status.UNKNOWN,
+                "%s: %d baselined cache frame(s) are no longer on disk — frame(s) "
+                "%s — so those saved references can't be verified (the range was "
+                "shortened, or files were deleted)."
+                % (nice, len(sv.missing), _sample(sv.missing)),
+                object_name=obj,
+                hint="If this is intentional, re-save the cache-hash baseline."))
         return extra
 
     out = []
@@ -966,16 +990,13 @@ def c27_cache_hashes(ctx, mk):
         elif sv.state == ch.S_CHANGED:
             sample = ", ".join(str(f) for f in sv.changed[:8])
             more = "" if len(sv.changed) <= 8 else " …(+%d more)" % (len(sv.changed) - 8)
-            # unreadable / uncovered are disclosed as their own lines below; here
-            # only note baselined frames now missing (part of the change story).
-            extra = ""
-            if sv.missing:
-                extra += " (%d baselined frame(s) also missing)" % len(sv.missing)
+            # unreadable / uncovered / bad-ref / missing are each disclosed as their
+            # own 'Couldn't verify' line below (review B4/B6), never buried here.
             out.append(mk(Status.WARNING,
-                "%s: %d cache file(s) changed since the baseline — frame(s) %s%s.%s "
+                "%s: %d cache file(s) changed since the baseline — frame(s) %s%s. "
                 "This is what you'd expect after a deliberate re-bake; Failsafe "
                 "detects the change but can't tell a re-bake from damage."
-                % (nice, len(sv.changed), sample, more, extra),
+                % (nice, len(sv.changed), sample, more),
                 object_name=obj,
                 hint="If you didn't re-bake since you saved the baseline, treat "
                      "the cache as suspect and re-bake. If you did, re-save the "
@@ -988,8 +1009,9 @@ def c27_cache_hashes(ctx, mk):
                 "are byte-for-byte unchanged. Usually a re-bake over a different "
                 "range." % (nice, len(sv.missing), len(sv.new)),
                 object_name=obj,
-                hint="If this range is intentional, click Save Baseline again to "
-                     "update the reference."))
+                hint="If this range is intentional, re-save the cache-hash "
+                     "baseline to update the reference."))
+            out.extend(_supplements(sv, nice, obj))
         elif sv.state == ch.S_UNREADABLE:
             out.append(mk(Status.UNKNOWN,
                 "%s: %d cache file(s) couldn't be read, so this sim can't be "
@@ -997,6 +1019,16 @@ def c27_cache_hashes(ctx, mk):
                 object_name=obj,
                 hint="Check file permissions or re-bake, then verify again."))
             out.extend(_supplements(sv, nice, obj))   # disclose any masked gaps
+        elif sv.state == ch.S_BAD_REF:
+            out.append(mk(Status.UNKNOWN,
+                "%s: %d baselined frame(s) have an unusable recorded hash in the "
+                "baseline (missing, malformed, or the wrong length), so they can't "
+                "be verified. This is NOT a changed-file result — the saved "
+                "reference itself is broken, likely a corrupted or hand-edited "
+                "baseline." % (nice, len(sv.bad_ref)),
+                object_name=obj,
+                hint="Re-save the cache-hash baseline to record valid hashes."))
+            out.extend(_supplements(sv, nice, obj))
         elif sv.state == ch.S_INCOMPLETE_REF:
             sample = ", ".join(str(f) for f in sv.uncovered[:8])
             more = ("" if len(sv.uncovered) <= 8

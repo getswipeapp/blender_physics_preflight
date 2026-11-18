@@ -188,12 +188,15 @@ def verify_floor(report, requested):
         return EXIT_CLEAN
     if report.cancelled or report.state != ch.R_OK:
         return EXIT_UNVERIFIED
-    unresolved = {ch.S_UNREADABLE, ch.S_INCOMPLETE_REF, ch.S_NO_REF,
-                  ch.S_EMPTY_REF, ch.S_GONE}
+    unresolved = {ch.S_UNREADABLE, ch.S_BAD_REF, ch.S_INCOMPLETE_REF,
+                  ch.S_NO_REF, ch.S_EMPTY_REF, ch.S_GONE, ch.S_DRIFT}
     for sv in report.sims:
-        # sv.uncovered / sv.unreadable catch frames masked under a CHANGED (or
-        # other) headline state; the state set catches whole-sim gaps.
-        if sv.state in unresolved or sv.uncovered or sv.unreadable:
+        # The per-frame lists catch gaps masked under a CHANGED (or other) headline
+        # state; the state set catches whole-sim gaps. 'missing' = baselined frames
+        # now gone (B6); 'bad_ref' = unusable saved digests (B7). A requested verify
+        # must never exit clean while any saved reference is unresolved.
+        if (sv.state in unresolved or sv.uncovered or sv.unreadable
+                or sv.missing or sv.bad_ref):
             return EXIT_UNVERIFIED
     return EXIT_CLEAN
 

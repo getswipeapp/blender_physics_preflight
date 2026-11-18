@@ -33,6 +33,7 @@ volatile rather than trusted.
 import collections
 import hashlib
 import os
+import re
 
 from . import baseline as bl
 
@@ -231,31 +232,45 @@ def capture_total_files(scenes):
 # Per-sim verification outcome. Lists hold frame NUMBERS (ints) for messaging.
 SimVerify = collections.namedtuple(
     "SimVerify", "identity system obj_name state matched changed missing "
-                 "unreadable new uncovered")
+                 "unreadable new uncovered bad_ref")
 
 # sim states
 S_UNCHANGED = "UNCHANGED"     # every REQUIRED frame baselined, present and identical
 S_CHANGED = "CHANGED"         # at least one frame's bytes differ from the baseline
 S_DRIFT = "DRIFT"             # frame set differs (missing/new) but none changed
 S_UNREADABLE = "UNREADABLE"   # some frames couldn't be read -> can't verify
+S_BAD_REF = "BAD_REF"         # the baseline's saved digest is unusable (B7)
 S_INCOMPLETE_REF = "INCOMPLETE_REF"  # some REQUIRED frames were never baselined (B3)
 S_NO_REF = "NO_REF"           # sim present now, but not in the baseline hashes
 S_EMPTY_REF = "EMPTY_REF"     # baseline recorded this sim but with no usable frame
 S_GONE = "GONE"               # sim in the baseline, not in the scene now
+
+# A valid stored digest is the exact lowercase-hex string hashlib produces for our
+# algorithm — nothing else. A missing / null / short / non-hex / wrong-length value
+# is an UNUSABLE reference, never silently treated as a 'changed' frame (review B7).
+_HEXLEN = len(hashlib.new(ALGO).hexdigest())
+_HEX_RE = re.compile(r"\A[0-9a-f]+\Z")
+
+
+def _valid_digest(d):
+    return isinstance(d, str) and len(d) == _HEXLEN and bool(_HEX_RE.match(d))
 
 
 def _nice(identity):
     return identity.replace("::", " — ")
 
 
-def _sim_state(matched, changed, missing, unreadable, new, uncovered):
+def _sim_state(matched, changed, missing, unreadable, new, uncovered, bad_ref):
     # A confirmed byte change is the most actionable fact, so it leads even when
-    # some other frames couldn't be read. Nothing here maps an unreadable / missing
-    # / unbaselined reference to a PASS — the cardinal 'no false PASS' rule.
+    # some other frames couldn't be read. Nothing here maps an unreadable / bad /
+    # missing / unbaselined reference to a PASS — the cardinal 'no false PASS' rule.
     if changed:
         return S_CHANGED
     if unreadable:
         return S_UNREADABLE
+    # An unusable saved digest is a broken reference, not a change (review B7).
+    if bad_ref:
+        return S_BAD_REF
     # A baseline that never covered every required frame cannot certify the sim as
     # unchanged, even if every frame it DID record still matches (review B3). This
     # must beat S_UNCHANGED so an incomplete baseline never reads as a clean PASS.
@@ -307,10 +322,10 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
             cur[_relkey(p, blend_dir)] = (fr, p)
         if saved is None:
             out.append(SimVerify(rec.identity, rec.system, rec.obj_name,
-                                 S_NO_REF, [], [], [], [], [], []))
+                                 S_NO_REF, [], [], [], [], [], [], []))
             continue
         saved_frames = saved.get("frames", {}) if isinstance(saved, dict) else {}
-        matched, changed, missing, unreadable, new = [], [], [], [], []
+        matched, changed, missing, unreadable, new, bad_ref = [], [], [], [], [], []
         for key, meta in saved_frames.items():
             if key not in cur:
                 # A baselined frame file is gone now (range shortened, deleted,
@@ -320,6 +335,16 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
             if cancel is not None and cancel():
                 raise Cancelled()
             fr, p = cur[key]
+            saved_digest = meta.get("sha256") if isinstance(meta, dict) else None
+            # An unusable saved digest (missing / null / wrong length / non-hex)
+            # can't be compared at all — record it as a broken reference, NOT as a
+            # 'changed' frame, which would be a false WARNING (review B7). The file
+            # is still hashed (cheap, cancellable) so the pass stays uniform.
+            if not _valid_digest(saved_digest):
+                bad_ref.append(fr)
+                done += 1
+                yield ("file", done)
+                continue
             # Per-block iteration so a huge frame file stays cancellable and the
             # GUI redraws between blocks (M1).
             res = None
@@ -330,7 +355,7 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
                     res = ev[1]
             if res is None or res is VOLATILE:
                 unreadable.append(fr)
-            elif res[0] == (meta.get("sha256") if isinstance(meta, dict) else None):
+            elif res[0] == saved_digest:
                 matched.append(fr)
             else:
                 changed.append(fr)
@@ -345,11 +370,12 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
         # (review B3). Frames the baseline DID record are 'covered'.
         baselined = set(_frames_of(saved_frames.keys()))
         uncovered = sorted(f for f in (rec.required or []) if f not in baselined)
-        state = _sim_state(matched, changed, missing, unreadable, new, uncovered)
+        state = _sim_state(matched, changed, missing, unreadable, new, uncovered,
+                           bad_ref)
         out.append(SimVerify(rec.identity, rec.system, rec.obj_name, state,
                              sorted(matched), sorted(changed),
                              sorted(_frames_of(missing)), sorted(unreadable),
-                             sorted(new), uncovered))
+                             sorted(new), uncovered, sorted(bad_ref)))
     # Sims the baseline knew about but which aren't in the scene now.
     for ident, saved in saved_sims.items():
         if ident in seen:
@@ -357,7 +383,7 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
         sysname = saved.get("system", "") if isinstance(saved, dict) else ""
         objname = saved.get("obj_name", "") if isinstance(saved, dict) else ""
         out.append(SimVerify(ident, sysname, objname, S_GONE,
-                             [], [], [], [], [], []))
+                             [], [], [], [], [], [], []))
     yield ("result", out)
 
 
@@ -402,6 +428,7 @@ R_UNREADABLE = "unreadable"    # sidecar exists but won't parse
 R_SCHEMA = "schema"            # sidecar from a different Failsafe schema
 R_FOREIGN = "foreign"          # sidecar was saved for a different .blend
 R_NO_SECTION = "no_section"    # sidecar has no cache-hash section (older save)
+R_ALGO = "algo"                # cache-hash section uses a different hash algorithm (B7)
 R_ERROR = "error"              # verification itself failed to run (B1)
 R_OK = "ok"
 
@@ -409,7 +436,7 @@ R_OK = "ok"
 # comparison. When the user asked to verify (CLI --verify-hashes), reaching any of
 # these must NOT be reported as a clean exit 0 — see cli.verify_floor (B1).
 INCOMPLETE_STATES = frozenset({R_UNSAVED, R_NO_BASELINE, R_NO_SECTION,
-                               R_UNREADABLE, R_SCHEMA, R_FOREIGN, R_ERROR})
+                               R_UNREADABLE, R_SCHEMA, R_FOREIGN, R_ALGO, R_ERROR})
 
 
 def _resolve_manifest():
@@ -436,6 +463,12 @@ def _resolve_manifest():
     manifest = data.get("cache_hashes")
     if not isinstance(manifest, dict) or not manifest.get("sims"):
         return HashReport(R_NO_SECTION, "", [], False), None
+    # The stored hashes must be the algorithm this build compares with; a baseline
+    # that declares a different one can't be compared frame-for-frame, so gate it as
+    # 'Couldn't verify' rather than flooding every frame with false mismatches (B7).
+    algo = manifest.get("algo")
+    if algo != ALGO:
+        return HashReport(R_ALGO, str(algo), [], False), None
     return None, manifest
 
 

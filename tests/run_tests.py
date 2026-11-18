@@ -2305,7 +2305,7 @@ def hash_edge_tests():
     # frames must disclose BOTH, and the floor must be 'unverified'.
     chg_unread = ch.HashReport(ch.R_OK, "", [ch.SimVerify(
         "Scene::Cube::Cloth::Cloth", "Cloth", "Cube", ch.S_CHANGED,
-        [1, 2], [3], [], [5], [], [])], False)
+        [1, 2], [3], [], [5], [], [], [])], False)
     r1 = _c27(chg_unread)
     sts1 = {r.status for r in r1}
     out.append(("B4 changed+unreadable discloses WARNING and UNKNOWN both",
@@ -2317,7 +2317,7 @@ def hash_edge_tests():
 
     chg_uncov = ch.HashReport(ch.R_OK, "", [ch.SimVerify(
         "Scene::Cube::Cloth::Cloth", "Cloth", "Cube", ch.S_CHANGED,
-        [1, 2], [3], [], [], [6], [6])], False)
+        [1, 2], [3], [], [], [6], [6], [])], False)
     r2 = _c27(chg_uncov)
     sts2 = {r.status for r in r2}
     umsg = " ".join(r.message for r in r2 if r.status == Status.UNKNOWN).lower()
@@ -2340,7 +2340,7 @@ def hash_edge_tests():
     # ---- B5 (synthetic): an S_GONE sim must be reported, not suppressed -------
     gone = ch.HashReport(ch.R_OK, "", [ch.SimVerify(
         "Scene::Cube::Cloth::Cloth", "Cloth", "Cube", ch.S_GONE,
-        [], [], [], [], [], [])], False)
+        [], [], [], [], [], [], [])], False)
     rg = _c27(gone)                         # empty scene -> no disk caches at all
     out.append(("B5 S_GONE reported even with no current disk caches",
                 len(rg) >= 1 and all(r.status == Status.UNKNOWN for r in rg),
@@ -2450,6 +2450,170 @@ def hash_edge_tests():
     allhint = " ".join(h for h in help_text.HELP.values())
     out.append(("wording: HELP has no 'Include cache hashes' checkbox",
                 "Include cache hashes" not in allhint, True, True))
+
+    return out
+
+
+def hash_edge2_tests():
+    """Regression tests for the third-round review edge cases (B6, B7) — each
+    reproduces the defect first:
+
+      B6 — previously fingerprinted files that disappear (sv.missing / S_DRIFT) must
+           not let an explicitly requested verification exit 0; the vanished saved
+           references must be disclosed.
+      B7 — an invalid saved digest (missing / null / wrong length / non-hex) or a
+           wrong declared algorithm must be rejected as an UNUSABLE REFERENCE
+           (UNKNOWN / nonzero), never mistaken for a changed-file WARNING — while a
+           legitimate re-bake WARNING is preserved."""
+    import json as _json
+    import shutil
+    from failsafe import (cachehash as ch, baseline as bl, cache_inspect as ci,
+                          cli)
+    out = []
+    tmp = tempfile.mkdtemp(prefix="failsafe_edge2_")
+
+    def _sv(report, system):
+        for s in report.sims:
+            if s.system == system:
+                return s
+        return None
+
+    def _c27(report):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        results = engine.run_all(bpy.context, hash_verify=report)
+        return [r for r in results if r.check_id == 27]
+
+    def _mkreport(state, **kw):
+        f = dict(matched=[], changed=[], missing=[], unreadable=[], new=[],
+                 uncovered=[], bad_ref=[])
+        f.update(kw)
+        sv = ch.SimVerify("S::C::Cloth::Cloth", "Cloth", "C", state,
+                          f["matched"], f["changed"], f["missing"], f["unreadable"],
+                          f["new"], f["uncovered"], f["bad_ref"])
+        return ch.HashReport(ch.R_OK, "", [sv], False)
+
+    # ---- B7 unit: _valid_digest rejects every unusable value ------------------
+    good = "a" * 64
+    for d, ok in [(good, True), (None, False), ("", False), ("a" * 63, False),
+                  ("a" * 65, False), ("A" * 64, False), ("z" * 64, False),
+                  (123, False), (["a" * 64], False)]:
+        out.append(("B7 _valid_digest(%.8r)->%s" % (d, ok),
+                    ch._valid_digest(d) is ok, ch._valid_digest(d), ok))
+
+    # ---- B6/B7 synthetic: floor + disclosure ---------------------------------
+    # a legitimate re-bake (pure change, valid digests) stays CLEAN — not over-floored
+    out.append(("B7 pure change (re-bake) stays clean (not over-floored)",
+                cli.verify_floor(_mkreport(ch.S_CHANGED, matched=[1, 2],
+                                           changed=[3]), True) == cli.EXIT_CLEAN,
+                cli.verify_floor(_mkreport(ch.S_CHANGED, changed=[3]), True),
+                cli.EXIT_CLEAN))
+
+    # B6: a sim whose only issue is vanished baselined files (DRIFT) floors + discloses
+    drift = _mkreport(ch.S_DRIFT, matched=[1, 2, 3, 4], missing=[5, 6])
+    out.append(("B6 pure drift (missing files) floors requested verify",
+                cli.verify_floor(drift, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(drift, True), cli.EXIT_UNVERIFIED))
+    dmsg = " ".join(r.message for r in _c27(drift)).lower()
+    out.append(("B6 drift discloses the missing baselined frames",
+                "missing" in dmsg, True, True))
+
+    # B6: CHANGED + missing must disclose BOTH and floor
+    chg_miss = _mkreport(ch.S_CHANGED, matched=[1], changed=[3], missing=[5, 6])
+    sts = {r.status for r in _c27(chg_miss)}
+    out.append(("B6 changed+missing discloses WARNING and UNKNOWN both",
+                Status.WARNING in sts and Status.UNKNOWN in sts, sorted(sts),
+                "both"))
+    out.append(("B6 changed+missing floors requested verify",
+                cli.verify_floor(chg_miss, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(chg_miss, True), cli.EXIT_UNVERIFIED))
+
+    # B7: a bad saved digest is UNKNOWN (unusable ref), never a changed WARNING
+    badr = _mkreport(ch.S_BAD_REF, matched=[1, 2], bad_ref=[3])
+    stsb = {r.status for r in _c27(badr)}
+    out.append(("B7 bad_ref renders UNKNOWN, not a changed WARNING",
+                Status.UNKNOWN in stsb and Status.WARNING not in stsb,
+                sorted(stsb), "UNKNOWN only"))
+    out.append(("B7 bad_ref floors requested verify",
+                cli.verify_floor(badr, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(badr, True), cli.EXIT_UNVERIFIED))
+    # B7: CHANGED + bad_ref discloses both
+    chg_bad = _mkreport(ch.S_CHANGED, matched=[1], changed=[2], bad_ref=[5])
+    stscb = {r.status for r in _c27(chg_bad)}
+    out.append(("B7 changed+bad_ref discloses WARNING and UNKNOWN both",
+                Status.WARNING in stscb and Status.UNKNOWN in stscb,
+                sorted(stscb), "both"))
+
+    # ---- e2e on a real baked project, mutating the baseline JSON -------------
+    src = os.path.join(tmp, "src")
+    os.makedirs(src, exist_ok=True)
+    fixtures._make_two_sim_blend(src, frame_end=6)
+    manifest = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    cloth_ident = next(k for k, v in manifest["sims"].items()
+                       if v.get("system") == "Cloth")
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=manifest)
+    cloth_pre = fixtures.prefix_of("ClothP")
+
+    def _open_mutate(tag, mutate):
+        dst = os.path.join(tmp, tag)
+        shutil.copytree(src, dst)
+        bpy.ops.wm.open_mainfile(filepath=os.path.join(dst, "twosim.blend"))
+        p = bl.default_baseline_path()
+        data = _json.load(open(p))
+        mutate(data["cache_hashes"])
+        _json.dump(data, open(p, "w"))
+        return dst
+
+    # B6 e2e: a baselined frame with no file on disk -> DRIFT(missing) -> floor.
+    # (pre-fix: DRIFT is only a WARNING, so --verify-hashes exited 0.)
+    def _phantom(sec):
+        rk = "blendcache_twosim/%s_%06d_%02d.bphys" % (cloth_pre, 99, 0)
+        sec["sims"][cloth_ident]["frames"][rk] = {"sha256": "a" * 64, "size": 10}
+    _open_mutate("b6_phantom", _phantom)
+    rep = ch.build_report(list(bpy.data.scenes))
+    cs = _sv(rep, "Cloth")
+    out.append(("B6 e2e: a vanished baselined file -> cloth DRIFT with missing",
+                cs is not None and cs.state == ch.S_DRIFT and bool(cs.missing),
+                (getattr(cs, "state", None), getattr(cs, "missing", None)),
+                "DRIFT+missing"))
+    code6, _ = cli.run(argv=["--verify-hashes", "--text"])
+    out.append(("B6 e2e: requested verify with a vanished ref -> nonzero exit",
+                code6 == cli.EXIT_UNVERIFIED, code6, cli.EXIT_UNVERIFIED))
+
+    # B7 e2e: a corrupted saved digest -> BAD_REF -> UNKNOWN/nonzero, not 'changed'.
+    for tag, badval in [("null", None), ("short", "abc"),
+                        ("nonhex", "z" * 64), ("len63", "a" * 63)]:
+        def _corrupt(sec, bv=badval):
+            frames = sec["sims"][cloth_ident]["frames"]
+            frames[sorted(frames)[0]]["sha256"] = bv
+        _open_mutate("b7_%s" % tag, _corrupt)
+        rep = ch.build_report(list(bpy.data.scenes))
+        cs = _sv(rep, "Cloth")
+        results = engine.run_all(bpy.context, hash_verify=rep)
+        cstat = {r.status for r in results
+                 if r.check_id == 27 and r.object_name == "ClothP"}
+        out.append(("B7 e2e [%s]: bad digest -> BAD_REF, no false 'changed'/PASS"
+                    % tag,
+                    cs is not None and cs.state == ch.S_BAD_REF
+                    and Status.PASS not in cstat,
+                    (getattr(cs, "state", None), sorted(cstat)), ch.S_BAD_REF))
+        codeb, _ = cli.run(argv=["--verify-hashes", "--text"])
+        out.append(("B7 e2e [%s]: requested verify -> nonzero exit" % tag,
+                    codeb == cli.EXIT_UNVERIFIED, codeb, cli.EXIT_UNVERIFIED))
+
+    # B7 e2e: a wrong declared algorithm -> R_ALGO gate, never PASS.
+    def _algo(sec):
+        sec["algo"] = "md5"
+    _open_mutate("b7_algo", _algo)
+    rep = ch.build_report(list(bpy.data.scenes))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    algost = statuses_for_check(results, 27)
+    out.append(("B7 e2e: wrong algorithm -> R_ALGO, UNKNOWN never PASS",
+                rep.state == ch.R_ALGO and Status.PASS not in algost,
+                (rep.state, algost), ch.R_ALGO))
+    codea, _ = cli.run(argv=["--verify-hashes", "--text"])
+    out.append(("B7 e2e: wrong algorithm requested verify -> nonzero exit",
+                codea == cli.EXIT_UNVERIFIED, codea, cli.EXIT_UNVERIFIED))
 
     return out
 
@@ -2620,6 +2784,7 @@ def main():
                                    + cache_hash_tests()
                                    + hash_blocker_tests()
                                    + hash_edge_tests()
+                                   + hash_edge2_tests()
                                    + couldnt_verify_tests()):
         if ok:
             passed += 1
@@ -2640,7 +2805,8 @@ def main():
              + len(batch_isolation_tests()) + len(review_blocker_tests())
              + len(integrity_header_tests()) + len(cache_coverage_tests())
              + len(cache_hash_tests()) + len(hash_blocker_tests())
-             + len(hash_edge_tests()) + len(couldnt_verify_tests()))
+             + len(hash_edge_tests()) + len(hash_edge2_tests())
+             + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))
