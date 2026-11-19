@@ -827,9 +827,18 @@ def c26_settings_baseline(ctx, mk):
 
 
 # -------------------------------------------------------------------- 27 ----
-def _has_disk_point_caches(entries):
-    return any(e.kind == "point" and not e.memory and e.file_check_applicable
-               for e in entries)
+def _has_hashable_disk_caches(entries):
+    """True if the scene has ANY on-disk cache the SHA-256 verifier can fingerprint
+    — a disk point cache OR a Mantaflow fluid bake (not a REPLAY playback cache). So
+    the 'hasn't been run' guidance shows on a FLUID-ONLY scene too (review M1), not
+    only when a point cache is present."""
+    for e in entries:
+        if e.kind == "point" and not e.memory and e.file_check_applicable:
+            return True
+        if e.kind == "fluid" and e.file_check_applicable \
+                and not getattr(e, "replay", False):
+            return True
+    return False
 
 
 # The real capture workflow: a dedicated button (CAPTURE mode of the cache-hash
@@ -863,7 +872,7 @@ def c27_cache_hashes(ctx, mk):
     than implying anything was checked. Read-only throughout."""
     entries = _caches(ctx)
     report = getattr(ctx, "hash_verify", None)
-    has_disk = _has_disk_point_caches(entries)
+    has_disk = _has_hashable_disk_caches(entries)
 
     if report is None:
         # No verification run. If there's nothing on disk to hash either, stay

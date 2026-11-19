@@ -327,11 +327,14 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
             cur[_relkey(p, blend_dir)] = (fr, p)
         if saved is None:
             if not cur:
-                # A configured stage that was never baked AND never baselined (e.g.
-                # a fluid domain with 'use_mesh' on but no mesh bake): there is
-                # nothing to hash and nothing to compare. That's the structural
-                # checks' concern (#17-#20 flag an enabled-but-unbaked stage), not a
-                # hash question — stay silent here rather than invent an UNKNOWN.
+                # A configured stage (e.g. a fluid domain with 'use_mesh' on) that
+                # has NO baked files AND NO baseline reference. It must NOT be
+                # silently omitted (review B1) — that would let the remaining stages
+                # read as a complete verification while a required stage is absent.
+                # Every required frame is uncovered -> incomplete, never a PASS.
+                out.append(SimVerify(rec.identity, rec.system, rec.obj_name,
+                                     S_INCOMPLETE_REF, [], [], [], [], [],
+                                     list(rec.required or []), []))
                 continue
             out.append(SimVerify(rec.identity, rec.system, rec.obj_name,
                                  S_NO_REF, [], [], [], [], [], [], []))

@@ -2706,10 +2706,18 @@ def hash_fluid_tests():
                 cs and cs[0].state == ch.S_UNCHANGED,
                 [s.state for s in cs], ch.S_UNCHANGED))
     results = engine.run_all(bpy.context, hash_verify=rep)
-    datast = {r.status for r in results
-              if r.check_id == 27 and "data" in (r.message or "").split("—")[0]}
-    out.append(("fluid changed data stage never PASS",
-                Status.PASS not in datast or True, True, True))  # soft
+    data_find = [r for r in results
+                 if r.check_id == 27 and "Fluid/data" in (r.message or "")]
+    config_find = [r for r in results
+                   if r.check_id == 27 and "Fluid/config" in (r.message or "")]
+    out.append(("fluid changed: data-stage finding is WARNING, never PASS",
+                bool(data_find)
+                and all(r.status == Status.WARNING for r in data_find),
+                [r.status for r in data_find], "WARNING only"))
+    out.append(("fluid changed: config-stage finding still PASS (independent)",
+                bool(config_find)
+                and any(r.status == Status.PASS for r in config_find),
+                [r.status for r in config_find], "has PASS"))
     out.append(("fluid changed -> #27 worst WARNING (not FAIL)",
                 worst_for_check(results, 27) == Status.WARNING,
                 worst_for_check(results, 27), Status.WARNING))
@@ -2775,7 +2783,38 @@ def hash_fluid_tests():
                 and cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                 (ds[0].missing if ds else None), "missing + floor"))
 
-    # (7) cancelled capture raises (writes nothing)
+    # (7) B1: a stage ENABLED after the baseline, never baked, must NOT be silently
+    # skipped — it reports incomplete coverage (never a clean pass) and floors.
+    _open("b1stage")
+    dom = bpy.data.objects.get("Domain")
+    dom.modifiers["Fluid"].domain_settings.use_noise = True   # enabled, never baked
+    rep = ch.build_report(list(bpy.data.scenes))
+    ns = _stage(rep, "noise")
+    out.append(("B1 fluid enabled-but-unbaked stage is reported, not skipped",
+                bool(ns) and ns[0].state == ch.S_INCOMPLETE_REF,
+                [s.state for s in ns], ch.S_INCOMPLETE_REF))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    nstat = {r.status for r in results
+             if r.check_id == 27 and "Fluid/noise" in (r.message or "")}
+    out.append(("B1 fluid unbaked stage -> UNKNOWN, never PASS",
+                Status.UNKNOWN in nstat and Status.PASS not in nstat,
+                sorted(nstat), "UNKNOWN"))
+    out.append(("B1 fluid unbaked stage floors requested verify",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (8) M1: a FLUID-ONLY scene (no point caches) still shows the #27 'hasn't been
+    # run' guidance on a quick scan, not silence.
+    _open("m1only")
+    results = engine.run_all(bpy.context)          # quick scan, no hash_verify
+    na27 = [r for r in results if r.check_id == 27]
+    nmsg = " ".join(r.message for r in na27).lower()
+    out.append(("M1 fluid-only scene shows #27 'hasn't been run' guidance",
+                any(r.status == Status.NA for r in na27)
+                and "hasn't been run" in nmsg,
+                [r.status for r in na27], "NA + guidance"))
+
+    # (9) cancelled capture raises (writes nothing)
     _open("cancel")
     cnt = {"n": 0}
 

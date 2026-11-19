@@ -94,6 +94,22 @@ honest "unchanged ≠ valid"). Tested on real bakes across all four versions
 mesh frame→blocking, relocation→unchanged, corrupted digest→BAD_REF, phantom
 ref→missing+floor, cancellation→writes nothing.
 
+### Fluid review round 2 (2026-11-19) — B1/B2/M1, certified 4 versions
+
+- **B1 — a configured stage with no files AND no baseline was silently skipped.**
+  The verify loop's `saved is None and not cur` short-circuit `continue`'d, so an
+  enabled-but-unbaked, never-baselined stage vanished from the report and the
+  remaining stages could read as a complete verification. Now it reports
+  `S_INCOMPLETE_REF` (every required frame uncovered → "Couldn't verify", never a
+  PASS, and `verify_floor` floors the exit).
+- **B2 — a fluid regression assertion contained `or True`** (always passed). Replaced
+  with discriminating per-stage checks: the changed `data` stage finding is WARNING
+  (never PASS) AND the `config` stage finding is still PASS (independence proven).
+- **M1 — a FLUID-ONLY scene didn't show the #27 guidance.** `_has_disk_point_caches`
+  only counted point caches, so on a scene with only a fluid bake the quick scan
+  stayed silent instead of saying "hasn't been run / click Verify Cache Hashes".
+  Renamed to `_has_hashable_disk_caches` (point OR non-replay fluid disk cache).
+
 ## Build plan (GN — next)
 
 1. `cache_inspect.iter_fluid_cache_files(scenes)` → one record per domain stage,
