@@ -964,7 +964,11 @@ def c27_cache_hashes(ctx, mk):
                 % (nice, len(sv.bad_ref), _sample(sv.bad_ref)),
                 object_name=obj,
                 hint="Re-save the cache-hash baseline to record valid hashes."))
-        if sv.missing and sv.state != ch.S_DRIFT:
+        # Vanished baselined files are always surfaced as their OWN 'Couldn't
+        # verify' line — even for a DRIFT sim, whose headline is only a WARNING —
+        # so the GUI shows an explicit unresolved-reference finding, matching the
+        # CLI's non-clean exit (reviewer's nonblocking UI note).
+        if sv.missing:
             extra.append(mk(Status.UNKNOWN,
                 "%s: %d baselined cache frame(s) are no longer on disk — frame(s) "
                 "%s — so those saved references can't be verified (the range was "
@@ -1004,14 +1008,14 @@ def c27_cache_hashes(ctx, mk):
             out.extend(_supplements(sv, nice, obj))
         elif sv.state == ch.S_DRIFT:
             out.append(mk(Status.WARNING,
-                "%s: the cache frame set differs from the baseline (%d baselined "
-                "frame(s) missing, %d new frame(s)), though the frames in common "
-                "are byte-for-byte unchanged. Usually a re-bake over a different "
-                "range." % (nice, len(sv.missing), len(sv.new)),
+                "%s: the cache's frame set no longer matches the baseline (%d "
+                "baselined frame(s) gone), though the frames still present are "
+                "byte-for-byte unchanged. Usually a re-bake over a shorter range."
+                % (nice, len(sv.missing)),
                 object_name=obj,
                 hint="If this range is intentional, re-save the cache-hash "
                      "baseline to update the reference."))
-            out.extend(_supplements(sv, nice, obj))
+            out.extend(_supplements(sv, nice, obj))   # explicit vanished-ref line
         elif sv.state == ch.S_UNREADABLE:
             out.append(mk(Status.UNKNOWN,
                 "%s: %d cache file(s) couldn't be read, so this sim can't be "

@@ -2513,9 +2513,16 @@ def hash_edge2_tests():
     out.append(("B6 pure drift (missing files) floors requested verify",
                 cli.verify_floor(drift, True) == cli.EXIT_UNVERIFIED,
                 cli.verify_floor(drift, True), cli.EXIT_UNVERIFIED))
-    dmsg = " ".join(r.message for r in _c27(drift)).lower()
+    drift_res = _c27(drift)
+    dmsg = " ".join(r.message for r in drift_res).lower()
     out.append(("B6 drift discloses the missing baselined frames",
-                "missing" in dmsg, True, True))
+                "missing" in dmsg or "no longer on disk" in dmsg, True, True))
+    # nonblocking UI note: a vanished-ref DRIFT now carries a DISTINCT 'Couldn't
+    # verify' (UNKNOWN) line in addition to the WARNING headline, so GUI + CLI agree.
+    dsts = {r.status for r in drift_res}
+    out.append(("UI: pure drift shows a distinct UNKNOWN vanished-ref line",
+                Status.WARNING in dsts and Status.UNKNOWN in dsts, sorted(dsts),
+                "WARNING+UNKNOWN"))
 
     # B6: CHANGED + missing must disclose BOTH and floor
     chg_miss = _mkreport(ch.S_CHANGED, matched=[1], changed=[3], missing=[5, 6])
