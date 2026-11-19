@@ -93,5 +93,7 @@ HELP = {
          "correct or will render. A mismatch means the file changed, which is "
          "exactly what a deliberate re-bake does, so it flags a change without "
          "calling it damage. It reads every cache byte, so it runs only when you "
-         "ask (both buttons are separate from the quick Scan)."),
+         "ask (both buttons are separate from the quick Scan). Covers point caches "
+         "(Cloth/Soft Body/Particles) and Fluid, fingerprinting each Mantaflow "
+         "stage (data, noise, mesh, particles, guiding, config) on its own."),
 }

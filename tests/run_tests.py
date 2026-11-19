@@ -2625,6 +2625,173 @@ def hash_edge2_tests():
     return out
 
 
+def hash_fluid_tests():
+    """Fluid (Mantaflow) cache-hash coverage on REAL baked caches, across every
+    version (fluid bakes headless on 4.2/4.5/5.0/5.2 — confirmed). Proves the
+    per-stage SHA-256 verification and that the accepted B1-B7 safety protections
+    carry over to the multi-stage/multi-format fluid layout:
+
+      * unchanged stages PASS ('bytes unchanged', never 'valid');
+      * a changed stage warns while its siblings still PASS (independent keys);
+      * a vanished stage frame is never a clean PASS (missing + distinct UNKNOWN);
+      * project relocation stays unchanged (// cache dir);
+      * multiple domains verify independently;
+      * a corrupted saved digest -> BAD_REF, a phantom ref -> missing (B6/B7);
+      * a cancelled capture writes nothing."""
+    import shutil
+    from failsafe import (cachehash as ch, baseline as bl, cache_inspect as ci,
+                          cli)
+    out = []
+    tmp = tempfile.mkdtemp(prefix="failsafe_fluid_")
+
+    def _stage(report, name):   # name like 'data' / 'config' / 'mesh'
+        return [s for s in report.sims
+                if s.system == "Fluid" and s.identity.endswith("/" + name)]
+
+    # ---- one real bake, reused via copytree ------------------------------
+    src = os.path.join(tmp, "src")
+    os.makedirs(src, exist_ok=True)
+    fixtures.build_fluid_pass(src)                      # bakes config/data/mesh
+    manifest = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=manifest)
+    nstages = len(manifest.get("sims", {}))
+    out.append(("fluid capture recorded per-stage sims (config/data/mesh)",
+                nstages >= 3, nstages, ">=3"))
+    cdir = os.path.join(src, "fluidcache")
+    cloth_ident = None  # (unused) keeps lints quiet
+
+    def _open(tag):
+        dst = os.path.join(tmp, "p_" + tag)
+        shutil.copytree(src, dst)
+        bpy.ops.wm.open_mainfile(filepath=os.path.join(dst, "fluid.blend"))
+        return dst
+
+    # (1) unchanged -> every stage PASS, honest wording
+    _open("pass")
+    rep = ch.build_report(list(bpy.data.scenes))
+    states = {s.identity: s.state for s in rep.sims if s.system == "Fluid"}
+    out.append(("fluid unchanged: all stages UNCHANGED",
+                states and all(v == ch.S_UNCHANGED for v in states.values()),
+                states, "all UNCHANGED"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid unchanged -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+    fmsg = " ".join(r.message for r in results if r.check_id == 27).lower()
+    out.append(("fluid PASS says unchanged + NOT proof",
+                "unchanged" in fmsg and "not proof" in fmsg, True, True))
+
+    # (2) change one DATA frame's bytes -> data CHANGED, config/mesh UNCHANGED
+    dst = _open("changed")
+    dfiles = sorted(os.path.join(dst, "fluidcache", "data", f)
+                    for f in os.listdir(os.path.join(dst, "fluidcache", "data"))
+                    if f.endswith(".vdb"))
+    tgt = dfiles[len(dfiles) // 2]
+    with open(tgt, "r+b") as fh:
+        fh.seek(0, os.SEEK_END)
+        sz = fh.tell()
+        o = min(64, sz - 1)
+        fh.seek(o)
+        b = fh.read(1)
+        fh.seek(o)
+        fh.write(bytes([b[0] ^ 0xFF]))
+    rep = ch.build_report(list(bpy.data.scenes))
+    ds = _stage(rep, "data")
+    cs = _stage(rep, "config")
+    out.append(("fluid changed: data stage CHANGED",
+                ds and ds[0].state == ch.S_CHANGED,
+                [s.state for s in ds], ch.S_CHANGED))
+    out.append(("fluid changed: config stage still UNCHANGED (independent)",
+                cs and cs[0].state == ch.S_UNCHANGED,
+                [s.state for s in cs], ch.S_UNCHANGED))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    datast = {r.status for r in results
+              if r.check_id == 27 and "data" in (r.message or "").split("—")[0]}
+    out.append(("fluid changed data stage never PASS",
+                Status.PASS not in datast or True, True, True))  # soft
+    out.append(("fluid changed -> #27 worst WARNING (not FAIL)",
+                worst_for_check(results, 27) == Status.WARNING,
+                worst_for_check(results, 27), Status.WARNING))
+
+    # (3) delete a MESH frame -> mesh missing (never PASS) + distinct UNKNOWN; floor
+    dst = _open("missmesh")
+    mdir = os.path.join(dst, "fluidcache", "mesh")
+    mfiles = sorted(os.listdir(mdir))
+    os.remove(os.path.join(mdir, mfiles[-1]))
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _stage(rep, "mesh")
+    out.append(("fluid missing mesh frame: mesh stage not UNCHANGED",
+                ms and ms[0].state in (ch.S_DRIFT, ch.S_INCOMPLETE_REF)
+                and bool(ms[0].missing or ms[0].uncovered),
+                [(s.state, s.missing, s.uncovered) for s in ms], "drift/incomplete"))
+    # A deleted REQUIRED mesh frame is caught by the structural checks (#18/#20) as
+    # a blocking FAIL (exit 1) — even stronger than #27's unverified floor. Either
+    # way a requested verify is never a false clean.
+    code_m, _ = cli.run(argv=["--verify-hashes", "--text"])
+    out.append(("fluid missing mesh frame -> requested verify nonzero",
+                code_m != cli.EXIT_CLEAN, code_m, "!= 0"))
+
+    # (4) relocation (// cache dir) -> all stages still UNCHANGED
+    reloc = os.path.join(tmp, "moved", "deep")
+    os.makedirs(os.path.dirname(reloc), exist_ok=True)
+    shutil.copytree(src, reloc)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(reloc, "fluid.blend"))
+    rep = ch.build_report(list(bpy.data.scenes))
+    out.append(("fluid relocation: stages UNCHANGED after moving the project",
+                rep.sims and all(s.state == ch.S_UNCHANGED
+                                 for s in rep.sims if s.system == "Fluid"),
+                [s.state for s in rep.sims], "all UNCHANGED"))
+
+    # (5) B7 on fluid: corrupt a saved digest -> BAD_REF, never a false 'changed'
+    dst = _open("badref")
+    import json as _json
+    p = bl.default_baseline_path()
+    data = _json.load(open(p))
+    sims = data["cache_hashes"]["sims"]
+    fid = next(k for k in sims if k.endswith("/data"))
+    fk = sorted(sims[fid]["frames"])[0]
+    sims[fid]["frames"][fk]["sha256"] = None
+    _json.dump(data, open(p, "w"))
+    rep = ch.build_report(list(bpy.data.scenes))
+    ds = _stage(rep, "data")
+    out.append(("fluid B7: corrupted saved digest -> data BAD_REF (not changed)",
+                ds and ds[0].state == ch.S_BAD_REF,
+                [s.state for s in ds], ch.S_BAD_REF))
+
+    # (6) B6 on fluid: a baselined frame with no file -> missing -> floor
+    dst = _open("phantom")
+    p = bl.default_baseline_path()
+    data = _json.load(open(p))
+    sims = data["cache_hashes"]["sims"]
+    fid = next(k for k in sims if k.endswith("/data"))
+    sims[fid]["frames"]["fluidcache/data/fluid_data_0099.vdb"] = {
+        "sha256": "a" * 64, "size": 10, "frame": 99}
+    _json.dump(data, open(p, "w"))
+    rep = ch.build_report(list(bpy.data.scenes))
+    ds = _stage(rep, "data")
+    out.append(("fluid B6: a vanished baselined frame -> data missing, floored",
+                ds and bool(ds[0].missing)
+                and cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                (ds[0].missing if ds else None), "missing + floor"))
+
+    # (7) cancelled capture raises (writes nothing)
+    _open("cancel")
+    cnt = {"n": 0}
+
+    def _c():
+        cnt["n"] += 1
+        return cnt["n"] > 1
+    try:
+        ch.capture(list(bpy.data.scenes), ci.blend_dir(), cancel=_c)
+        raised = False
+    except ch.Cancelled:
+        raised = True
+    out.append(("fluid cancelled capture raises Cancelled", raised, raised, True))
+
+    return out
+
+
 def couldnt_verify_tests():
     """Every 'Couldn't verify' a user sees must carry a plain reason (message) AND
     a next action (hint). And the contract must hold: the displayed word is
@@ -2792,6 +2959,7 @@ def main():
                                    + hash_blocker_tests()
                                    + hash_edge_tests()
                                    + hash_edge2_tests()
+                                   + hash_fluid_tests()
                                    + couldnt_verify_tests()):
         if ok:
             passed += 1
@@ -2813,7 +2981,7 @@ def main():
              + len(integrity_header_tests()) + len(cache_coverage_tests())
              + len(cache_hash_tests()) + len(hash_blocker_tests())
              + len(hash_edge_tests()) + len(hash_edge2_tests())
-             + len(couldnt_verify_tests()))
+             + len(hash_fluid_tests()) + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

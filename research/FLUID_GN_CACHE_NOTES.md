@@ -68,7 +68,33 @@ Implication: GN disk-cache hashing is lower priority than fluid (packed is the
 default and already handled). When we do it, enumerate `<bake_dir>/<id>/meta/*.json`
 (and `blobs/*`) as the per-frame files; a packed target stays "Couldn't verify".
 
-## Build plan (next)
+## Blender 4.2 bake: the "gap" was a probe artifact (RESOLVED)
+
+The first standalone probe's headless `fluid.bake_data()` failed on 4.2.9 with a
+`Scene.frame_set()` SystemError. Investigating: that failure came from the probe's
+own setup (a GAS domain with an explicit `scene.frame_set(1)` before baking), NOT
+from Mantaflow baking per se. The project's real fixture (`fixtures._make_fluid_blend`
+— a LIQUID domain, `bpy.ops.fluid.bake_all()` with a `selected_objects` override)
+**bakes successfully headless on 4.2.9** (verified: config/data/mesh = 4/4/4 files,
+identical to 5.2.3). The certified four-version matrix exercises real fluid bakes on
+4.2 via the "HS fluid" tests. So fluid verification is tested on genuine 4.2 bakes,
+not extrapolated from newer versions.
+
+## SHIPPED (2026-11-18): fluid cache hash coverage
+
+`cache_inspect.iter_fluid_cache_files` yields one record per domain STAGE (config,
+data, and each enabled optional stage), discovering the actual files by the
+verified per-stage filename patterns (`_FLUID_COMPONENT_RE`) rather than assuming
+extensions. `iter_hashable_cache_files` chains point caches + fluid so capture and
+verify share one source. Each manifest frame now also stores its frame NUMBER
+(fluid filenames lack the point-cache `_NNNNNN_II` token). All B1–B7 protections
+apply unchanged (per-stage independence, S_BAD_REF, missing/uncovered floors,
+honest "unchanged ≠ valid"). Tested on real bakes across all four versions
+(`hash_fluid_tests`): unchanged→PASS, changed-data→CHANGED (siblings PASS), deleted
+mesh frame→blocking, relocation→unchanged, corrupted digest→BAD_REF, phantom
+ref→missing+floor, cancellation→writes nothing.
+
+## Build plan (GN — next)
 
 1. `cache_inspect.iter_fluid_cache_files(scenes)` → one record per domain stage,
    with the stage's present files `(frame, abspath)` and `required` = domain

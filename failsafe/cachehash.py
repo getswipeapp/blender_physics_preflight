@@ -156,7 +156,7 @@ def capture_iter(scenes, blend_dir, cancel=None):
     from . import cache_inspect as ci
     sims = {}
     done = 0
-    for rec in ci.iter_point_cache_files(scenes):
+    for rec in ci.iter_hashable_cache_files(scenes):
         frames = {}
         volatile = 0
         for (_fr, _idx, p) in rec.files:
@@ -179,7 +179,12 @@ def capture_iter(scenes, blend_dir, cancel=None):
                 yield ("file", done)
                 continue
             digest, size = res
-            frames[_relkey(p, blend_dir)] = {"sha256": digest, "size": size}
+            # Store the frame NUMBER with each hash: fluid filenames (e.g.
+            # fluid_data_0001.vdb) don't carry the point-cache's _NNNNNN_II frame
+            # token, so parsing it back from the path isn't reliable across cache
+            # systems. Recording it makes verify frame-aware for every system.
+            frames[_relkey(p, blend_dir)] = {"sha256": digest, "size": size,
+                                             "frame": _fr}
             yield ("file", done)
         if frames or volatile:
             sims[rec.identity] = {"system": rec.system, "obj_name": rec.obj_name,
@@ -224,7 +229,7 @@ def capture_total_files(scenes):
     """How many present point-cache frame files a capture will hash (for a
     progress bar's denominator, which steps per file)."""
     from . import cache_inspect as ci
-    return sum(len(rec.files) for rec in ci.iter_point_cache_files(scenes))
+    return sum(len(rec.files) for rec in ci.iter_hashable_cache_files(scenes))
 
 
 # --------------------------------------------------------------- verify -----
@@ -289,7 +294,7 @@ def verify_total(scenes, manifest, blend_dir):
     from . import cache_inspect as ci
     saved_sims = manifest.get("sims", {}) if isinstance(manifest, dict) else {}
     n = 0
-    for rec in ci.iter_point_cache_files(scenes):
+    for rec in ci.iter_hashable_cache_files(scenes):
         saved = saved_sims.get(rec.identity)
         if not isinstance(saved, dict):
             continue
@@ -314,23 +319,35 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
     out = []
     seen = set()
     done = 0
-    for rec in ci.iter_point_cache_files(scenes):
+    for rec in ci.iter_hashable_cache_files(scenes):
         seen.add(rec.identity)
         saved = saved_sims.get(rec.identity)
         cur = {}
         for (fr, _idx, p) in rec.files:
             cur[_relkey(p, blend_dir)] = (fr, p)
         if saved is None:
+            if not cur:
+                # A configured stage that was never baked AND never baselined (e.g.
+                # a fluid domain with 'use_mesh' on but no mesh bake): there is
+                # nothing to hash and nothing to compare. That's the structural
+                # checks' concern (#17-#20 flag an enabled-but-unbaked stage), not a
+                # hash question — stay silent here rather than invent an UNKNOWN.
+                continue
             out.append(SimVerify(rec.identity, rec.system, rec.obj_name,
                                  S_NO_REF, [], [], [], [], [], [], []))
             continue
         saved_frames = saved.get("frames", {}) if isinstance(saved, dict) else {}
         matched, changed, missing, unreadable, new, bad_ref = [], [], [], [], [], []
+        baselined = set()
         for key, meta in saved_frames.items():
+            fnum = _frame_num(key, meta)
+            if fnum is not None:
+                baselined.add(fnum)
             if key not in cur:
                 # A baselined frame file is gone now (range shortened, deleted,
                 # or project moved out from under an external path).
-                missing.append(key)
+                if fnum is not None:
+                    missing.append(fnum)
                 continue
             if cancel is not None and cancel():
                 raise Cancelled()
@@ -367,14 +384,13 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
         # Required frames (the whole cache range) that the baseline never recorded
         # a hash for — the integrity of those frames is simply unverifiable, so the
         # sim can't be a clean PASS no matter how well the baselined frames match
-        # (review B3). Frames the baseline DID record are 'covered'.
-        baselined = set(_frames_of(saved_frames.keys()))
+        # (review B3). Frames the baseline DID record ('baselined') are 'covered'.
         uncovered = sorted(f for f in (rec.required or []) if f not in baselined)
         state = _sim_state(matched, changed, missing, unreadable, new, uncovered,
                            bad_ref)
         out.append(SimVerify(rec.identity, rec.system, rec.obj_name, state,
                              sorted(matched), sorted(changed),
-                             sorted(_frames_of(missing)), sorted(unreadable),
+                             sorted(missing), sorted(unreadable),
                              sorted(new), uncovered, sorted(bad_ref)))
     # Sims the baseline knew about but which aren't in the scene now.
     for ident, saved in saved_sims.items():
@@ -402,7 +418,8 @@ def verify_sims(scenes, manifest, blend_dir, cancel=None, progress=None):
 
 def _frames_of(keys):
     """Best-effort frame numbers from relkey filenames (``..._000012_00.bphys``)
-    for nicer 'missing frame' messages; falls back to leaving the key out."""
+    for nicer 'missing frame' messages; falls back to leaving the key out. Used
+    only for OLD baselines whose frame entries predate the stored ``frame`` field."""
     frames = []
     for k in keys:
         base = k.rsplit("/", 1)[-1]
@@ -414,6 +431,18 @@ def _frames_of(keys):
             except ValueError:
                 pass
     return frames
+
+
+def _frame_num(key, meta):
+    """The frame number for a saved manifest entry — from the recorded ``frame``
+    field (every cache system; written since this build), falling back to parsing
+    the point-cache filename for older baselines. None if neither yields a number."""
+    if isinstance(meta, dict):
+        f = meta.get("frame")
+        if isinstance(f, int):
+            return f
+    got = _frames_of([key])
+    return got[0] if got else None
 
 
 # --------------------------------------------------------- report wrapper ---

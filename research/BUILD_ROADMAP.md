@@ -43,7 +43,7 @@ Already built and confirmed in source (these were WRONGLY listed as gaps from me
 ### PHASE 1 — Finish & extend our own lane (read-only). Beat every cache tool outright.
 - ✅ **Hair-particle + Dynamic Paint vertex cache coverage** (2026-11-16). Follow-up: Dynamic Paint IMAGE-sequence surfaces.
 - ✅ **HTML report** (2026-11-16).
-- ✅ **Deep content integrity (structure + baselined hashes)** (2026-11-16): `.bphys` header/type structure check (#17/#18) + on-demand per-frame SHA-256 change detection vs a saved baseline (#27, review M2). #27 point-cache increment **ACCEPTED** by independent review (2026-11-18, commit e460744, B1–B7 closed). Next: fluid/GN hash coverage — **on-disk layouts researched on all 4 versions (2026-11-18, see [FLUID_GN_CACHE_NOTES.md](FLUID_GN_CACHE_NOTES.md))**, build next; then Blender-decode verification (Phase 3).
+- ✅ **Deep content integrity (structure + baselined hashes)** (2026-11-16): `.bphys` header/type structure check (#17/#18) + on-demand per-frame SHA-256 change detection vs a saved baseline (#27, review M2). #27 point-cache increment **ACCEPTED** by independent review (2026-11-18, commit e460744, B1–B7 closed). **Fluid cache hash coverage SHIPPED (2026-11-18)** — per-stage SHA-256 of Mantaflow data/noise/mesh/particles/guiding/config, tested on real bakes across all 4 versions (incl. 4.2); layouts in [FLUID_GN_CACHE_NOTES.md](FLUID_GN_CACHE_NOTES.md). Next: Geometry Nodes disk-bake hashing (packed stays "Couldn't verify"), then Blender-decode verification (Phase 3).
 - **Persistent dismissal** of intentional findings (stored in scene props, like Triage; shown as "acknowledged").
 - Polish: extend jump-to-fix to #24–26; fix stale docstring.
 - Every item ships with failure fixtures + tests + cross-version check.

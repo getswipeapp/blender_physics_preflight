@@ -957,6 +957,103 @@ def inspect_fluid_domain(obj, mod, scene):
     return e
 
 
+# config + data are written on every fluid bake; the rest only when their feature
+# flag is on (same set inspect_fluid_domain requires). Order is stable for output.
+_FLUID_ALWAYS_STAGES = ("config", "data")
+_FLUID_OPTIONAL_STAGES = (
+    ("noise", ("use_noise",)),
+    ("mesh", ("use_mesh",)),
+    ("particles", ("use_spray_particles", "use_foam_particles",
+                   "use_bubble_particles", "use_tracer_particles")),
+    ("guiding", ("use_guide",)),
+)
+
+
+def fluid_enabled_stages(ds):
+    """The Mantaflow sub-cache stages this domain is CONFIGURED to write — config
+    and data always, the rest only when their feature flag is on. A stage that is
+    enabled but not yet baked still belongs here, so the hash verifier can report
+    its frames as uncovered/missing rather than silently skipping the stage."""
+    stages = list(_FLUID_ALWAYS_STAGES)
+    for name, flags in _FLUID_OPTIONAL_STAGES:
+        if any(bool(getattr(ds, f, False)) for f in flags):
+            stages.append(name)
+    return stages
+
+
+def _fluid_stage_files(stage_dir, component):
+    """Discover the ACTUAL files for one fluid stage — matched by the component's
+    verified filename pattern, so the real extension on disk (``.vdb`` / ``.uni`` /
+    ``.bobj.gz`` …) is found rather than assumed. Returns [(frame:int, abspath)]."""
+    out = []
+    rx = _FLUID_COMPONENT_RE.get(component)
+    if rx is None or not stage_dir or not os.path.isdir(stage_dir):
+        return out
+    try:
+        names = os.listdir(stage_dir)
+    except OSError:
+        return out
+    for fn in names:
+        m = rx.match(fn)
+        if m:
+            out.append((int(m.group(1)), os.path.join(stage_dir, fn)))
+    return out
+
+
+def iter_fluid_cache_files(scenes):
+    """Yield a :class:`PointCacheFiles` per Mantaflow domain STAGE with a disk
+    cache (one record for config, data, and each enabled optional stage), so the
+    shared hash verifier treats each stage independently — a changed noise stage is
+    distinct from a changed data stage.
+
+    ``identity`` is the relocation-stable ``Scene::Owner::Fluid::<modifier>/<stage>``.
+    ``required`` is the domain's OWN cache range (``cache_frame_start..end``), NOT
+    the scene range. ``files`` are the stage's actual on-disk frame files, their
+    real extensions discovered. ``index`` is always 0 (fluid frames aren't indexed
+    like point caches). A REPLAY cache is a playback cache, not a bake, and is
+    skipped (the structural checks report it as a Warning). Read-only."""
+    for scene in scenes:
+        for obj in scene.objects:
+            for mod in obj.modifiers:
+                if mod.type != "FLUID":
+                    continue
+                if getattr(mod, "fluid_type", "") != "DOMAIN":
+                    continue
+                ds = getattr(mod, "domain_settings", None)
+                if ds is None:
+                    continue
+                if getattr(ds, "cache_type", "") == "REPLAY":
+                    continue  # playback cache, not a bake we can fingerprint
+                raw = getattr(ds, "cache_directory", "") or ""
+                if not raw:
+                    continue
+                cache_dir = _abspath(raw)
+                if not cache_dir:
+                    continue
+                cs = int(getattr(ds, "cache_frame_start", scene.frame_start))
+                ce = int(getattr(ds, "cache_frame_end", scene.frame_end))
+                required = list(range(cs, ce + 1))
+                for stage in fluid_enabled_stages(ds):
+                    stage_dir = os.path.join(cache_dir, stage)
+                    files = [(fr, 0, p) for (fr, p)
+                             in sorted(_fluid_stage_files(stage_dir, stage))]
+                    identity = "%s::%s::Fluid::%s/%s" % (
+                        scene.name, obj.name, mod.name, stage)
+                    yield PointCacheFiles(identity, "Fluid", obj.name,
+                                          "%s/%s" % (mod.name, stage),
+                                          stage_dir, files, required)
+
+
+def iter_hashable_cache_files(scenes):
+    """Every disk cache the SHA-256 verifier covers: point caches (``.bphys``) and
+    Mantaflow fluid stages. One place so capture and verify never disagree about
+    what is hashable."""
+    for rec in iter_point_cache_files(scenes):
+        yield rec
+    for rec in iter_fluid_cache_files(scenes):
+        yield rec
+
+
 # -------------------------------------------------- geometry nodes ----------
 
 def _resolve_gn_target(bake, mod):
