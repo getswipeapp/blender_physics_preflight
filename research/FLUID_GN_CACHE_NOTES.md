@@ -60,9 +60,14 @@ a changed noise stage is distinct from a changed data stage.
   so no `blobs/` appeared). **Frame numbers are 5-digit** (`00001_00000.json` =
   `<frame:05d>_<subframe:05d>`), and `<bake_id>` is a per-bake integer folder.
   JSON magic `7b 22 76 65 72 73 69...` = `{"versio…`.
-- 4.2.9's modifier API has **no `bake_target`** attribute (older); its disk bakes
-  land in a default `blendcache_<file>`-style location. GN disk-bake support is
-  therefore version-sensitive and rarer than fluid.
+- 4.2.9's modifier API has **no `bake_target`** attribute — because **packed
+  storage for simulation zones did not exist until Blender 4.3**. On 4.2 a GN sim
+  bake is therefore **always written to disk**, driven by `mod.bake_directory`
+  alone (the attribute exists on 4.2). Verified by real 4.2.9 bakes (probe
+  `scratchpad/probe_gn_v3.py`): setting `mod.bake_directory = "//pbake"` and baking
+  writes `//pbake/<bake_id>/meta/NNNNN_IIIII.json` + `blobs/NNNNN_IIIII.blob` —
+  **byte-for-byte the same layout as 4.5/5.0/5.2**. So GN disk hashing applies on
+  all four versions; it is NOT 4.2-excluded (review B2, 2026-11-20).
 
 Implication: GN disk-cache hashing is lower priority than fluid (packed is the
 default and already handled). When we do it, enumerate `<bake_dir>/<id>/meta/*.json`
@@ -120,24 +125,52 @@ data — a `blobs` record (content files, `required=[]`). Added to
 `<id>/blobs/` layout).
 
 Version handling (real bakes on all four):
-- **PACKED is the default** and is NEVER hashed (no disk files) — it stays the
-  existing honest "Couldn't verify"; a test asserts `iter_gn_cache_files` yields
-  nothing for a packed bake, so packed is never mistaken for a missing disk cache.
+- **PACKED (4.3+ default)** is NEVER hashed (no disk files) — it stays the existing
+  honest "Couldn't verify"; a test asserts `iter_gn_cache_files` yields nothing for
+  a packed bake, so packed is never mistaken for a missing disk cache.
 - **4.5 / 5.0 / 5.2** expose `modifier.bake_target`; a DISK bake is detected
   (`_resolve_gn_target` follows INHERIT) and its meta/blobs are hashed.
-- **4.2** has NO `modifier.bake_target`, so a sim bake goes PACKED and GN disk
-  hashing is not applicable there (the fixture reports this and the test records it
-  — never a false pass).
+- **4.2** has NO `modifier.bake_target` and no packed storage, so a sim bake is
+  always disk and is hashed here like any other version (not excluded).
 
 Gotcha found and handled: a simulation-zone bake item reports `bake_mode='STILL'`
 with `frame_end=100` — those fields describe *Bake nodes*, not sim zones (the zone
 bakes the scene range). So `_gn_bake_range` can't give the expected set for a sim
-zone. #27's `required` is therefore the frames actually baked on disk (its job is
-the baked *bytes*); whether the bake covers the sim range stays #19/#20's job.
+zone. #27 therefore uses the **contiguous span** of the frames present on disk as
+the meta record's `required` (a sim bake runs contiguously from its start, so a
+hole inside that span is a genuine missing frame); coverage beyond the observed
+span stays #19/#20's job.
 
-Tests (`hash_gn_tests`, real bakes): packed→not hashed, unchanged→PASS, changed
-meta→CHANGED, deleted meta frame→missing+floor, blob changed→CHANGED,
-relocation→unchanged, cancellation→writes nothing; 4.2 records packed-only.
+### GN review round 2 (2026-11-20) — B1/B2/M1, certified 4 versions
+
+- **B1 — incomplete coverage could read as a clean PASS.** `required` was set to
+  the frames *present on disk*, so a frame missing before baseline capture was
+  simply never expected → an unqualified PASS. Fixed two ways: (1) `required` is now
+  the **contiguous span** `min(present)..max(present)`, so an interior hole
+  (frames 1,2,4 with 3 gone) is uncovered → `S_INCOMPLETE_REF` → "Couldn't verify"
+  and floors a requested verify; (2) a disk bake with an **empty/missing meta
+  directory** (or an unresolved directory) is no longer silently dropped — it is
+  yielded with no coverage so a verify can't read clean.
+- **B2 — Blender 4.2 disk bakes were wrongly excluded.** The code required
+  `_resolve_gn_target == "DISK"`, which is never true on 4.2 (no `bake_target`), so
+  all 4.2 GN hashing was disabled. Packed storage is a 4.3+ feature, so on 4.2 a sim
+  bake is always disk. New `_gn_disk_status()` returns `'disk'` when no
+  `bake_target` exists, so 4.2 disk bakes are detected and hashed (identical layout,
+  verified by real 4.2 bakes).
+- **M1 — real blob dependencies.** The old blob test injected a fabricated file.
+  The fixture now bakes a **moving** sim (Set Position offset in the zone) so Blender
+  writes genuine `blobs/NNNNN_IIIII.blob`. Real bakes reveal a dependency: the
+  **first frame's blob holds the static topology/UVs** and every later frame's meta
+  references it. #27 now derives the blob record from the **blob names the present
+  meta actually reference** (`_gn_referenced_blob_names`), so deleting the shared
+  first-frame blob surfaces as a missing dependency (floor), not a silent pass.
+
+Tests (`hash_gn_tests`, real bakes, all four versions incl. 4.2): packed→not hashed
+(where packable), disk bake produced, meta+blob records enumerated, unchanged→PASS,
+changed meta→CHANGED, deleted meta frame→missing+floor, interior hole before
+baseline→INCOMPLETE_REF (#27 UNKNOWN)+floor, empty meta dir→still enumerated,
+changed real blob→CHANGED, missing first-frame dependency blob→missing+floor,
+relocation→unchanged, cancellation→writes nothing.
 
 ## History
 

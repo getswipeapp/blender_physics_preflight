@@ -1045,23 +1045,100 @@ def iter_fluid_cache_files(scenes):
 
 
 _GN_META_RE = re.compile(r"(\d{5,})_\d+\.json$")
+# A blob FILENAME as it appears referenced inside a meta JSON ("00001_00000.blob").
+_GN_BLOB_NAME_RE = re.compile(r"(\d{5,}_\d+)\.blob")
+
+
+def _gn_has_bake_target(bake, mod):
+    """Whether this Blender build exposes a GN bake storage target at all.
+
+    Blender 4.2 has NO ``bake_target`` (packed storage for simulation zones arrived
+    in 4.3), so a GN sim bake there is always written to disk. Both the bake item
+    and the modifier are checked, since the enum lives on the modifier."""
+    return hasattr(bake, "bake_target") or hasattr(mod, "bake_target")
+
+
+def _gn_disk_status(bake, mod):
+    """Classify a GN bake's storage: ``'disk'`` | ``'packed'`` | ``'unknown'``.
+
+    On Blender 4.2 (no ``bake_target`` enum) a sim bake is ALWAYS on disk, so a bake
+    with no target is ``'disk'``, never packed — treating it as packed wrongly
+    disabled GN disk verification on 4.2, whose on-disk layout
+    (``<bake_id>/meta/*.json`` + ``blobs/*.blob``) is byte-for-byte the same as
+    4.5/5.0/5.2 (verified by real bakes on all four). On 4.3+ the resolved target
+    decides; an unrecognised value is ``'unknown'`` (reported, never a false PASS)."""
+    if not _gn_has_bake_target(bake, mod):
+        return "disk"
+    t = _resolve_gn_target(bake, mod)
+    if t == "DISK":
+        return "disk"
+    if t == "PACKED":
+        return "packed"
+    return "unknown"
+
+
+def _gn_bake_base_dir(bake, mod):
+    """Absolute base directory a GN bake writes under — its own custom path when
+    ``use_custom_path`` is set, else the modifier's ``bake_directory`` (which exists
+    and is honoured on 4.2 too). None if unresolved (empty path / unsaved file)."""
+    mod_raw = getattr(mod, "bake_directory", "") or ""
+    use_custom = bool(getattr(bake, "use_custom_path", False))
+    raw = (getattr(bake, "directory", "") or mod_raw) if use_custom else mod_raw
+    return _abspath(raw) if raw else None
+
+
+def _gn_referenced_blob_names(meta_paths):
+    """The set of blob filenames the given meta JSON files reference BY NAME — the
+    bake's real blob DEPENDENCY set.
+
+    A GN sim bake stores a frame's heavy attribute data in ``blobs/<frame>_<idx>.blob``
+    and the per-frame ``meta/*.json`` references it by name with start/size offsets.
+    Crucially, STATIC data (mesh topology, UVs) is written ONCE — on the first baked
+    frame — and every later frame's meta references that SAME first-frame blob
+    (verified on real bakes, all four versions). So the true dependency set is the
+    union of the blob names referenced across every present meta file, not merely the
+    files that happen to sit in ``blobs/``. Deleting the first-frame blob breaks every
+    later frame, and this is what surfaces that. Read-only; tolerant of unreadable
+    meta files (they're reported via the meta record)."""
+    names = set()
+    for p in meta_paths:
+        try:
+            with open(p, "r", encoding="utf-8", errors="ignore") as fh:
+                txt = fh.read()
+        except OSError:
+            continue
+        for m in _GN_BLOB_NAME_RE.finditer(txt):
+            names.add(m.group(1) + ".blob")
+    return names
 
 
 def iter_gn_cache_files(scenes):
     """Yield :class:`PointCacheFiles` for Geometry Nodes simulation bakes stored on
     DISK. Each disk bake yields a ``meta`` record (one ``<frame>_<idx>.json`` per
-    baked frame, frame-indexed, ``required`` = the bake's frame range) and — only
-    when the bake actually wrote blob data — a ``blobs`` record (the content files,
-    ``required`` = [] since blobs aren't frame-indexed; change/missing detection
-    still applies by path).
+    baked frame, frame-indexed) and — when the present meta reference blob data — a
+    ``blobs`` record (the referenced ``<frame>_<idx>.blob`` dependency files).
 
-    PACKED bakes (the default — stored inside the .blend) leave no files and are
-    NEVER yielded, so they stay the existing honest 'Couldn't verify' rather than
-    being mistaken for a missing disk cache. On Blender 4.2 the modifier exposes no
-    ``bake_target``, so a GN bake can't be confirmed as on-disk there and is left to
-    the structural checks — nothing is hashed, never a false PASS.
+    ``required`` for the meta record is the CONTIGUOUS span from the first to the
+    last present frame. A GN sim bake runs contiguously from its start frame, so a
+    hole inside that span (e.g. frames 1,2,4 with 3 absent) is a genuine missing
+    frame and must NOT read as a complete PASS (review B1). The sim zone's own frame
+    range is unreadable (``bake_mode`` reports ``STILL`` / ``frame_end`` 100 for sim
+    zones — verified on all four versions), so this observed span is the only honest
+    expected set; coverage BEYOND it (a never-written head/tail frame) can't be
+    established and stays #19/#20's job.
 
-    identity = ``Scene::Owner::GeometryNodes::<modifier>/<bake_id>/<meta|blobs>``
+    ``required`` for the blobs record is the frame set of the meta-referenced blobs,
+    so a referenced-but-absent dependency (including the shared first-frame topology
+    blob) reports as uncovered/missing rather than a silent pass (review M1).
+
+    PACKED bakes (4.3+ default — stored inside the .blend) leave no files and are
+    NEVER yielded (they stay the honest 'Couldn't verify' of #17). A DISK bake we
+    cannot LOCATE (no directory set, unsaved file) is NOT silently dropped either —
+    it is yielded with no coverage so a requested verify reports 'Couldn't verify',
+    never a clean pass (review B1). On Blender 4.2 a sim bake is always on disk and
+    is verified here like any other (review B2).
+
+    identity = ``Scene::Owner::Geometry Nodes::<modifier>/<bake_id>/<meta|blobs>``
     (relocation-stable). Read-only."""
     for scene in scenes:
         for obj in scene.objects:
@@ -1071,20 +1148,24 @@ def iter_gn_cache_files(scenes):
                 bakes = list(getattr(mod, "bakes", []) or [])
                 if not bakes:
                     continue
-                mod_raw = getattr(mod, "bake_directory", "") or ""
                 for b in bakes:
-                    if _resolve_gn_target(b, mod) != "DISK":
-                        continue  # packed / unknown target: not hashable
-                    use_custom = bool(getattr(b, "use_custom_path", False))
-                    raw = ((getattr(b, "directory", "") or mod_raw)
-                           if use_custom else mod_raw)
-                    base_dir = _abspath(raw) if raw else None
+                    if _gn_disk_status(b, mod) != "disk":
+                        continue  # packed / unknown target: not hashable (#17)
+                    base_dir = _gn_bake_base_dir(b, mod)
                     bake_id = getattr(b, "bake_id", None)
-                    if not base_dir or bake_id is None:
+                    label = "%s/%s" % (mod.name, bake_id)
+                    ident_meta = "%s::%s::Geometry Nodes::%s/meta" % (
+                        scene.name, obj.name, label)
+                    ident_blobs = "%s::%s::Geometry Nodes::%s/blobs" % (
+                        scene.name, obj.name, label)
+                    if base_dir is None or bake_id is None:
+                        # A disk bake we can't locate — surface it with no coverage
+                        # so a requested verify can't read clean (review B1).
+                        yield PointCacheFiles(ident_meta, "Geometry Nodes",
+                                              obj.name, "%s/meta" % label, None,
+                                              [], [])
                         continue
                     bdir = os.path.join(base_dir, str(bake_id))
-                    label = "%s/%s" % (mod.name, bake_id)
-
                     meta_dir = os.path.join(bdir, "meta")
                     mfiles = []
                     if os.path.isdir(meta_dir):
@@ -1093,35 +1174,42 @@ def iter_gn_cache_files(scenes):
                             if m:
                                 mfiles.append((int(m.group(1)), 0,
                                                os.path.join(meta_dir, fn)))
-                    # required = the frames actually baked on disk. A GN bake item's
-                    # bake_mode/frame_start/frame_end describe 'Bake' NODES, not
-                    # simulation zones (a sim zone reports STILL yet bakes the whole
-                    # scene range), so they can't give the expected set reliably.
-                    # #27 verifies the baked bytes; whether the bake covers the sim
-                    # range is the structural checks' job (#19/#20). Only yield a
-                    # record when something is actually baked.
-                    if not mfiles:
-                        continue
-                    required = sorted(fr for (fr, _i, _p) in mfiles)
-                    yield PointCacheFiles(
-                        "%s::%s::Geometry Nodes::%s/meta" % (scene.name, obj.name,
-                                                             label),
-                        "Geometry Nodes", obj.name, "%s/meta" % label, meta_dir,
-                        sorted(mfiles), required)
+                    mfiles.sort()
+                    if mfiles:
+                        present = [fr for (fr, _i, _p) in mfiles]
+                        required = list(range(min(present), max(present) + 1))
+                    else:
+                        # A disk bake located but with an empty/missing meta
+                        # directory. Still yielded (not omitted): no files, no
+                        # coverage -> 'Couldn't verify', never a pass (review B1).
+                        required = []
+                    yield PointCacheFiles(ident_meta, "Geometry Nodes", obj.name,
+                                          "%s/meta" % label, meta_dir, mfiles,
+                                          required)
 
+                    # Blobs: hash the files the present meta actually DEPEND on
+                    # (referenced by name), including the shared first-frame topology
+                    # blob reused by every later frame. A referenced blob missing on
+                    # disk -> uncovered/missing -> floor (a broken dependency), never
+                    # a silent pass (review M1).
                     blob_dir = os.path.join(bdir, "blobs")
-                    bfiles = []
-                    if os.path.isdir(blob_dir):
-                        for i, fn in enumerate(sorted(os.listdir(blob_dir))):
-                            p = os.path.join(blob_dir, fn)
+                    ref_names = _gn_referenced_blob_names(
+                        [p for (_fr, _i, p) in mfiles])
+                    if ref_names:
+                        bfiles, req_blobs = [], set()
+                        for nm in ref_names:
+                            try:
+                                bf = int(nm.split("_", 1)[0])
+                            except ValueError:
+                                bf = 0
+                            req_blobs.add(bf)
+                            p = os.path.join(blob_dir, nm)
                             if os.path.isfile(p):
-                                bfiles.append((i, 0, p))
-                    if bfiles:
+                                bfiles.append((bf, 0, p))
                         yield PointCacheFiles(
-                            "%s::%s::Geometry Nodes::%s/blobs" % (scene.name,
-                                                                  obj.name, label),
-                            "Geometry Nodes", obj.name, "%s/blobs" % label,
-                            blob_dir, bfiles, [])  # blobs aren't frame-indexed
+                            ident_blobs, "Geometry Nodes", obj.name,
+                            "%s/blobs" % label, blob_dir, sorted(bfiles),
+                            sorted(req_blobs))
 
 
 def iter_hashable_cache_files(scenes):
@@ -1170,19 +1258,24 @@ def inspect_gn_bakes(obj, mod, scene):
     for b in bakes:
         e = CacheEntry(obj.name, "Geometry Nodes", "gn")
         e.scene_range = (scene.frame_start, scene.frame_end)
-        target = _resolve_gn_target(b, mod)
-        if target != "DISK":
+        status = _gn_disk_status(b, mod)
+        if status != "disk":
             # PACKED (or an unrecognised/inherited-packed target) leaves no
             # Python-visible files. Phase 0 §3b: report UNKNOWN, never guess.
             e.baked_determinable = False
             e.baked_flag = None
             e.file_check_applicable = False
-            e.path_note = ("packed Geometry Nodes bake (not visible to Python)"
-                           if target in ("PACKED", "") else
-                           "Geometry Nodes bake target '%s'" % target.title())
+            if status == "packed":
+                e.path_note = "packed Geometry Nodes bake (not visible to Python)"
+            else:
+                t = _resolve_gn_target(b, mod)
+                e.path_note = ("packed Geometry Nodes bake (not visible to Python)"
+                               if t in ("PACKED", "") else
+                               "Geometry Nodes bake target '%s'" % t.title())
             out.append(e)
             continue
-        # Disk bake. Honour a per-bake custom directory and frame range.
+        # Disk bake (incl. Blender 4.2, which has no bake_target and always writes
+        # sim bakes to disk). Honour a per-bake custom directory and frame range.
         use_custom = bool(getattr(b, "use_custom_path", False))
         raw = (getattr(b, "directory", "") or mod_raw) if use_custom else mod_raw
         e.uses_disk = True

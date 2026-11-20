@@ -2832,12 +2832,16 @@ def hash_fluid_tests():
 
 
 def hash_gn_tests():
-    """Geometry Nodes DISK-bake cache-hash coverage on a REAL bake.
+    """Geometry Nodes DISK-bake cache-hash coverage on REAL bakes (meta + blobs).
 
-    GN sim bakes go to disk on 4.5/5.0/5.2 (bake_target DISK); on 4.2 there is no
-    modifier bake_target, so they go PACKED and GN disk hashing is not applicable
-    (recorded, never a false pass). PACKED bakes are never hashed — they must not be
-    mistaken for a missing disk cache. Preserves the B1-B7 protections."""
+    GN sim bakes are written to disk on ALL four versions: via ``bake_target='DISK'``
+    on 4.5/5.0/5.2, and via ``bake_directory`` alone on 4.2 (which has no
+    ``bake_target`` and no packed storage — packed arrived in 4.3). The on-disk
+    layout is identical, so GN disk hashing runs on 4.2 too (review B2). A PACKED
+    bake (4.3+) is never hashed — it must not be mistaken for a missing disk cache.
+    The bake is a real moving simulation, so it writes genuine ``blobs/*.blob`` with
+    the first-frame topology blob that every later frame depends on (review M1).
+    Preserves the B1-B7 protections and adds the B1 interior-coverage protection."""
     import shutil
     from failsafe import (cachehash as ch, baseline as bl, cache_inspect as ci,
                           cli)
@@ -2847,27 +2851,38 @@ def hash_gn_tests():
     def _meta(report):
         return [s for s in report.sims if s.identity.endswith("/meta")]
 
+    def _blobs(report):
+        return [s for s in report.sims if s.identity.endswith("/blobs")]
+
     # A PACKED bake must NOT be hashed (never mistaken for a missing disk cache).
+    # On 4.2 packing is impossible, so this falls back to a disk bake; assert the
+    # packed rule only where a packed bake was actually produced.
     psrc = os.path.join(tmp, "packed")
     os.makedirs(psrc, exist_ok=True)
-    fixtures._make_gn_disk_blend(psrc, packed=True)
+    _pb, _pdisk, packed_made = fixtures._make_gn_disk_blend(psrc, packed=True)
     precs = list(ci.iter_gn_cache_files(list(bpy.data.scenes)))
-    out.append(("GN packed bake is NOT hashed (stays Couldn't verify)",
-                len(precs) == 0, len(precs), 0))
+    if packed_made:
+        out.append(("GN packed bake is NOT hashed (stays Couldn't verify)",
+                    len(precs) == 0, len(precs), 0))
+    else:
+        out.append(("GN packed unavailable on this Blender (4.2) — disk bake made "
+                    "instead, recorded not a false pass", True, "4.2 disk", "n/a"))
 
-    # A real DISK bake.
+    # A real DISK bake (meta + blobs). Runs on every version now, incl. 4.2.
     src = os.path.join(tmp, "src")
     os.makedirs(src, exist_ok=True)
-    _blend, disk = fixtures._make_gn_disk_blend(src)
-    if not disk:
-        out.append(("GN disk bake unavailable on this Blender (4.2 packed) — "
-                    "recorded, not a false pass", True, "packed-only", "n/a"))
-        return out
+    _blend, disk, _pm = fixtures._make_gn_disk_blend(src)
+    out.append(("GN disk bake produced on this Blender (incl. 4.2, review B2)",
+                disk, disk, True))
 
     recs = list(ci.iter_gn_cache_files(list(bpy.data.scenes)))
-    out.append(("GN disk bake -> meta record enumerated with files",
+    out.append(("GN disk bake -> meta record with files",
                 any(r.identity.endswith("/meta") and r.files for r in recs),
-                len(recs), ">=1 meta"))
+                len([r for r in recs if r.identity.endswith("/meta")]), ">=1 meta"))
+    # The moving sim must actually write blob dependencies for M1 to be real.
+    out.append(("GN disk bake -> real blob dependency record enumerated",
+                any(r.identity.endswith("/blobs") and r.files for r in recs),
+                len([r for r in recs if r.identity.endswith("/blobs")]), ">=1 blobs"))
     man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
     bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
                      overwrite=True, cache_hashes=man)
@@ -2878,13 +2893,14 @@ def hash_gn_tests():
         bpy.ops.wm.open_mainfile(filepath=os.path.join(dst, "gn.blend"))
         return dst
 
-    # (1) unchanged -> meta UNCHANGED -> PASS
+    # (1) unchanged -> meta AND blobs UNCHANGED -> #27 PASS
     _open("pass")
     rep = ch.build_report(list(bpy.data.scenes))
-    ms = _meta(rep)
-    out.append(("GN unchanged: meta UNCHANGED",
-                bool(ms) and all(s.state == ch.S_UNCHANGED for s in ms),
-                [s.state for s in ms], "UNCHANGED"))
+    ms, bs = _meta(rep), _blobs(rep)
+    out.append(("GN unchanged: meta + blobs all UNCHANGED",
+                bool(ms) and bool(bs)
+                and all(s.state == ch.S_UNCHANGED for s in ms + bs),
+                [s.state for s in ms + bs], "UNCHANGED"))
     results = engine.run_all(bpy.context, hash_verify=rep)
     out.append(("GN unchanged -> #27 PASS",
                 worst_for_check(results, 27) == Status.PASS,
@@ -2925,31 +2941,86 @@ def hash_gn_tests():
                 cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                 cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
-    # (4) blob dependencies: inject a blob file, baseline, verify, then change it.
-    # (The trivial sim stored data inline, so we exercise the blob path with an
-    # injected blob; hashing is content-agnostic. meta hashing is on the real bake.)
-    dst = _open("blobs")
-    bdir = fixtures.gn_bake_dir(dst)
-    blobs = os.path.join(bdir, "blobs")
-    os.makedirs(blobs, exist_ok=True)
-    bp = os.path.join(blobs, "0000000000000000")
-    with open(bp, "wb") as fh:
-        fh.write(b"BLOBDATA-v1" * 64)
-    man2 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    # (B1) interior frame MISSING BEFORE the baseline is captured. The expected set
+    # can't come from the sim-zone bake range, so #27 uses the contiguous span of
+    # present frames: a hole inside it is uncovered -> INCOMPLETE_REF, never an
+    # unqualified PASS for complete coverage (review B1).
+    hole = os.path.join(tmp, "hole")
+    os.makedirs(hole, exist_ok=True)
+    fixtures._make_gn_disk_blend(hole)
+    hbdir = fixtures.gn_bake_dir(hole)
+    hmeta = sorted(f for f in os.listdir(os.path.join(hbdir, "meta"))
+                   if f.endswith(".json"))
+    # Remove a genuinely interior meta frame (not first/last) BEFORE baseline.
+    interior = hmeta[len(hmeta) // 2]
+    os.remove(os.path.join(hbdir, "meta", interior))
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(hole, "gn.blend"))
+    man_h = ch.capture(list(bpy.data.scenes), ci.blend_dir())
     bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
-                     overwrite=True, cache_hashes=man2)
+                     overwrite=True, cache_hashes=man_h)
     rep = ch.build_report(list(bpy.data.scenes))
-    brecs = [s for s in rep.sims if s.identity.endswith("/blobs")]
-    out.append(("GN blob record captured + verified UNCHANGED",
-                bool(brecs) and brecs[0].state == ch.S_UNCHANGED,
-                [s.state for s in brecs], "UNCHANGED"))
-    with open(bp, "wb") as fh:
-        fh.write(b"BLOBDATA-v2-CHANGED" * 64)
+    ms = _meta(rep)
+    out.append(("GN interior hole before baseline: meta is INCOMPLETE_REF, not PASS",
+                bool(ms) and ms[0].state == ch.S_INCOMPLETE_REF
+                and bool(ms[0].uncovered),
+                [(s.state, s.uncovered) for s in ms], "INCOMPLETE_REF + uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("GN interior hole -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("GN interior hole -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (B1b) an enabled disk bake with an EMPTY meta directory must NOT be silently
+    # omitted — a record is still enumerated so a verify can't read clean.
+    empt = os.path.join(tmp, "empty")
+    os.makedirs(empt, exist_ok=True)
+    fixtures._make_gn_disk_blend(empt)
+    ebdir = fixtures.gn_bake_dir(empt)
+    for f in os.listdir(os.path.join(ebdir, "meta")):
+        os.remove(os.path.join(ebdir, "meta", f))
+    erecs = [r for r in ci.iter_gn_cache_files(list(bpy.data.scenes))
+             if r.identity.endswith("/meta")]
+    out.append(("GN empty meta dir: still enumerated (not omitted), no files",
+                len(erecs) >= 1 and erecs[0].files == [],
+                (len(erecs), erecs[0].files if erecs else None), ">=1, []"))
+
+    # (M1) REAL blob dependency: change an actual position blob -> blobs CHANGED.
+    dst = _open("blobchg")
+    bdir = fixtures.gn_bake_dir(dst)
+    blobnames = sorted(f for f in os.listdir(os.path.join(bdir, "blobs"))
+                       if f.endswith(".blob"))
+    # Change a LATER frame's position blob (not the shared first-frame one).
+    tgtblob = os.path.join(bdir, "blobs", blobnames[-1])
+    with open(tgtblob, "r+b") as fh:
+        fh.seek(0)
+        b0 = fh.read(1)
+        fh.seek(0)
+        fh.write(bytes([b0[0] ^ 0xFF]))
     rep = ch.build_report(list(bpy.data.scenes))
-    brecs = [s for s in rep.sims if s.identity.endswith("/blobs")]
-    out.append(("GN changed blob -> blobs CHANGED",
-                bool(brecs) and brecs[0].state == ch.S_CHANGED,
-                [s.state for s in brecs], ch.S_CHANGED))
+    bs = _blobs(rep)
+    out.append(("GN changed real blob -> blobs CHANGED",
+                bool(bs) and bs[0].state == ch.S_CHANGED,
+                [s.state for s in bs], ch.S_CHANGED))
+
+    # (M1b) REAL missing dependency: delete the first-frame topology blob that every
+    # later frame references. It was baselined, so it reports missing -> never PASS,
+    # and floors a requested verify.
+    dst = _open("blobdep")
+    bdir = fixtures.gn_bake_dir(dst)
+    first_blob = sorted(f for f in os.listdir(os.path.join(bdir, "blobs"))
+                        if f.endswith(".blob"))[0]
+    os.remove(os.path.join(bdir, "blobs", first_blob))
+    rep = ch.build_report(list(bpy.data.scenes))
+    bs = _blobs(rep)
+    out.append(("GN missing dependency blob: blobs not UNCHANGED, has missing",
+                bool(bs) and bs[0].state != ch.S_UNCHANGED
+                and (bool(bs[0].missing) or bool(bs[0].uncovered)),
+                [(s.state, s.missing, s.uncovered) for s in bs], "missing/uncovered"))
+    out.append(("GN missing dependency blob -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
     # (5) relocation (// bake dir) -> meta UNCHANGED
     reloc = os.path.join(tmp, "moved", "x")

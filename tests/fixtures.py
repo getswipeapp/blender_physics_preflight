@@ -805,18 +805,29 @@ def build_fluid_missing_mesh_frame(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
-def _make_gn_disk_blend(outdir, frame_end=4, packed=False):
-    """Create a Geometry Nodes simulation-zone bake and (when the Blender build
-    exposes it) store it on DISK, so the GN cache-hash tests run on a real bake.
+def _make_gn_disk_blend(outdir, frame_end=6, packed=False):
+    """Create a Geometry Nodes simulation-zone bake with a REAL moving simulation,
+    stored on DISK, so the GN cache-hash tests run on a genuine bake that writes
+    both ``meta/*.json`` AND ``blobs/*.blob`` (the heavy attribute data).
 
-    Returns ``(blend_path, disk_available)``. ``disk_available`` is False on builds
-    without ``modifier.bake_target`` (Blender 4.2), where sim bakes go PACKED — the
-    caller then skips the disk-only assertions. ``packed=True`` forces a packed
-    bake even where disk is available (to prove packed bakes aren't hashed)."""
+    The zone feeds its previous state through a Set Position offset, so each baked
+    frame carries real, changing geometry — which is what makes Blender spill the
+    attribute arrays to blob files (a trivial passthrough stored nothing and wrote
+    no blobs). The grid is dense enough that the position array is always a blob.
+
+    Returns ``(blend_path, disk_available, packed_made)``:
+      * ``disk_available`` — a real disk bake was written (True on ALL four versions:
+        GN sim bakes go to disk on 4.5/5.0/5.2 via ``bake_target='DISK'`` and on 4.2
+        via ``bake_directory`` alone, since 4.2 has no ``bake_target`` and no packed
+        storage).
+      * ``packed_made`` — a PACKED bake was actually produced (only possible where
+        ``bake_target`` exists, i.e. 4.3+). ``packed=True`` on 4.2 can't pack, so it
+        falls back to a disk bake and ``packed_made`` is False (the caller skips the
+        packed-only assertion there)."""
     reset()
     sc = bpy.context.scene
     sc.frame_start, sc.frame_end = 1, frame_end
-    bpy.ops.mesh.primitive_grid_add(x_subdivisions=12, y_subdivisions=12, size=4)
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=24, y_subdivisions=24, size=4)
     ob = bpy.context.active_object
     ob.name = "GNObj"
     mod = ob.modifiers.new("GeoNodes", "NODES")
@@ -832,24 +843,48 @@ def _make_gn_disk_blend(outdir, frame_end=4, packed=False):
     si = n.new("GeometryNodeSimulationInput")
     so = n.new("GeometryNodeSimulationOutput")
     si.pair_with_output(so)
+
+    def _geo_in(node):
+        for i, s in enumerate(node.inputs):
+            if s.type == "GEOMETRY":
+                return i
+        return 0
+
+    def _geo_out(node):
+        for i, s in enumerate(node.outputs):
+            if s.type == "GEOMETRY":
+                return i
+        return 0
+
+    setp = n.new("GeometryNodeSetPosition")
+    off = n.new("ShaderNodeCombineXYZ")
+    try:
+        off.inputs[2].default_value = 0.05
+    except Exception:
+        pass
     L = ng.links.new
-    L(gi.outputs[0], si.inputs[0])
-    L(si.outputs[0], so.inputs[0])
-    L(so.outputs[0], go.inputs[0])
+    L(gi.outputs[0], si.inputs[_geo_in(si)])          # initial geometry
+    L(si.outputs[_geo_out(si)], setp.inputs[0])       # previous state -> Set Position
+    L(off.outputs[0], setp.inputs[3])                 # Offset (+Z each step)
+    L(setp.outputs[0], so.inputs[_geo_in(so)])        # store new state
+    L(so.outputs[_geo_out(so)], go.inputs[0])
+
     blend = os.path.join(outdir, "gn.blend")
     bpy.ops.wm.save_as_mainfile(filepath=blend)
-    disk_available = hasattr(mod, "bake_target") and not packed
-    if disk_available:
-        mod.bake_target = "DISK"
-        mod.bake_directory = "//gnbake"
-        bpy.ops.wm.save_as_mainfile(filepath=blend)
+    has_bt = hasattr(mod, "bake_target")
+    packed_made = bool(packed and has_bt)
+    if has_bt:
+        mod.bake_target = "PACKED" if packed_made else "DISK"
+    if not packed_made:
+        mod.bake_directory = "//gnbake"   # disk location (honoured on 4.2 too)
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
     bpy.context.view_layer.objects.active = ob
     ob.select_set(True)
     with bpy.context.temp_override(scene=sc, active_object=ob, object=ob,
                                    selected_objects=[ob]):
         bpy.ops.object.simulation_nodes_cache_bake()
     bpy.ops.wm.save_mainfile()
-    return blend, disk_available
+    return blend, (not packed_made), packed_made
 
 
 def gn_bake_dir(outdir, blend=None):
