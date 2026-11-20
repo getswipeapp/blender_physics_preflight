@@ -172,6 +172,40 @@ baseline→INCOMPLETE_REF (#27 UNKNOWN)+floor, empty meta dir→still enumerated
 changed real blob→CHANGED, missing first-frame dependency blob→missing+floor,
 relocation→unchanged, cancellation→writes nothing.
 
+### GN review round 3 (2026-11-20) — B3/B4, certified 4 versions
+
+Two remaining coverage blockers after round 2, both about COMPLETENESS of
+verification (not the SHA-256 maths):
+
+- **B4 — a reliable expected frame range (head/tail completeness).** Round 2 used
+  the **contiguous present span** `min(present)..max(present)`, which cannot see a
+  first or last frame that was already absent when the baseline was captured (only
+  3..6 present → span 3..6 → clean). **Research result (real bakes, all four
+  versions):** the sim-zone range IS reliably recoverable — it is the **custom
+  simulation frame range** when `use_custom_simulation_frame_range` is set, else the
+  **scene frame range** (scene (3,8) baked frames 3..8; custom (2,4) baked 2..4). The
+  misleading field is only `bake_mode`/`frame_end` (reports `STILL`/100 for a sim
+  zone). The bake item's **`node.bl_idname`** reliably says which kind it is
+  (`GeometryNodeSimulationOutput` vs `GeometryNodeBake`), so `_gn_expected_range()`
+  honours `bake_mode` only for a real Bake node and uses custom-or-scene range for a
+  sim zone. #27's `required` is now that range, so a missing HEAD or TAIL frame is
+  uncovered → `S_INCOMPLETE_REF` → UNKNOWN + floor. `inspect_gn_bakes` (#19/#20) uses
+  the same helper, so the structural checks no longer rely on the unreliable fields.
+  When the range genuinely can't be established (an unknown future bake-node kind),
+  it falls back to the present span and does not imply head/tail coverage.
+- **B3 — blob identity collision.** Round 2 reduced required blob coverage to the
+  bare **frame number** (`req_blobs.add(frame)`), so two blobs sharing a frame
+  (`00001_00000.blob` + `00001_00001.blob`) collapsed to one; a sibling absent before
+  baseline could hide behind a present same-frame blob and read as PASS. **Real bakes
+  (all four versions) write exactly one blob per frame (index 0)** — every attribute
+  is packed into it at byte offsets — but the filename scheme `(<frame>_<index>)`
+  ALLOWS siblings, so coverage must be per exact file. `_gn_blob_coverage_key(frame,
+  index)` now encodes the pair into one int (index 0 → the plain frame for natural
+  display; index > 0 → a distinct key above the Blender frame ceiling), and `required`
+  holds those keys. An adversarial fixture (a real bake whose first meta is edited to
+  reference an absent `_00001` sibling) proves it: the present `_00000` blob matches,
+  yet the absent sibling stays uncovered → `INCOMPLETE_REF` → floor.
+
 ## History
 
 1. `cache_inspect.iter_fluid_cache_files(scenes)` → one record per domain stage,
