@@ -295,71 +295,77 @@ def gn_unit_tests():
         got = ci._resolve_gn_target(bake, mod)
         out.append(("gn target: " + label, got == expect, got, expect))
 
-    # R07: a custom PATH must not trigger custom-range handling; only a custom
-    # frame range (or STILL) changes the range.
-    scene = Fake(frame_start=1, frame_end=10)
-    range_cases = [
-        ("custom path only -> scene range",
-         Fake(bake_mode="ANIMATION", use_custom_path=True,
-              use_custom_simulation_frame_range=False, frame_start=0, frame_end=0),
-         (1, 10)),
-        ("custom range -> its own range",
-         Fake(bake_mode="ANIMATION", use_custom_simulation_frame_range=True,
-              frame_start=3, frame_end=7), (3, 7)),
-        ("no customisation -> scene range",
-         Fake(bake_mode="ANIMATION"), (1, 10)),
-        ("still frame -> single frame",
-         Fake(bake_mode="STILL", frame_start=5), (5, 5)),
-    ]
-    for label, bake, expect in range_cases:
-        got = ci._gn_bake_range(bake, scene)
-        out.append(("gn range: " + label, got == expect, got, expect))
-
-    # B4: the RELIABLE expected range ignores bake_mode for a simulation zone (which
-    # misreports STILL) and uses the scene range, or the custom sim range when set.
-    # A Bake node's bake_mode is genuine and IS honoured. Unknown kind -> None.
+    # B4 / B4a: the RELIABLE expected range ignores bake_mode for a simulation zone
+    # (which misreports STILL) and uses, in precedence, the per-bake custom simulation
+    # range > the SCENE-WIDE custom simulation range (scene.use_custom_simulation_range,
+    # which OVERRIDES the scene range) > the scene range. A Bake node is skipped by #27
+    # and only informs #17: its STILL frame is not derivable -> None; ANIMATION -> the
+    # frame range. Unknown kind -> None.
     def _node(idname):
         return Fake(bl_idname=idname)
+    scene = Fake(frame_start=1, frame_end=10, use_custom_simulation_range=False)
+    scene_wide = Fake(frame_start=1, frame_end=6, use_custom_simulation_range=True,
+                      simulation_frame_start=2, simulation_frame_end=9)
     exp_cases = [
         ("sim zone, no custom -> scene range",
-         Fake(node=_node("GeometryNodeSimulationOutput"),
+         scene, Fake(node=_node("GeometryNodeSimulationOutput"),
               bake_mode="STILL", frame_start=1, frame_end=100,
               use_custom_simulation_frame_range=False), (1, 10)),
         ("sim zone STILL misreport ignored (not single frame)",
-         Fake(node=_node("GeometryNodeSimulationOutput"),
+         scene, Fake(node=_node("GeometryNodeSimulationOutput"),
               bake_mode="STILL", frame_start=5, frame_end=100,
               use_custom_simulation_frame_range=False), (1, 10)),
-        ("sim zone, custom range -> its own range",
-         Fake(node=_node("GeometryNodeSimulationOutput"),
+        ("sim zone, per-bake custom range -> its own range",
+         scene, Fake(node=_node("GeometryNodeSimulationOutput"),
               bake_mode="STILL", use_custom_simulation_frame_range=True,
               frame_start=2, frame_end=4), (2, 4)),
-        ("bake node STILL -> single frame (honoured)",
-         Fake(node=_node("GeometryNodeBake"), bake_mode="STILL",
-              frame_start=5, use_custom_simulation_frame_range=False), (5, 5)),
+        ("sim zone, SCENE-WIDE sim range OVERRIDES scene range (B4a)",
+         scene_wide, Fake(node=_node("GeometryNodeSimulationOutput"),
+              bake_mode="STILL", frame_start=1, frame_end=100,
+              use_custom_simulation_frame_range=False), (2, 9)),
+        ("sim zone, per-bake custom range BEATS scene-wide sim range (B4a precedence)",
+         scene_wide, Fake(node=_node("GeometryNodeSimulationOutput"),
+              bake_mode="STILL", use_custom_simulation_frame_range=True,
+              frame_start=3, frame_end=5), (3, 5)),
+        ("bake node STILL -> None (baked frame not derivable)",
+         scene, Fake(node=_node("GeometryNodeBake"), bake_mode="STILL",
+              frame_start=5, use_custom_simulation_frame_range=False), None),
         ("bake node ANIMATION -> scene range",
-         Fake(node=_node("GeometryNodeBake"), bake_mode="ANIMATION",
+         scene, Fake(node=_node("GeometryNodeBake"), bake_mode="ANIMATION",
               use_custom_simulation_frame_range=False), (1, 10)),
         ("unknown node kind -> None (can't establish)",
-         Fake(node=_node("GeometryNodeFoo"), bake_mode="STILL"), None),
+         scene, Fake(node=_node("GeometryNodeFoo"), bake_mode="STILL"), None),
         ("no node at all -> None",
-         Fake(bake_mode="STILL"), None),
+         scene, Fake(bake_mode="STILL"), None),
     ]
-    for label, bake, expect in exp_cases:
-        got = ci._gn_expected_range(bake, scene)
+    for label, sc, bake, expect in exp_cases:
+        got = ci._gn_expected_range(bake, sc)
         out.append(("gn expected-range: " + label, got == expect, got, expect))
 
-    # B3: a blob's coverage key is its EXACT (frame, index) identity. Index 0 keeps
-    # the natural frame number; two blobs sharing a frame but differing in index MUST
-    # get distinct keys, so an absent sibling can't be masked by a present one.
+    # _gn_is_sim_zone: only a Simulation Output node is a sim zone (hashed by #27).
+    out.append(("gn sim-zone: Simulation Output is a sim zone",
+                ci._gn_is_sim_zone(Fake(node=_node("GeometryNodeSimulationOutput"))) is True,
+                True, True))
+    out.append(("gn sim-zone: Bake node is NOT a sim zone (skipped by #27)",
+                ci._gn_is_sim_zone(Fake(node=_node("GeometryNodeBake"))) is False,
+                False, False))
+    out.append(("gn sim-zone: no node is NOT a sim zone",
+                ci._gn_is_sim_zone(Fake()) is False, False, False))
+
+    # B3 (round 3): a blob's coverage identity is its EXACT filename STEM, so it can
+    # NEVER collide. The old packed-int scheme mapped 00000_00001.blob and
+    # 00001_00000.blob both to 1 (frame-0 collision); stems keep them distinct.
     k = ci._gn_blob_coverage_key
-    out.append(("gn blob key: index 0 is the plain frame",
-                k(6, 0) == 6, k(6, 0), 6))
+    out.append(("gn blob key: stem of a plain blob",
+                k("00006_00000.blob") == "00006_00000",
+                k("00006_00000.blob"), "00006_00000"))
+    out.append(("gn blob key: frame-0 sibling vs frame-1 blob are DISTINCT (B3)",
+                k("00000_00001.blob") != k("00001_00000.blob"),
+                (k("00000_00001.blob"), k("00001_00000.blob")), "distinct"))
     out.append(("gn blob key: same-frame siblings are DISTINCT (B3)",
-                len({k(1, 0), k(1, 1), k(1, 2)}) == 3,
-                sorted({k(1, 0), k(1, 1), k(1, 2)}), "3 distinct"))
-    out.append(("gn blob key: a sibling never collides with another frame",
-                k(1, 1) != k(2, 0) and k(1, 1) != 1,
-                (k(1, 1), k(2, 0)), "no collision"))
+                len({k("00001_00000.blob"), k("00001_00001.blob"),
+                     k("00001_00002.blob")}) == 3,
+                "3 distinct stems", "3 distinct"))
 
     # Metadata present but blobs/ missing -> not COMPLETE (R03).
     e = ci.CacheEntry("Obj", "Geometry Nodes", "gn")
@@ -3068,12 +3074,13 @@ def hash_gn_tests():
                 cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                 cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
-    # (B3) BLOB IDENTITY COLLISION. Real bakes write one blob per frame (index 0),
-    # but the filename scheme allows same-frame siblings (<frame>_00001.blob). Inject
-    # a reference to a sibling that is ABSENT on disk, BEFORE the baseline is captured.
-    # The present same-frame blob (<frame>_00000.blob) must NOT mask it: coverage is
-    # tracked per exact (frame, index), so the absent sibling is uncovered -> never a
-    # clean PASS, and floors a requested verify (review B3).
+    # (B3, round 3) FRAME-0 BLOB IDENTITY COLLISION. The old packed-int key mapped
+    # 00000_00001.blob and 00001_00000.blob BOTH to 1, so a present frame-1 blob could
+    # cover an absent frame-0 sibling and read as a clean PASS. Inject a reference to an
+    # ABSENT "00000_00001.blob" while the present "00001_00000.blob" stays on disk,
+    # BEFORE the baseline is captured. With exact filename-stem identities the present
+    # frame-1 blob must NOT mask the absent frame-0 sibling: it stays uncovered -> never
+    # a clean PASS, and floors a requested verify (review B3).
     import json as _json
     coll = os.path.join(tmp, "collide")
     os.makedirs(coll, exist_ok=True)
@@ -3081,39 +3088,44 @@ def hash_gn_tests():
     cbdir = fixtures.gn_bake_dir(coll)
     cmeta = sorted(f for f in os.listdir(os.path.join(cbdir, "meta"))
                    if f.endswith(".json"))
+    # The present blob that WOULD have collided with the absent frame-0 sibling.
+    present_blob = "00001_00000.blob"
+    absent_sibling = "00000_00001.blob"  # frame 0, index 1 — never written
+    has_present = os.path.isfile(os.path.join(cbdir, "blobs", present_blob))
     first_meta = os.path.join(cbdir, "meta", cmeta[0])  # 00001_00000.json
-    sibling = cmeta[0].replace(".json", "").split("_")[0] + "_00001.blob"
     with open(first_meta, "r", encoding="utf-8") as fh:
         j = _json.load(fh)
-    # A valid-JSON reference to a non-existent same-frame sibling blob.
-    j["_failsafe_adversarial_ref"] = {"name": sibling, "start": 0, "size": 1}
+    # A valid-JSON reference to the non-existent frame-0 sibling blob.
+    j["_failsafe_adversarial_ref"] = {"name": absent_sibling, "start": 0, "size": 1}
     with open(first_meta, "w", encoding="utf-8") as fh:
         _json.dump(j, fh)
     bpy.ops.wm.open_mainfile(filepath=os.path.join(coll, "gn.blend"))
-    # The enumerator must track the present AND the absent same-frame blob distinctly.
+    # The two files must carry DISTINCT coverage identities (the old int key collided).
+    sib_key = ci._gn_blob_coverage_key(absent_sibling)      # "00000_00001"
+    present_key = ci._gn_blob_coverage_key(present_blob)     # "00001_00000"
     crecs = [r for r in ci.iter_gn_cache_files(list(bpy.data.scenes))
              if r.identity.endswith("/blobs")]
-    sib_key = ci._gn_blob_coverage_key(int(cmeta[0].split("_")[0]), 1)
-    present_frame1 = ci._gn_blob_coverage_key(int(cmeta[0].split("_")[0]), 0)
-    out.append(("GN B3: same-frame sibling tracked as a DISTINCT required identity",
-                bool(crecs) and sib_key in crecs[0].required
-                and present_frame1 in crecs[0].required,
+    out.append(("GN B3: frame-0 sibling and frame-1 blob have DISTINCT identities",
+                sib_key != present_key, (sib_key, present_key), "distinct"))
+    out.append(("GN B3: both the present blob and the absent sibling are tracked",
+                has_present and bool(crecs) and sib_key in crecs[0].required
+                and present_key in crecs[0].required,
                 (sib_key in crecs[0].required if crecs else None,
-                 present_frame1 in crecs[0].required if crecs else None),
+                 present_key in crecs[0].required if crecs else None),
                 "both tracked"))
     man_c = ch.capture(list(bpy.data.scenes), ci.blend_dir())
     bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
                      overwrite=True, cache_hashes=man_c)
     rep = ch.build_report(list(bpy.data.scenes))
     bs = _blobs(rep)
-    # The present same-frame blob matched, yet the absent sibling is still uncovered:
-    # the collision did NOT mask it.
-    out.append(("GN B3: present sibling does NOT mask the absent one (matched + uncovered)",
+    # The present frame-1 blob matched, yet the absent frame-0 sibling is still
+    # uncovered: the collision did NOT mask it.
+    out.append(("GN B3: present frame-1 blob does NOT mask absent frame-0 sibling",
                 bool(bs) and bs[0].state != ch.S_UNCHANGED
-                and bool(bs[0].uncovered) and bool(bs[0].matched),
+                and (sib_key in (bs[0].uncovered or [])) and bool(bs[0].matched),
                 [(s.state, s.matched, s.uncovered) for s in bs],
-                "matched + uncovered, not UNCHANGED"))
-    out.append(("GN B3: absent same-frame sibling -> requested verify nonzero",
+                "matched + sibling uncovered, not UNCHANGED"))
+    out.append(("GN B3: absent frame-0 sibling -> requested verify nonzero",
                 cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                 cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
@@ -3149,6 +3161,83 @@ def hash_gn_tests():
         out.append(("GN B4: missing %s frame -> requested verify nonzero" % pos,
                     cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                     cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (B4a, round 3) SCENE-WIDE custom simulation range. With scene range 1..6 but a
+    # scene-wide simulation range 1..8, the sim bakes 1..8. Delete the TAIL frame (8),
+    # which lies OUTSIDE the scene range, BEFORE baseline. If the expected set wrongly
+    # used the scene range (1..6), the surviving 1..7 would fully cover it and read as a
+    # clean PASS. Honouring the scene-wide range (1..8) makes frame 8 uncovered ->
+    # INCOMPLETE_REF -> #27 UNKNOWN. This is the discriminating test for B4a.
+    swr = os.path.join(tmp, "scene_wide")
+    os.makedirs(swr, exist_ok=True)
+    _sb, _sd, _sp = fixtures._make_gn_disk_blend(swr, frame_end=6,
+                                                 scene_sim_range=(1, 8))
+    if hasattr(bpy.context.scene, "use_custom_simulation_range"):
+        swbd = fixtures.gn_bake_dir(swr)
+        swmetas = sorted(f for f in os.listdir(os.path.join(swbd, "meta"))
+                         if f.endswith(".json"))
+        baked_frames = [int(f.split("_")[0]) for f in swmetas]
+        out.append(("GN B4a: scene-wide sim range (1..8) baked frames beyond scene range",
+                    baked_frames == list(range(1, 9)), baked_frames, [1, 2, 3, 4, 5, 6, 7, 8]))
+        tail_gone = int(swmetas[-1].split("_")[0])      # frame 8, outside scene 1..6
+        os.remove(os.path.join(swbd, "meta", swmetas[-1]))
+        bpy.ops.wm.open_mainfile(filepath=os.path.join(swr, "gn.blend"))
+        man_sw = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+        bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                         overwrite=True, cache_hashes=man_sw)
+        rep = ch.build_report(list(bpy.data.scenes))
+        ms = _meta(rep)
+        out.append(("GN B4a: tail frame beyond scene range is uncovered, not a PASS",
+                    bool(ms) and ms[0].state == ch.S_INCOMPLETE_REF
+                    and tail_gone in (ms[0].uncovered or []),
+                    [(s.state, s.uncovered) for s in ms],
+                    "INCOMPLETE_REF incl. frame %d" % tail_gone))
+        results = engine.run_all(bpy.context, hash_verify=rep)
+        out.append(("GN B4a: scene-wide tail gap -> #27 UNKNOWN (never PASS)",
+                    worst_for_check(results, 27) == Status.UNKNOWN,
+                    worst_for_check(results, 27), Status.UNKNOWN))
+        out.append(("GN B4a: scene-wide tail gap -> requested verify nonzero",
+                    cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                    cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+    else:
+        out.append(("GN B4a: scene-wide sim range unavailable on this Blender — skipped",
+                    True, "n/a", "n/a"))
+
+    # (custom-path, round 3) A per-bake CUSTOM path stores files DIRECTLY under it, with
+    # NO <bake_id> subfolder. The enumerator must look there (not <custom>/<bake_id>),
+    # else a correctly-baked custom-path cache reads as empty. Prove it: a full custom-
+    # path bake verifies UNCHANGED (files found) and #27 PASSES.
+    cust = os.path.join(tmp, "custpath")
+    os.makedirs(cust, exist_ok=True)
+    custom_dir = os.path.join(cust, "mybakes")
+    os.makedirs(custom_dir, exist_ok=True)
+    _cb, _cd, _cp = fixtures._make_gn_disk_blend(cust, frame_end=5,
+                                                 custom_bake_dir=custom_dir)
+    direct_meta = sorted(f for f in os.listdir(os.path.join(custom_dir, "meta"))
+                         if f.endswith(".json")) if os.path.isdir(
+                             os.path.join(custom_dir, "meta")) else []
+    if direct_meta:
+        recs_c = [r for r in ci.iter_gn_cache_files(list(bpy.data.scenes))
+                  if r.identity.endswith("/meta")]
+        out.append(("GN custom-path: files found directly under the custom dir (no bake_id)",
+                    bool(recs_c) and bool(recs_c[0].files)
+                    and all("/meta" in r.identity for r in recs_c),
+                    [len(r.files) for r in recs_c], ">=1 file located"))
+        man_cp = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+        bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                         overwrite=True, cache_hashes=man_cp)
+        rep = ch.build_report(list(bpy.data.scenes))
+        ms, bs = _meta(rep), _blobs(rep)
+        out.append(("GN custom-path: full custom-path bake -> meta + blobs UNCHANGED",
+                    bool(ms) and all(s.state == ch.S_UNCHANGED for s in ms + bs),
+                    [s.state for s in ms + bs], "UNCHANGED"))
+        results = engine.run_all(bpy.context, hash_verify=rep)
+        out.append(("GN custom-path: full custom-path bake -> #27 PASS",
+                    worst_for_check(results, 27) == Status.PASS,
+                    worst_for_check(results, 27), Status.PASS))
+    else:
+        out.append(("GN custom-path: custom-path bake produced no disk files — skipped",
+                    True, "n/a", "n/a"))
 
     # (5) relocation (// bake dir) -> meta UNCHANGED
     reloc = os.path.join(tmp, "moved", "x")

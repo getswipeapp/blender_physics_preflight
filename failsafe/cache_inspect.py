@@ -1047,8 +1047,6 @@ def iter_fluid_cache_files(scenes):
 _GN_META_RE = re.compile(r"(\d{5,})_\d+\.json$")
 # A blob FILENAME as it appears referenced inside a meta JSON ("00001_00000.blob").
 _GN_BLOB_NAME_RE = re.compile(r"(\d{5,}_\d+)\.blob")
-# Parse a blob filename into its (frame, index) parts.
-_GN_BLOB_PARTS_RE = re.compile(r"(\d+)_(\d+)\.blob$")
 
 # A blob file's identity is (frame, index) — Blender names blobs <frame>_<index>.blob.
 # Real bakes observed on 4.2/4.5/5.0/5.2 write exactly one blob per frame (index 0),
@@ -1056,18 +1054,18 @@ _GN_BLOB_PARTS_RE = re.compile(r"(\d+)_(\d+)\.blob$")
 # frame to spill into sibling blobs (index 1, 2, …), so coverage must be tracked by
 # the exact (frame, index) file, never collapsed to the bare frame number — otherwise
 # a referenced-but-absent sibling could hide behind a present same-frame blob and read
-# as a false PASS (review B3). The coverage pipeline keys on a single int, so we encode
-# (frame, index) into one: index 0 keeps the natural frame number (so ordinary bakes
-# display and sort as plain frames), and any index > 0 gets a distinct, collision-free
-# key above the Blender frame ceiling.
-_GN_BLOB_IDX_MULT = 10_000_000  # > the maximum Blender frame (1,048,574)
+# as a false PASS (review B3). The coverage identity is therefore the blob's exact
+# filename STEM ("00000_00001"): a real, per-file identity that can NEVER collide (an
+# earlier packed-int scheme collided frame 0's siblings with low frame numbers — e.g.
+# 00000_00001.blob and 00001_00000.blob both mapped to 1), is JSON-safe (stored in the
+# baseline sidecar), sorts stably, and displays meaningfully (review B3, round 3).
 
 
-def _gn_blob_coverage_key(frame, idx):
-    """A single int uniquely identifying a blob file by (frame, index) for coverage
-    bookkeeping. Index 0 -> the frame itself (natural display); index > 0 -> a
-    distinct high key so same-frame siblings never collapse together (review B3)."""
-    return frame if idx == 0 else frame * _GN_BLOB_IDX_MULT + idx
+def _gn_blob_coverage_key(name):
+    """The coverage identity of a blob file: its exact filename stem (no ".blob").
+    A real per-file identity, so two blobs sharing a frame number never collapse and a
+    referenced-but-absent sibling can't hide behind a present one (review B3)."""
+    return name[:-5] if name.endswith(".blob") else name
 
 
 def _gn_has_bake_target(bake, mod):
@@ -1108,6 +1106,27 @@ def _gn_bake_base_dir(bake, mod):
     return _abspath(raw) if raw else None
 
 
+def _gn_bake_cache_dir(bake, mod):
+    """The directory that actually holds this bake's ``meta/`` and ``blobs/`` — or
+    None if unresolved.
+
+    Layout verified by real bakes on all four versions (review, round 3):
+      * a per-bake CUSTOM path (``use_custom_path``) is that bake's own folder, so the
+        files sit DIRECTLY under it — ``<directory>/meta`` — with NO ``<bake_id>``
+        subfolder;
+      * the shared modifier ``bake_directory`` is used by every bake on the modifier,
+        so each bake gets its own ``<bake_directory>/<bake_id>/meta`` subfolder.
+    Appending ``<bake_id>`` unconditionally looked in the wrong place for a custom
+    path and would read a correctly-baked custom-path cache as empty."""
+    base_dir = _gn_bake_base_dir(bake, mod)
+    if base_dir is None:
+        return None
+    if bool(getattr(bake, "use_custom_path", False)):
+        return base_dir
+    bake_id = getattr(bake, "bake_id", None)
+    return os.path.join(base_dir, str(bake_id)) if bake_id is not None else None
+
+
 def _gn_referenced_blob_names(meta_paths):
     """The set of blob filenames the given meta JSON files reference BY NAME — the
     bake's real blob DEPENDENCY set.
@@ -1134,25 +1153,32 @@ def _gn_referenced_blob_names(meta_paths):
 
 
 def iter_gn_cache_files(scenes):
-    """Yield :class:`PointCacheFiles` for Geometry Nodes simulation bakes stored on
-    DISK. Each disk bake yields a ``meta`` record (one ``<frame>_<idx>.json`` per
+    """Yield :class:`PointCacheFiles` for Geometry Nodes SIMULATION-ZONE bakes stored
+    on DISK. Each disk bake yields a ``meta`` record (one ``<frame>_<idx>.json`` per
     baked frame, frame-indexed) and — when the present meta reference blob data — a
     ``blobs`` record (the referenced ``<frame>_<idx>.blob`` dependency files).
 
-    ``required`` for the meta record is the RELIABLE expected frame range
-    (:func:`_gn_expected_range`): the custom simulation range when set, else the
-    scene range for a simulation zone (``bake_mode``'s ``STILL``/``frame_end`` 100
-    misreport is ignored — verified on all four versions). This catches a missing
-    HEAD or TAIL frame as well as interior holes (review B4) — none of them read as
-    a complete PASS. When the range can't be established (an unknown bake-node kind),
-    it falls back to the contiguous present span (interior-hole protection only) and
-    does not imply head/tail coverage it can't prove (review B1).
+    Only SIMULATION zones (``GeometryNodeSimulationOutput``) are hashed. An explicit
+    Bake node is a different feature whose baked frame set we can't establish reliably
+    (a STILL bake stores the current-frame-at-bake-time, not derivable from any
+    property), so hashing it could assert a wrong required set — it is skipped and left
+    to the STRUCTURAL #17/#19 checks, never a false PASS (review, round 3).
 
-    ``required`` for the blobs record is the set of EXACT ``(frame, index)``
-    identities the meta files reference (:func:`_gn_blob_coverage_key`), so a
-    referenced-but-absent dependency — including the shared first-frame topology blob,
-    or a sibling blob sharing a frame number with a present one (review B3) — reports
-    as uncovered/missing rather than a silent pass (review M1).
+    ``required`` for the meta record is the RELIABLE expected frame range
+    (:func:`_gn_expected_range`): per-bake custom simulation range if set, else the
+    SCENE-WIDE custom simulation range (``scene.use_custom_simulation_range``, which
+    OVERRIDES the scene frame range — review B4a), else the scene range. ``bake_mode``
+    (which misreports ``STILL``/``frame_end`` 100 for a sim zone) is ignored. This
+    catches a missing HEAD or TAIL frame as well as interior holes (review B4) — none
+    read as a complete PASS. The baked range lives directly under a per-bake CUSTOM
+    path, or under ``<bake_directory>/<bake_id>`` otherwise (:func:`_gn_bake_cache_dir`
+    — review, round 3).
+
+    ``required`` for the blobs record is the set of EXACT filename-stem identities the
+    meta files reference (:func:`_gn_blob_coverage_key`), so a referenced-but-absent
+    dependency — including the shared first-frame topology blob, or a sibling blob
+    sharing a frame number with a present one (review B3) — reports as
+    uncovered/missing rather than a silent pass (review M1).
 
     PACKED bakes (4.3+ default — stored inside the .blend) leave no files and are
     NEVER yielded (they stay the honest 'Couldn't verify' of #17). A DISK bake we
@@ -1174,21 +1200,30 @@ def iter_gn_cache_files(scenes):
                 for b in bakes:
                     if _gn_disk_status(b, mod) != "disk":
                         continue  # packed / unknown target: not hashable (#17)
-                    base_dir = _gn_bake_base_dir(b, mod)
+                    if not _gn_is_sim_zone(b):
+                        # #27 hashes SIMULATION-ZONE caches, whose baked range we can
+                        # establish reliably (every frame). An explicit Bake node is a
+                        # different feature whose baked frame set we do NOT verify here
+                        # (a STILL bake stores the current-frame-at-bake, not derivable
+                        # from any property — review, round 3), so hashing it risks a
+                        # wrong required set. Skip it: #17 still reports it structurally
+                        # ('baked', range undetermined), so it's never a false PASS and
+                        # never silently dropped from the overall verdict.
+                        continue
                     bake_id = getattr(b, "bake_id", None)
                     label = "%s/%s" % (mod.name, bake_id)
                     ident_meta = "%s::%s::Geometry Nodes::%s/meta" % (
                         scene.name, obj.name, label)
                     ident_blobs = "%s::%s::Geometry Nodes::%s/blobs" % (
                         scene.name, obj.name, label)
-                    if base_dir is None or bake_id is None:
+                    bdir = _gn_bake_cache_dir(b, mod)
+                    if bdir is None or bake_id is None:
                         # A disk bake we can't locate — surface it with no coverage
                         # so a requested verify can't read clean (review B1).
                         yield PointCacheFiles(ident_meta, "Geometry Nodes",
                                               obj.name, "%s/meta" % label, None,
                                               [], [])
                         continue
-                    bdir = os.path.join(base_dir, str(bake_id))
                     meta_dir = os.path.join(bdir, "meta")
                     mfiles = []
                     if os.path.isdir(meta_dir):
@@ -1198,12 +1233,13 @@ def iter_gn_cache_files(scenes):
                                 mfiles.append((int(m.group(1)), 0,
                                                os.path.join(meta_dir, fn)))
                     mfiles.sort()
-                    # Expected frame set: the reliable sim-zone range (custom range,
-                    # else scene range) catches a missing HEAD or TAIL frame, not only
-                    # interior holes (review B4). When it can't be established (unknown
-                    # bake-node kind), fall back to the contiguous present span, which
-                    # still catches interior holes and never implies head/tail coverage
-                    # we can't prove.
+                    # Expected frame set: the reliable sim-zone range (per-bake custom
+                    # range, else scene-wide custom simulation range, else scene range)
+                    # catches a missing HEAD or TAIL frame, not only interior holes
+                    # (review B4/B4a). Only sim zones reach here, so a range is almost
+                    # always resolvable; the present-span fallback remains only for a
+                    # degenerate inverted custom range (start > end) and still catches
+                    # interior holes without implying head/tail coverage.
                     exp = _gn_expected_range(b, scene)
                     exp_ok = exp is not None and exp[0] <= exp[1]
                     if exp_ok:
@@ -1232,19 +1268,14 @@ def iter_gn_cache_files(scenes):
                     if ref_names:
                         bfiles, req_keys = [], set()
                         for nm in ref_names:
-                            pm = _GN_BLOB_PARTS_RE.match(nm)
-                            if pm:
-                                bf, bi = int(pm.group(1)), int(pm.group(2))
-                            else:
-                                bf, bi = 0, 0
-                            # Track each referenced blob by its EXACT (frame, index)
+                            # Track each referenced blob by its EXACT filename-stem
                             # identity, so a referenced-but-absent sibling can't hide
                             # behind a present same-frame blob (review B3).
-                            key = _gn_blob_coverage_key(bf, bi)
+                            key = _gn_blob_coverage_key(nm)
                             req_keys.add(key)
                             p = os.path.join(blob_dir, nm)
                             if os.path.isfile(p):
-                                bfiles.append((key, bi, p))
+                                bfiles.append((key, 0, p))
                         yield PointCacheFiles(
                             ident_blobs, "Geometry Nodes", obj.name,
                             "%s/blobs" % label, blob_dir, sorted(bfiles),
@@ -1274,17 +1305,27 @@ def _resolve_gn_target(bake, mod):
     return (bt or "").upper()
 
 
-def _gn_bake_range(bake, scene):
-    """Effective frame range for one GN bake. The custom *path* and custom
-    *frame range* are independent toggles — only a custom frame range (or a
-    still-frame bake) changes the range (R07)."""
-    if getattr(bake, "bake_mode", "ANIMATION") == "STILL":
-        f = int(getattr(bake, "frame_start", scene.frame_start))
-        return (f, f)
-    if bool(getattr(bake, "use_custom_simulation_frame_range", False)):
-        return (int(getattr(bake, "frame_start", scene.frame_start)),
-                int(getattr(bake, "frame_end", scene.frame_end)))
-    return (scene.frame_start, scene.frame_end)
+def _gn_is_sim_zone(bake):
+    """True iff this bake item belongs to a Geometry Nodes SIMULATION zone
+    (``GeometryNodeSimulationOutput``), as opposed to an explicit Bake node or an
+    unknown/future kind. The node backlink is reliable on all four versions (a real
+    bake always exposes ``bake.node.bl_idname`` — verified 4.2/4.5/5.0/5.2)."""
+    node = getattr(bake, "node", None)
+    return (getattr(node, "bl_idname", "") or "") == "GeometryNodeSimulationOutput"
+
+
+def _scene_sim_range(scene):
+    """The scene-level baked range for a SIMULATION: the scene-wide custom simulation
+    range (``scene.use_custom_simulation_range`` -> ``simulation_frame_start`` /
+    ``simulation_frame_end``) when enabled, else the ordinary scene frame range.
+
+    Verified by real bakes on all four versions: with scene range 1..6 and a scene-wide
+    simulation range 2..9, the sim baked frames 2..9 — so the scene frame range alone
+    UNDERSTATES the baked set and would miss a tail frame (review B4a, round 3)."""
+    if bool(getattr(scene, "use_custom_simulation_range", False)):
+        return (int(getattr(scene, "simulation_frame_start", scene.frame_start)),
+                int(getattr(scene, "simulation_frame_end", scene.frame_end)))
+    return (int(scene.frame_start), int(scene.frame_end))
 
 
 def _gn_expected_range(bake, scene):
@@ -1296,28 +1337,39 @@ def _gn_expected_range(bake, scene):
     4.2/4.5/5.0/5.2. So the range can't be read from the bake item's own mode. The
     bake's ``node`` backlink tells us what KIND of bake it is, which is reliable:
 
-      * ``GeometryNodeSimulationOutput`` — a simulation zone. Its baked range is the
-        custom simulation frame range when ``use_custom_simulation_frame_range`` is
-        set, otherwise the whole SCENE frame range. Verified by real bakes: scene
-        (3,8) baked frames 3..8; a custom (2,4) baked 2..4 — on every version. A sim
-        always runs from the scene start, so the scene range is authoritative and
-        lets #27 catch a missing HEAD or TAIL frame, not just interior holes
-        (review B4).
-      * ``GeometryNodeBake`` — a Bake node. Here ``bake_mode`` IS the user's genuine
-        choice (STILL = one frame, ANIMATION = a range), so ``_gn_bake_range`` is
-        honoured.
+      * ``GeometryNodeSimulationOutput`` — a simulation zone. Precedence, verified by
+        real bakes on all four versions (review B4a, round 3):
+          1. the per-bake custom simulation frame range
+             (``use_custom_simulation_frame_range`` -> the bake's frame_start/end),
+          2. else the SCENE-WIDE custom simulation range
+             (``scene.use_custom_simulation_range``), which OVERRIDES the scene frame
+             range (a tail frame beyond the scene range would otherwise be missed),
+          3. else the ordinary scene frame range.
+        A sim always runs from its start, so this is authoritative and lets #27 catch
+        a missing HEAD or TAIL frame, not only interior holes (review B4).
+      * ``GeometryNodeBake`` — an explicit Bake node (a DIFFERENT feature). Its
+        ``bake_mode`` IS genuine. A STILL bake stores the CURRENT frame at bake time,
+        which is NOT persisted to any readable property (``frame_start`` is NOT it —
+        verified on real bakes), so its range can't be derived -> ``None``. An
+        ANIMATION bake runs the frame range. NOTE: #27 does not hash Bake-node caches
+        (only simulation zones — see :func:`iter_gn_cache_files`); this range is used
+        only by the STRUCTURAL #17/#19 checks.
 
-    An unknown/unavailable node kind returns ``None`` — the caller then falls back to
-    the present-frame span and does not imply complete coverage (review B4)."""
+    An unknown/unavailable node kind returns ``None``."""
     node = getattr(bake, "node", None)
     idname = getattr(node, "bl_idname", "") or ""
     if idname == "GeometryNodeSimulationOutput":
         if bool(getattr(bake, "use_custom_simulation_frame_range", False)):
             return (int(getattr(bake, "frame_start", scene.frame_start)),
                     int(getattr(bake, "frame_end", scene.frame_end)))
-        return (int(scene.frame_start), int(scene.frame_end))
+        return _scene_sim_range(scene)
     if idname == "GeometryNodeBake":
-        return _gn_bake_range(bake, scene)
+        if getattr(bake, "bake_mode", "ANIMATION") == "STILL":
+            return None  # baked frame = current frame at bake time, not derivable
+        if bool(getattr(bake, "use_custom_simulation_frame_range", False)):
+            return (int(getattr(bake, "frame_start", scene.frame_start)),
+                    int(getattr(bake, "frame_end", scene.frame_end)))
+        return (int(scene.frame_start), int(scene.frame_end))
     return None
 
 
@@ -1358,7 +1410,10 @@ def inspect_gn_bakes(obj, mod, scene):
         e.raw_path = raw
         base_dir = _abspath(raw) if raw else None
         bake_id = getattr(b, "bake_id", None)
-        bdir = os.path.join(base_dir, str(bake_id)) if (base_dir and bake_id is not None) else None
+        # Custom path -> files sit directly under it; shared bake_directory -> under a
+        # <bake_id> subfolder (verified by real bakes, round 3). Appending <bake_id>
+        # unconditionally looked in the wrong place for a custom path.
+        bdir = _gn_bake_cache_dir(b, mod)
         e.cache_dir = bdir
         e.identity = ("gn", bdir)
         e.file_check_applicable = blend_is_saved() and bool(bdir)

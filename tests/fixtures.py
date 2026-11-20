@@ -805,7 +805,8 @@ def build_fluid_missing_mesh_frame(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
-def _make_gn_disk_blend(outdir, frame_end=6, packed=False):
+def _make_gn_disk_blend(outdir, frame_end=6, packed=False, scene_sim_range=None,
+                        custom_bake_dir=None):
     """Create a Geometry Nodes simulation-zone bake with a REAL moving simulation,
     stored on DISK, so the GN cache-hash tests run on a genuine bake that writes
     both ``meta/*.json`` AND ``blobs/*.blob`` (the heavy attribute data).
@@ -869,6 +870,11 @@ def _make_gn_disk_blend(outdir, frame_end=6, packed=False):
     L(setp.outputs[0], so.inputs[_geo_in(so)])        # store new state
     L(so.outputs[_geo_out(so)], go.inputs[0])
 
+    # A scene-wide custom simulation range OVERRIDES the scene frame range for sim
+    # zones (verified on real bakes) — used to prove #27 honours it (review B4a).
+    if scene_sim_range is not None and hasattr(sc, "use_custom_simulation_range"):
+        sc.use_custom_simulation_range = True
+        sc.simulation_frame_start, sc.simulation_frame_end = scene_sim_range
     blend = os.path.join(outdir, "gn.blend")
     bpy.ops.wm.save_as_mainfile(filepath=blend)
     has_bt = hasattr(mod, "bake_target")
@@ -877,6 +883,13 @@ def _make_gn_disk_blend(outdir, frame_end=6, packed=False):
         mod.bake_target = "PACKED" if packed_made else "DISK"
     if not packed_made:
         mod.bake_directory = "//gnbake"   # disk location (honoured on 4.2 too)
+    # A per-bake CUSTOM path stores files directly under it (no <bake_id> subfolder) —
+    # used to prove the enumerator looks in the right place (review, round 3).
+    if custom_bake_dir is not None and not packed_made:
+        bk = (getattr(mod, "bakes", []) or [None])[0]
+        if bk is not None and hasattr(bk, "use_custom_path"):
+            bk.use_custom_path = True
+            bk.directory = custom_bake_dir
     bpy.ops.wm.save_as_mainfile(filepath=blend)
     bpy.context.view_layer.objects.active = ob
     ob.select_set(True)

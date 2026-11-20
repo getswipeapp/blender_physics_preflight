@@ -206,6 +206,42 @@ verification (not the SHA-256 maths):
   reference an absent `_00001` sibling) proves it: the present `_00000` blob matches,
   yet the absent sibling stays uncovered → `INCOMPLETE_REF` → floor.
 
+### GN review round 3 CORRECTION (2026-11-20, re-review) — B4a/B3/paths, certified 4 versions
+
+The re-review of the above found the round-3 fix incomplete. Verified every claim
+with REAL bakes on all four versions before changing code:
+
+- **B4a — scene-wide custom simulation range was ignored.** Blender ALSO has a
+  **scene-level** `scene.use_custom_simulation_range` (+ `simulation_frame_start` /
+  `simulation_frame_end`) that OVERRIDES the scene frame range for sim zones.
+  **Verified real bake:** scene range 1–6 + scene sim range 1–8 → disk frames **1–8**
+  (on 4.2/4.5/5.0/5.2). The old helper used only the scene range, so a tail frame
+  beyond it (frame 8) could be deleted before baseline and still read PASS. Fixed
+  precedence (`_scene_sim_range` + `_gn_expected_range`): **per-bake custom sim range >
+  scene-wide custom sim range > scene range** (precedence also verified: per-bake 3–5
+  wins over scene-sim 2–9 → frames 3–5). Discriminating test deletes frame 8.
+- **B3 — the packed-int key still collided at frame 0.** `frame*10⁷+idx` mapped
+  `00000_00001.blob` (0·10⁷+1 = 1) and `00001_00000.blob` (1) to the SAME key, so a
+  present frame-1 blob could cover an absent frame-0 sibling. Replaced the int key with
+  the blob's **exact filename STEM** (`"00000_00001"`) — a real per-file identity that
+  can never collide, is JSON-safe, sorts stably, and displays meaningfully.
+  `_frame_num` passes a str identity through for set-membership coverage. Discriminating
+  test: inject an absent `00000_00001.blob` reference while `00001_00000.blob` is
+  present → the sibling stays uncovered (`['00000_00001']`), present blob matched.
+- **Bake nodes vs sim zones.** A STILL Bake node stores the **current frame at bake
+  time**, NOT `frame_start` (verified: current 7, `frame_start` stayed 1), and it isn't
+  in any readable property. So #27 now hashes **simulation zones only**; Bake nodes are
+  skipped (never a false PASS) and surfaced by structural #17/#19. `_gn_expected_range`
+  returns None for a STILL bake node and for unknown kinds.
+- **Custom bake path layout.** A per-bake `use_custom_path` + `directory` writes files
+  **directly** under it (`<dir>/meta`, NO `<bake_id>` subfolder — verified real bake);
+  only the shared modifier `bake_directory` uses `<bake_dir>/<bake_id>/`. Both the
+  hashing path and `inspect_gn_bakes` now resolve via `_gn_bake_cache_dir`, so a
+  custom-path cache is read in the right place (was read as empty → false UNKNOWN).
+  Discriminating test: a full custom-path bake verifies UNCHANGED → #27 PASS.
+
+All four versions: 537 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
 ## History
 
 1. `cache_inspect.iter_fluid_cache_files(scenes)` → one record per domain stage,

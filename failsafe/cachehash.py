@@ -437,12 +437,18 @@ def _frames_of(keys):
 
 
 def _frame_num(key, meta):
-    """The frame number for a saved manifest entry — from the recorded ``frame``
-    field (every cache system; written since this build), falling back to parsing
-    the point-cache filename for older baselines. None if neither yields a number."""
+    """The coverage identity for a saved manifest entry — from the recorded ``frame``
+    field (every cache system; written since this build), falling back to parsing the
+    point-cache filename for older baselines. None if neither yields one.
+
+    Usually an int frame number, but Geometry Nodes blob coverage records a string
+    filename-stem identity (``"00000_00001"``) so same-frame sibling blobs never
+    collapse (review B3). Both are opaque, hashable identities used only for
+    set-membership coverage and display, never arithmetic — so a str passes straight
+    through here, matching the str ``required`` keys the enumerator produced."""
     if isinstance(meta, dict):
         f = meta.get("frame")
-        if isinstance(f, int):
+        if isinstance(f, (int, str)):
             return f
     got = _frames_of([key])
     return got[0] if got else None
