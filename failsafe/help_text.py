@@ -94,6 +94,7 @@ HELP = {
          "exactly what a deliberate re-bake does, so it flags a change without "
          "calling it damage. It reads every cache byte, so it runs only when you "
          "ask (both buttons are separate from the quick Scan). Covers point caches "
-         "(Cloth/Soft Body/Particles) and Fluid, fingerprinting each Mantaflow "
-         "stage (data, noise, mesh, particles, guiding, config) on its own."),
+         "(Cloth/Soft Body/Particles), Fluid (each Mantaflow stage — data, noise, "
+         "mesh, particles, guiding, config — on its own), and Geometry Nodes disk "
+         "bakes (packed GN bakes have no files, so they stay 'Couldn't verify')."),
 }

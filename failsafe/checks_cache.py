@@ -838,6 +838,10 @@ def _has_hashable_disk_caches(entries):
         if e.kind == "fluid" and e.file_check_applicable \
                 and not getattr(e, "replay", False):
             return True
+        # A Geometry Nodes bake is file-checkable only when it is a DISK bake
+        # (inspect_gn_bakes sets file_check_applicable False for packed bakes).
+        if e.kind == "gn" and e.file_check_applicable:
+            return True
     return False
 
 

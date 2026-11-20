@@ -1044,13 +1044,95 @@ def iter_fluid_cache_files(scenes):
                                           stage_dir, files, required)
 
 
+_GN_META_RE = re.compile(r"(\d{5,})_\d+\.json$")
+
+
+def iter_gn_cache_files(scenes):
+    """Yield :class:`PointCacheFiles` for Geometry Nodes simulation bakes stored on
+    DISK. Each disk bake yields a ``meta`` record (one ``<frame>_<idx>.json`` per
+    baked frame, frame-indexed, ``required`` = the bake's frame range) and — only
+    when the bake actually wrote blob data — a ``blobs`` record (the content files,
+    ``required`` = [] since blobs aren't frame-indexed; change/missing detection
+    still applies by path).
+
+    PACKED bakes (the default — stored inside the .blend) leave no files and are
+    NEVER yielded, so they stay the existing honest 'Couldn't verify' rather than
+    being mistaken for a missing disk cache. On Blender 4.2 the modifier exposes no
+    ``bake_target``, so a GN bake can't be confirmed as on-disk there and is left to
+    the structural checks — nothing is hashed, never a false PASS.
+
+    identity = ``Scene::Owner::GeometryNodes::<modifier>/<bake_id>/<meta|blobs>``
+    (relocation-stable). Read-only."""
+    for scene in scenes:
+        for obj in scene.objects:
+            for mod in obj.modifiers:
+                if mod.type != "NODES":
+                    continue
+                bakes = list(getattr(mod, "bakes", []) or [])
+                if not bakes:
+                    continue
+                mod_raw = getattr(mod, "bake_directory", "") or ""
+                for b in bakes:
+                    if _resolve_gn_target(b, mod) != "DISK":
+                        continue  # packed / unknown target: not hashable
+                    use_custom = bool(getattr(b, "use_custom_path", False))
+                    raw = ((getattr(b, "directory", "") or mod_raw)
+                           if use_custom else mod_raw)
+                    base_dir = _abspath(raw) if raw else None
+                    bake_id = getattr(b, "bake_id", None)
+                    if not base_dir or bake_id is None:
+                        continue
+                    bdir = os.path.join(base_dir, str(bake_id))
+                    label = "%s/%s" % (mod.name, bake_id)
+
+                    meta_dir = os.path.join(bdir, "meta")
+                    mfiles = []
+                    if os.path.isdir(meta_dir):
+                        for fn in os.listdir(meta_dir):
+                            m = _GN_META_RE.match(fn)
+                            if m:
+                                mfiles.append((int(m.group(1)), 0,
+                                               os.path.join(meta_dir, fn)))
+                    # required = the frames actually baked on disk. A GN bake item's
+                    # bake_mode/frame_start/frame_end describe 'Bake' NODES, not
+                    # simulation zones (a sim zone reports STILL yet bakes the whole
+                    # scene range), so they can't give the expected set reliably.
+                    # #27 verifies the baked bytes; whether the bake covers the sim
+                    # range is the structural checks' job (#19/#20). Only yield a
+                    # record when something is actually baked.
+                    if not mfiles:
+                        continue
+                    required = sorted(fr for (fr, _i, _p) in mfiles)
+                    yield PointCacheFiles(
+                        "%s::%s::Geometry Nodes::%s/meta" % (scene.name, obj.name,
+                                                             label),
+                        "Geometry Nodes", obj.name, "%s/meta" % label, meta_dir,
+                        sorted(mfiles), required)
+
+                    blob_dir = os.path.join(bdir, "blobs")
+                    bfiles = []
+                    if os.path.isdir(blob_dir):
+                        for i, fn in enumerate(sorted(os.listdir(blob_dir))):
+                            p = os.path.join(blob_dir, fn)
+                            if os.path.isfile(p):
+                                bfiles.append((i, 0, p))
+                    if bfiles:
+                        yield PointCacheFiles(
+                            "%s::%s::Geometry Nodes::%s/blobs" % (scene.name,
+                                                                  obj.name, label),
+                            "Geometry Nodes", obj.name, "%s/blobs" % label,
+                            blob_dir, bfiles, [])  # blobs aren't frame-indexed
+
+
 def iter_hashable_cache_files(scenes):
-    """Every disk cache the SHA-256 verifier covers: point caches (``.bphys``) and
-    Mantaflow fluid stages. One place so capture and verify never disagree about
-    what is hashable."""
+    """Every disk cache the SHA-256 verifier covers: point caches (``.bphys``),
+    Mantaflow fluid stages, and Geometry Nodes DISK bakes. One place so capture and
+    verify never disagree about what is hashable."""
     for rec in iter_point_cache_files(scenes):
         yield rec
     for rec in iter_fluid_cache_files(scenes):
+        yield rec
+    for rec in iter_gn_cache_files(scenes):
         yield rec
 
 

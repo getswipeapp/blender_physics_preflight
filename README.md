@@ -94,7 +94,7 @@ an error and the batch keeps going, preserving every good file's result. Use
 | 24 | Cache sitting in a cloud-synced folder (Dropbox, OneDrive, Google Drive, iCloud…) — can be locked or only partly downloaded at render time |
 | 25 | Potentially unclaimed cache files no simulation in any scene of the `.blend` owns (ownership checked across all scenes; often from renamed/deleted sims) — flagged to review before deleting, since a shared folder may hold another `.blend`'s data |
 | 26 | Simulation settings changed since you saved a **baseline** (opt-in; compares against an external sidecar file, never written into your `.blend`) |
-| 27 | Baked cache files changed since you saved a **baseline** (opt-in, on-demand per-frame SHA-256; detects a change — a match means the bytes are unchanged, never that the cache is valid; reads every cache byte, so it runs only when you click Verify Cache Hashes). Covers point caches (Cloth / Soft Body / Particles) **and Fluid**, where each Mantaflow stage (data, noise, mesh, particles, guiding, config) is fingerprinted independently |
+| 27 | Baked cache files changed since you saved a **baseline** (opt-in, on-demand per-frame SHA-256; detects a change — a match means the bytes are unchanged, never that the cache is valid; reads every cache byte, so it runs only when you click Verify Cache Hashes). Covers point caches (Cloth / Soft Body / Particles), **Fluid** (each Mantaflow stage — data, noise, mesh, particles, guiding, config — fingerprinted independently), and **Geometry Nodes disk bakes** (meta + blob data; packed GN bakes have no files so they stay "Couldn't verify") |
 
 Covered cache systems: Cloth, Soft Body, Rigid Body World, Particles, Fluid
 (Mantaflow), and Geometry Nodes simulation zones with **disk** bakes.

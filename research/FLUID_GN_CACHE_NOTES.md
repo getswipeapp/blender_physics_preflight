@@ -110,7 +110,36 @@ ref→missing+floor, cancellation→writes nothing.
   stayed silent instead of saying "hasn't been run / click Verify Cache Hashes".
   Renamed to `_has_hashable_disk_caches` (point OR non-replay fluid disk cache).
 
-## Build plan (GN — next)
+## SHIPPED (2026-11-19): Geometry Nodes disk-bake hash coverage
+
+`cache_inspect.iter_gn_cache_files` yields, per GN **disk** bake, a `meta` record
+(the `<frame>_<idx>.json` files, frame-indexed) and — only when the bake wrote blob
+data — a `blobs` record (content files, `required=[]`). Added to
+`iter_hashable_cache_files` and `_has_hashable_disk_caches`. Reuses the verified
+`inspect_gn_bakes` logic (`_resolve_gn_target`, `bake_id`, the `<id>/meta/` +
+`<id>/blobs/` layout).
+
+Version handling (real bakes on all four):
+- **PACKED is the default** and is NEVER hashed (no disk files) — it stays the
+  existing honest "Couldn't verify"; a test asserts `iter_gn_cache_files` yields
+  nothing for a packed bake, so packed is never mistaken for a missing disk cache.
+- **4.5 / 5.0 / 5.2** expose `modifier.bake_target`; a DISK bake is detected
+  (`_resolve_gn_target` follows INHERIT) and its meta/blobs are hashed.
+- **4.2** has NO `modifier.bake_target`, so a sim bake goes PACKED and GN disk
+  hashing is not applicable there (the fixture reports this and the test records it
+  — never a false pass).
+
+Gotcha found and handled: a simulation-zone bake item reports `bake_mode='STILL'`
+with `frame_end=100` — those fields describe *Bake nodes*, not sim zones (the zone
+bakes the scene range). So `_gn_bake_range` can't give the expected set for a sim
+zone. #27's `required` is therefore the frames actually baked on disk (its job is
+the baked *bytes*); whether the bake covers the sim range stays #19/#20's job.
+
+Tests (`hash_gn_tests`, real bakes): packed→not hashed, unchanged→PASS, changed
+meta→CHANGED, deleted meta frame→missing+floor, blob changed→CHANGED,
+relocation→unchanged, cancellation→writes nothing; 4.2 records packed-only.
+
+## History
 
 1. `cache_inspect.iter_fluid_cache_files(scenes)` → one record per domain stage,
    with the stage's present files `(frame, abspath)` and `required` = domain

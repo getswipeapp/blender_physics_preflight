@@ -2831,6 +2831,154 @@ def hash_fluid_tests():
     return out
 
 
+def hash_gn_tests():
+    """Geometry Nodes DISK-bake cache-hash coverage on a REAL bake.
+
+    GN sim bakes go to disk on 4.5/5.0/5.2 (bake_target DISK); on 4.2 there is no
+    modifier bake_target, so they go PACKED and GN disk hashing is not applicable
+    (recorded, never a false pass). PACKED bakes are never hashed — they must not be
+    mistaken for a missing disk cache. Preserves the B1-B7 protections."""
+    import shutil
+    from failsafe import (cachehash as ch, baseline as bl, cache_inspect as ci,
+                          cli)
+    out = []
+    tmp = tempfile.mkdtemp(prefix="failsafe_gn_")
+
+    def _meta(report):
+        return [s for s in report.sims if s.identity.endswith("/meta")]
+
+    # A PACKED bake must NOT be hashed (never mistaken for a missing disk cache).
+    psrc = os.path.join(tmp, "packed")
+    os.makedirs(psrc, exist_ok=True)
+    fixtures._make_gn_disk_blend(psrc, packed=True)
+    precs = list(ci.iter_gn_cache_files(list(bpy.data.scenes)))
+    out.append(("GN packed bake is NOT hashed (stays Couldn't verify)",
+                len(precs) == 0, len(precs), 0))
+
+    # A real DISK bake.
+    src = os.path.join(tmp, "src")
+    os.makedirs(src, exist_ok=True)
+    _blend, disk = fixtures._make_gn_disk_blend(src)
+    if not disk:
+        out.append(("GN disk bake unavailable on this Blender (4.2 packed) — "
+                    "recorded, not a false pass", True, "packed-only", "n/a"))
+        return out
+
+    recs = list(ci.iter_gn_cache_files(list(bpy.data.scenes)))
+    out.append(("GN disk bake -> meta record enumerated with files",
+                any(r.identity.endswith("/meta") and r.files for r in recs),
+                len(recs), ">=1 meta"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+
+    def _open(tag):
+        dst = os.path.join(tmp, "p_" + tag)
+        shutil.copytree(src, dst)
+        bpy.ops.wm.open_mainfile(filepath=os.path.join(dst, "gn.blend"))
+        return dst
+
+    # (1) unchanged -> meta UNCHANGED -> PASS
+    _open("pass")
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN unchanged: meta UNCHANGED",
+                bool(ms) and all(s.state == ch.S_UNCHANGED for s in ms),
+                [s.state for s in ms], "UNCHANGED"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("GN unchanged -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+
+    # (2) change a meta file -> CHANGED
+    dst = _open("changed")
+    bdir = fixtures.gn_bake_dir(dst)
+    mfiles = sorted(os.path.join(bdir, "meta", f)
+                    for f in os.listdir(os.path.join(bdir, "meta"))
+                    if f.endswith(".json"))
+    tgt = mfiles[len(mfiles) // 2]
+    with open(tgt, "r+b") as fh:
+        fh.seek(0, os.SEEK_END)
+        sz = fh.tell()
+        o = min(20, sz - 1)
+        fh.seek(o)
+        b = fh.read(1)
+        fh.seek(o)
+        fh.write(bytes([b[0] ^ 0xFF]))
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN changed meta -> CHANGED",
+                bool(ms) and ms[0].state == ch.S_CHANGED,
+                [s.state for s in ms], ch.S_CHANGED))
+
+    # (3) delete a meta frame -> missing (never PASS), floors requested verify
+    dst = _open("missmeta")
+    bdir = fixtures.gn_bake_dir(dst)
+    mnames = sorted(os.listdir(os.path.join(bdir, "meta")))
+    os.remove(os.path.join(bdir, "meta", mnames[-1]))
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN missing meta frame: not UNCHANGED, has missing",
+                bool(ms) and ms[0].state != ch.S_UNCHANGED and bool(ms[0].missing),
+                [(s.state, s.missing) for s in ms], "missing"))
+    out.append(("GN missing meta -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (4) blob dependencies: inject a blob file, baseline, verify, then change it.
+    # (The trivial sim stored data inline, so we exercise the blob path with an
+    # injected blob; hashing is content-agnostic. meta hashing is on the real bake.)
+    dst = _open("blobs")
+    bdir = fixtures.gn_bake_dir(dst)
+    blobs = os.path.join(bdir, "blobs")
+    os.makedirs(blobs, exist_ok=True)
+    bp = os.path.join(blobs, "0000000000000000")
+    with open(bp, "wb") as fh:
+        fh.write(b"BLOBDATA-v1" * 64)
+    man2 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man2)
+    rep = ch.build_report(list(bpy.data.scenes))
+    brecs = [s for s in rep.sims if s.identity.endswith("/blobs")]
+    out.append(("GN blob record captured + verified UNCHANGED",
+                bool(brecs) and brecs[0].state == ch.S_UNCHANGED,
+                [s.state for s in brecs], "UNCHANGED"))
+    with open(bp, "wb") as fh:
+        fh.write(b"BLOBDATA-v2-CHANGED" * 64)
+    rep = ch.build_report(list(bpy.data.scenes))
+    brecs = [s for s in rep.sims if s.identity.endswith("/blobs")]
+    out.append(("GN changed blob -> blobs CHANGED",
+                bool(brecs) and brecs[0].state == ch.S_CHANGED,
+                [s.state for s in brecs], ch.S_CHANGED))
+
+    # (5) relocation (// bake dir) -> meta UNCHANGED
+    reloc = os.path.join(tmp, "moved", "x")
+    os.makedirs(os.path.dirname(reloc), exist_ok=True)
+    shutil.copytree(src, reloc)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(reloc, "gn.blend"))
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN relocation: meta UNCHANGED after moving the project",
+                bool(ms) and all(s.state == ch.S_UNCHANGED for s in ms),
+                [s.state for s in ms], "UNCHANGED"))
+
+    # (6) cancelled capture raises (writes nothing)
+    _open("cancel")
+    cnt = {"n": 0}
+
+    def _c():
+        cnt["n"] += 1
+        return cnt["n"] > 1
+    try:
+        ch.capture(list(bpy.data.scenes), ci.blend_dir(), cancel=_c)
+        raised = False
+    except ch.Cancelled:
+        raised = True
+    out.append(("GN cancelled capture raises Cancelled", raised, raised, True))
+
+    return out
+
+
 def couldnt_verify_tests():
     """Every 'Couldn't verify' a user sees must carry a plain reason (message) AND
     a next action (hint). And the contract must hold: the displayed word is
@@ -2999,6 +3147,7 @@ def main():
                                    + hash_edge_tests()
                                    + hash_edge2_tests()
                                    + hash_fluid_tests()
+                                   + hash_gn_tests()
                                    + couldnt_verify_tests()):
         if ok:
             passed += 1
@@ -3020,7 +3169,8 @@ def main():
              + len(integrity_header_tests()) + len(cache_coverage_tests())
              + len(cache_hash_tests()) + len(hash_blocker_tests())
              + len(hash_edge_tests()) + len(hash_edge2_tests())
-             + len(hash_fluid_tests()) + len(couldnt_verify_tests()))
+             + len(hash_fluid_tests()) + len(hash_gn_tests())
+             + len(couldnt_verify_tests()))
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))

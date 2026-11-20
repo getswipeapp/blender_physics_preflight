@@ -805,6 +805,68 @@ def build_fluid_missing_mesh_frame(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+def _make_gn_disk_blend(outdir, frame_end=4, packed=False):
+    """Create a Geometry Nodes simulation-zone bake and (when the Blender build
+    exposes it) store it on DISK, so the GN cache-hash tests run on a real bake.
+
+    Returns ``(blend_path, disk_available)``. ``disk_available`` is False on builds
+    without ``modifier.bake_target`` (Blender 4.2), where sim bakes go PACKED — the
+    caller then skips the disk-only assertions. ``packed=True`` forces a packed
+    bake even where disk is available (to prove packed bakes aren't hashed)."""
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=12, y_subdivisions=12, size=4)
+    ob = bpy.context.active_object
+    ob.name = "GNObj"
+    mod = ob.modifiers.new("GeoNodes", "NODES")
+    ng = bpy.data.node_groups.new("SimTree", "GeometryNodeTree")
+    mod.node_group = ng
+    ng.interface.new_socket("Geometry", in_out="INPUT",
+                            socket_type="NodeSocketGeometry")
+    ng.interface.new_socket("Geometry", in_out="OUTPUT",
+                            socket_type="NodeSocketGeometry")
+    n = ng.nodes
+    gi = n.new("NodeGroupInput")
+    go = n.new("NodeGroupOutput")
+    si = n.new("GeometryNodeSimulationInput")
+    so = n.new("GeometryNodeSimulationOutput")
+    si.pair_with_output(so)
+    L = ng.links.new
+    L(gi.outputs[0], si.inputs[0])
+    L(si.outputs[0], so.inputs[0])
+    L(so.outputs[0], go.inputs[0])
+    blend = os.path.join(outdir, "gn.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    disk_available = hasattr(mod, "bake_target") and not packed
+    if disk_available:
+        mod.bake_target = "DISK"
+        mod.bake_directory = "//gnbake"
+        bpy.ops.wm.save_as_mainfile(filepath=blend)
+    bpy.context.view_layer.objects.active = ob
+    ob.select_set(True)
+    with bpy.context.temp_override(scene=sc, active_object=ob, object=ob,
+                                   selected_objects=[ob]):
+        bpy.ops.object.simulation_nodes_cache_bake()
+    bpy.ops.wm.save_mainfile()
+    return blend, disk_available
+
+
+def gn_bake_dir(outdir, blend=None):
+    """The `<bake_dir>/<bake_id>` folder of the first GN disk bake, or None."""
+    for ob in bpy.data.objects:
+        for mod in ob.modifiers:
+            if mod.type != "NODES":
+                continue
+            for b in getattr(mod, "bakes", []) or []:
+                bid = getattr(b, "bake_id", None)
+                if bid is not None:
+                    d = os.path.join(outdir, "gnbake", str(bid))
+                    if os.path.isdir(d):
+                        return d
+    return None
+
+
 def build_fluid_mislabeled_mesh(outdir):
     """Adversarial (R10): delete the last mesh frame, then drop a wrongly-named
     data file into mesh/. The component-specific matcher must ignore it, so the
