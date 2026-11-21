@@ -1135,6 +1135,37 @@ def _gn_bake_cache_dir(bake, mod):
     return os.path.join(base_dir, str(bake_id)) if bake_id is not None else None
 
 
+def _gn_meta_is_recognizable(data):
+    """True iff a decoded meta JSON has the SHAPE of a real Geometry Nodes bake frame,
+    so a blob dependency set can be trusted to come from it.
+
+    Verified on real bakes (4.2.9 and 5.2.3, bracketing 4.5/5.0): a bake frame's meta
+    is a dict ``{"version": N, "items": {...}}`` whose ``items`` is a NON-EMPTY mapping
+    (keys ``"0"``, ``"1"``, …) — or a list — of per-socket entries, each a dict
+    carrying a ``"type"`` (``GEOMETRY``, ``FLOAT``, …) alongside its ``data``. A pure
+    value item (e.g. a FLOAT) legitimately stores its value INLINE and references no
+    blob, so a recognizable frame may reference zero blobs — "zero blobs" alone is NOT
+    a defect and must not reject a legitimate value-only bake.
+
+    Syntactically-valid JSON that LACKS this shape — ``{}``, a bare list, ``items``
+    missing / empty / not a mapping of typed dicts — is NOT trustworthy bake metadata:
+    its real blob dependency set can't be established, so the caller must treat it as
+    unreadable and force 'Couldn't verify', never accept an empty dependency set as a
+    clean PASS (review R6-1)."""
+    if not isinstance(data, dict):
+        return False
+    items = data.get("items")
+    if isinstance(items, dict):
+        vals = list(items.values())
+    elif isinstance(items, list):
+        vals = items
+    else:
+        return False
+    if not vals:
+        return False
+    return all(isinstance(it, dict) and "type" in it for it in vals)
+
+
 def _iter_json_strings(obj):
     """Yield every string value inside a decoded JSON structure, recursively."""
     if isinstance(obj, str):
@@ -1168,14 +1199,23 @@ def _gn_referenced_blob_names(meta_paths):
     the literal ``.blob`` spelling and could silently drop an escaped dependency,
     letting an absent blob read as a clean PASS (review R4-1).
 
-    Returns ``(names, unreadable)``. A meta file that can't be parsed — malformed /
-    truncated JSON, or bytes that aren't valid UTF-8 — is NOT raw-text scanned as a
-    fallback: a partial raw-text scan can MISS a referenced blob (its name split across
-    a truncation, or mangled by the bad encoding) and under-count the dependency set,
-    so an absent blob would read as a clean PASS (review R5-1). Such a file's path is
-    returned in ``unreadable`` instead, and the caller forces the whole sim to
-    'Couldn't verify' — never trusting a dependency set drawn from metadata it couldn't
-    fully read. Read-only; never raises on a bad file."""
+    Returns ``(names, unreadable)``. A meta file is put in ``unreadable`` — and the
+    caller forces the whole sim to 'Couldn't verify', never trusting a dependency set
+    drawn from it — when EITHER:
+
+    * it can't be parsed — malformed / truncated JSON, or bytes that aren't valid
+      UTF-8. It is NOT raw-text scanned as a fallback: a partial raw-text scan can MISS
+      a referenced blob (its name split across a truncation, or mangled by the bad
+      encoding) and under-count the dependency set, so an absent blob would read as a
+      clean PASS (review R5-1); OR
+    * it parses but is NOT a recognizable GN bake frame
+      (:func:`_gn_meta_is_recognizable`) — e.g. ``{}`` or any valid JSON lacking the
+      ``items`` structure. Its real dependency set can't be established, so accepting
+      its empty blob set would let a frame whose blob was deleted read as a clean PASS
+      (review R6-1). A recognizable frame that references zero blobs (a pure value-only
+      item stores its value inline) is fine and is NOT flagged.
+
+    Read-only; never raises on a bad file."""
     names = set()
     unreadable = []
     for p in meta_paths:
@@ -1190,6 +1230,12 @@ def _gn_referenced_blob_names(meta_paths):
         try:
             data = json.loads(txt)
         except (ValueError, TypeError):
+            unreadable.append(p)
+            continue
+        if not _gn_meta_is_recognizable(data):
+            # Valid JSON, but not a GN bake frame: we can't establish its blob
+            # dependency set, so DON'T accept an empty one — mark it unreadable so the
+            # sim reads 'Couldn't verify', never a clean PASS (review R6-1).
             unreadable.append(p)
             continue
         for s in _iter_json_strings(data):

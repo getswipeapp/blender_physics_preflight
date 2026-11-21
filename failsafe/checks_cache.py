@@ -1080,12 +1080,12 @@ def c27_cache_hashes(ctx, mk):
                      "to drop the stale reference."))
         elif sv.state == ch.S_META_UNREADABLE:
             out.append(mk(Status.UNKNOWN,
-                "%s: %d cache metadata file(s) couldn't be parsed (malformed JSON "
-                "or invalid encoding): %s. The baked data they describe — and which "
-                "data blobs each frame depends on — can't be read, so this cache "
-                "can't be verified. This is NOT a clean result: a corrupt metadata "
-                "file is never treated as 'unchanged'."
-                % (nice, len(sv.unreadable), _sample(sv.unreadable)),
+                "%s: %d cache metadata file(s) couldn't be read as Geometry Nodes "
+                "bake data — malformed JSON, invalid encoding, or valid JSON that "
+                "isn't a recognizable bake frame: %s. Which data blobs each frame "
+                "depends on can't be established, so this cache can't be verified. "
+                "This is NOT a clean result: unreadable metadata is never treated "
+                "as 'unchanged'." % (nice, len(sv.unreadable), _sample(sv.unreadable)),
                 object_name=obj,
                 hint="Re-bake the simulation to regenerate its cache metadata, then "
                      + _CAP_HINT))

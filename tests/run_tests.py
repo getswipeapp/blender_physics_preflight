@@ -371,6 +371,36 @@ def gn_unit_tests():
     out.append(("gn sim-zone: no node is NOT a sim zone",
                 ci._gn_is_sim_zone(Fake()) is False, False, False))
 
+    # R6-1: valid JSON is only trustworthy bake metadata if it has the real frame
+    # SHAPE (a non-empty 'items' mapping of typed entries, verified on 4.2 & 5.2). A
+    # recognizable frame may reference ZERO blobs (a value-only item stores inline), so
+    # that must still be accepted; anything lacking the shape (e.g. {}) must be rejected
+    # so its empty dependency set can't read as a clean PASS.
+    rec = ci._gn_meta_is_recognizable
+    real_like = {"version": 3, "items": {"0": {"name": "Geometry", "type": "GEOMETRY",
+                 "data": {"mesh": {"poly_offsets": {"name": "00001_00000.blob"}}}}}}
+    value_only = {"version": 3, "items": {"0": {"name": "Accum", "type": "FLOAT",
+                  "data": 1.0}}}            # legit: recognizable, references no blob
+    items_list = {"version": 3, "items": [{"type": "GEOMETRY", "data": {}}]}
+    rec_cases = [
+        ("real geometry-frame shape is recognizable", real_like, True),
+        ("value-only frame (zero blobs) is recognizable (not over-rejected)",
+         value_only, True),
+        ("items as a typed LIST is recognizable", items_list, True),
+        ("empty object {} is NOT recognizable (R6-1)", {}, False),
+        ("version only, no items -> NOT recognizable", {"version": 3}, False),
+        ("empty items mapping -> NOT recognizable", {"version": 3, "items": {}}, False),
+        ("items present but an entry lacks 'type' -> NOT recognizable",
+         {"items": {"0": {"name": "x", "data": {}}}}, False),
+        ("items not a mapping/list -> NOT recognizable",
+         {"items": "garbage"}, False),
+        ("a bare list is NOT recognizable", [], False),
+        ("a bare string is NOT recognizable", "nope", False),
+    ]
+    for label, data, expect in rec_cases:
+        got = rec(data)
+        out.append(("gn meta-recognizable: " + label, got is expect, got, expect))
+
     # B3 (round 3): a blob's coverage identity is its EXACT filename STEM, so it can
     # NEVER collide. The old packed-int scheme mapped 00000_00001.blob and
     # 00001_00000.blob both to 1 (frame-0 collision); stems keep them distinct.
@@ -3421,6 +3451,56 @@ def hash_gn_tests():
                     cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
     finally:
         ci._gn_expected_range = _orig_range
+
+    # (R6-1, round 6) VALID JSON that is NOT a recognizable bake frame. Replace every
+    # frame's metadata with "{}" (valid JSON, no 'items' structure) and delete the
+    # shared first-frame blob. The meta filenames still exist and their hashes match a
+    # baseline captured after the edit, and no blobs are enumerated as required — the
+    # exact shape that could read UNCHANGED if "valid JSON" were trusted as bake data.
+    # The recognizer must reject "{}" so the sim reads 'Couldn't verify' instead, and
+    # must NOT emit a blobs record from an un-establishable dependency set.
+    r6 = os.path.join(tmp, "r6_emptyobj")
+    os.makedirs(r6, exist_ok=True)
+    fixtures._make_gn_disk_blend(r6)
+    r6bd = fixtures.gn_bake_dir(r6)
+    r6meta = os.path.join(r6bd, "meta")
+    r6blob = os.path.join(r6bd, "blobs")
+    for fn in os.listdir(r6meta):
+        if fn.endswith(".json"):
+            with open(os.path.join(r6meta, fn), "w", encoding="utf-8") as fh:
+                fh.write("{}")                      # valid JSON, not a bake frame
+    r6blobs = sorted(os.listdir(r6blob)) if os.path.isdir(r6blob) else []
+    for bf in r6blobs:
+        os.remove(os.path.join(r6blob, bf))         # delete the shared blob(s)
+    names_r6, unread_r6 = ci._gn_referenced_blob_names(
+        [os.path.join(r6meta, f) for f in os.listdir(r6meta) if f.endswith(".json")])
+    out.append(("GN R6-1: deleted a real baked blob (precondition)",
+                bool(r6blobs), r6blobs, ">=1 blob existed"))
+    out.append(("GN R6-1: '{}' metas are UNREADABLE (not recognizable), no blob names",
+                bool(unread_r6) and not names_r6,
+                (len(unread_r6), len(names_r6)), "unreadable; no names"))
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(r6, "gn.blend"))
+    recs_r6 = list(ci.iter_gn_cache_files(list(bpy.data.scenes)))
+    out.append(("GN R6-1: '{}' metas -> meta flagged meta_unreadable, NO blobs record",
+                any(r.identity.endswith("/meta") and r.meta_unreadable for r in recs_r6)
+                and not any(r.identity.endswith("/blobs") for r in recs_r6),
+                [(r.identity.split("::")[-1], bool(r.meta_unreadable)) for r in recs_r6],
+                "meta flagged; no blobs"))
+    man_r6 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_r6)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN R6-1: '{}' metas -> S_META_UNREADABLE (never UNCHANGED)",
+                bool(ms) and all(s.state == ch.S_META_UNREADABLE for s in ms),
+                [s.state for s in ms], ch.S_META_UNREADABLE))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("GN R6-1: '{}' metas + deleted blob -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("GN R6-1: '{}' metas -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
     # (5) relocation (// bake dir) -> meta UNCHANGED
     reloc = os.path.join(tmp, "moved", "x")
