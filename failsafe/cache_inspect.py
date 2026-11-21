@@ -1052,9 +1052,25 @@ def iter_fluid_cache_files(scenes):
                                           stage_dir, files, required)
 
 
-_GN_META_RE = re.compile(r"(\d{5,})_\d+\.json$")
+# A GN bake meta file is named <frame:05d>_<subframe:05d>.json. The SECOND field is
+# the frame's SUBFRAME (fractional part), not an interchangeable index: 00001_00000 is
+# frame 1.00000, 00001_00001 is frame 1.00001 (Blender's naming, verified on real bakes
+# 4.2/4.5/5.0/5.2 — a normal integer-frame simulation always writes subframe 00000).
+# group(1) is the exact stem "<frame>_<subframe>", group(2) the integer frame.
+_GN_META_RE = re.compile(r"((\d{5,})_\d+)\.json$")
 # A blob FILENAME as it appears referenced inside a meta JSON ("00001_00000.blob").
 _GN_BLOB_NAME_RE = re.compile(r"(\d{5,}_\d+)\.blob")
+
+
+def _gn_meta_coverage_key(frame):
+    """The exact on-disk stem a baked WHOLE frame must have: ``<frame>_00000`` (subframe
+    zero). Blender names a GN bake file ``<frame:05d>_<subframe:05d>``; a whole frame is
+    subframe 0 (verified on real bakes, all four versions). Tracking the EXACT stem — not
+    just the integer frame — means a different-subframe file (``00003_00001``) can NEVER
+    satisfy the requirement for the whole frame (``00003_00000``); collapsing to the bare
+    integer let a renamed/foreign subframe file hide a missing required frame and read as
+    a false PASS (review R8-1), the same collision class fixed for blobs in B3."""
+    return "%05d_%05d" % (frame, 0)
 
 # A blob file's identity is (frame, index) — Blender names blobs <frame>_<index>.blob.
 # Real bakes observed on 4.2/4.5/5.0/5.2 write exactly one blob per frame (index 0),
@@ -1346,7 +1362,11 @@ def iter_gn_cache_files(scenes):
                         for fn in os.listdir(meta_dir):
                             m = _GN_META_RE.match(fn)
                             if m:
-                                mfiles.append((int(m.group(1)), 0,
+                                # Coverage identity is the EXACT filename stem
+                                # ("<frame>_<subframe>"), never the bare integer frame,
+                                # so a different-subframe file can't satisfy a required
+                                # whole frame (review R8-1).
+                                mfiles.append((m.group(1), 0,
                                                os.path.join(meta_dir, fn)))
                     mfiles.sort()
                     # Expected frame set: the reliable sim-zone range (per-bake custom
@@ -1365,7 +1385,11 @@ def iter_gn_cache_files(scenes):
                                               obj.name, "%s/meta" % label, None,
                                               [], [])
                         continue
-                    required = list(range(exp[0], exp[1] + 1))
+                    # Require each WHOLE frame's exact subframe-0 stem, so a renamed or
+                    # foreign non-zero-subframe meta can't be counted as the required
+                    # frame (review R8-1).
+                    required = [_gn_meta_coverage_key(f)
+                                for f in range(exp[0], exp[1] + 1)]
 
                     # The blob DEPENDENCY set is read by PARSING each present meta file.
                     # If ANY meta can't be parsed (malformed JSON or invalid encoding),
@@ -1567,8 +1591,11 @@ def inspect_gn_bakes(obj, mod, scene):
             meta = os.path.join(bdir, "meta")
             if os.path.isdir(meta):
                 for fn in os.listdir(meta):
-                    m = re.match(r"(\d{5,})_\d+\.json$", fn)
-                    if m:
+                    m = re.match(r"(\d{5,})_(\d+)\.json$", fn)
+                    # Only a WHOLE-frame file (subframe 0) counts as that integer frame
+                    # present; a different-subframe file must not satisfy it (review
+                    # R8-1), matching the hash-coverage identity above.
+                    if m and int(m.group(2)) == 0:
                         fr = int(m.group(1))
                         present.add(fr)
                         st = _file_state(os.path.join(meta, fn))

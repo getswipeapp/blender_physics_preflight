@@ -435,6 +435,16 @@ def gn_unit_tests():
                      k("00001_00002.blob")}) == 3,
                 "3 distinct stems", "3 distinct"))
 
+    # R8-1: a WHOLE frame's required meta identity is its exact <frame>_00000 stem, so a
+    # different-subframe file (<frame>_00001) can NEVER satisfy the required whole frame.
+    mk_ = ci._gn_meta_coverage_key
+    out.append(("gn meta key: whole frame -> '<frame>_00000' stem",
+                mk_(3) == "00003_00000", mk_(3), "00003_00000"))
+    out.append(("gn meta key: a nonzero-subframe file can't match the whole-frame key (R8-1)",
+                mk_(3) != "00003_00001", (mk_(3), "00003_00001"), "distinct"))
+    out.append(("gn meta key: frame >= 100000 keeps 5-digit subframe",
+                mk_(100000) == "100000_00000", mk_(100000), "100000_00000"))
+
     # Metadata present but blobs/ missing -> not COMPLETE (R03).
     e = ci.CacheEntry("Obj", "Geometry Nodes", "gn")
     e.baked_determinable = True
@@ -3261,7 +3271,7 @@ def hash_gn_tests():
         hbd = fixtures.gn_bake_dir(hd)
         hmetas = sorted(f for f in os.listdir(os.path.join(hbd, "meta"))
                         if f.endswith(".json"))
-        gone = int(hmetas[idx].split("_")[0])
+        gone = hmetas[idx][:-5]                   # exact stem "<frame>_<subframe>"
         os.remove(os.path.join(hbd, "meta", hmetas[idx]))
         bpy.ops.wm.open_mainfile(filepath=os.path.join(hd, "gn.blend"))
         man_e = ch.capture(list(bpy.data.scenes), ci.blend_dir())
@@ -3274,7 +3284,7 @@ def hash_gn_tests():
                     bool(ms) and ms[0].state == ch.S_INCOMPLETE_REF
                     and gone in (ms[0].uncovered or []),
                     [(s.state, s.uncovered) for s in ms],
-                    "INCOMPLETE_REF incl. frame %d" % gone))
+                    "INCOMPLETE_REF incl. %s" % gone))
         results = engine.run_all(bpy.context, hash_verify=rep)
         out.append(("GN B4: missing %s frame -> #27 UNKNOWN (never PASS)" % pos,
                     worst_for_check(results, 27) == Status.UNKNOWN,
@@ -3300,7 +3310,7 @@ def hash_gn_tests():
         baked_frames = [int(f.split("_")[0]) for f in swmetas]
         out.append(("GN B4a: scene-wide sim range (1..8) baked frames beyond scene range",
                     baked_frames == list(range(1, 9)), baked_frames, [1, 2, 3, 4, 5, 6, 7, 8]))
-        tail_gone = int(swmetas[-1].split("_")[0])      # frame 8, outside scene 1..6
+        tail_gone = swmetas[-1][:-5]       # exact stem of frame 8 (outside scene 1..6)
         os.remove(os.path.join(swbd, "meta", swmetas[-1]))
         bpy.ops.wm.open_mainfile(filepath=os.path.join(swr, "gn.blend"))
         man_sw = ch.capture(list(bpy.data.scenes), ci.blend_dir())
@@ -3312,7 +3322,7 @@ def hash_gn_tests():
                     bool(ms) and ms[0].state == ch.S_INCOMPLETE_REF
                     and tail_gone in (ms[0].uncovered or []),
                     [(s.state, s.uncovered) for s in ms],
-                    "INCOMPLETE_REF incl. frame %d" % tail_gone))
+                    "INCOMPLETE_REF incl. %s" % tail_gone))
         results = engine.run_all(bpy.context, hash_verify=rep)
         out.append(("GN B4a: scene-wide tail gap -> #27 UNKNOWN (never PASS)",
                     worst_for_check(results, 27) == Status.UNKNOWN,
@@ -3621,6 +3631,52 @@ def hash_gn_tests():
     out.append(("GN R7-1 guard: empty-geometry bake -> #27 PASS (not UNKNOWN)",
                 worst_for_check(results, 27) == Status.PASS,
                 worst_for_check(results, 27), Status.PASS))
+
+    # (R8-1, round 8) SUBFRAME coverage collision. A GN bake file is named
+    # <frame>_<subframe>; the WHOLE frame is subframe 0. Coverage is keyed by the EXACT
+    # stem, so a different-subframe file cannot satisfy a required whole frame. Rename a
+    # real whole-frame meta (00003_00000.json -> 00003_00001.json), valid JSON and its
+    # blobs UNCHANGED, BEFORE baseline: the required 00003_00000 is then absent even
+    # though a file "for frame 3" exists. Collapsing to the integer frame 3 would mark
+    # it covered and PASS; the exact-stem identity keeps it uncovered -> #27 UNKNOWN.
+    r8 = os.path.join(tmp, "r8_subframe")
+    os.makedirs(r8, exist_ok=True)
+    fixtures._make_gn_disk_blend(r8)
+    r8bd = fixtures.gn_bake_dir(r8)
+    r8meta = os.path.join(r8bd, "meta")
+    whole = os.path.join(r8meta, "00003_00000.json")
+    subf = os.path.join(r8meta, "00003_00001.json")
+    out.append(("GN R8-1: frame-3 whole-frame meta exists to rename (precondition)",
+                os.path.exists(whole), os.path.exists(whole), True))
+    os.rename(whole, subf)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(r8, "gn.blend"))
+    # Structural #17/#19 must NOT count the subframe file as frame 3 present.
+    struct_present = None
+    for sobj in bpy.data.objects:
+        for smod in sobj.modifiers:
+            if smod.type == "NODES":
+                for e in ci.inspect_gn_bakes(sobj, smod, bpy.context.scene):
+                    if e.frames_present:
+                        struct_present = set(e.frames_present)
+    out.append(("GN R8-1: structural check does NOT count subframe file as frame 3 present",
+                struct_present is not None and 3 not in struct_present,
+                sorted(struct_present) if struct_present else None, "3 absent"))
+    man_r8 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_r8)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN R8-1: subframe file does NOT cover the required whole frame",
+                bool(ms) and ms[0].state == ch.S_INCOMPLETE_REF
+                and "00003_00000" in (ms[0].uncovered or []),
+                [(s.state, s.uncovered) for s in ms], "uncovered incl. 00003_00000"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("GN R8-1: renamed-subframe gap -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("GN R8-1: renamed-subframe gap -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
     # (5) relocation (// bake dir) -> meta UNCHANGED
     reloc = os.path.join(tmp, "moved", "x")
