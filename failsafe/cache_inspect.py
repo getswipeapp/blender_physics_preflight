@@ -1140,19 +1140,32 @@ def _gn_meta_is_recognizable(data):
     so a blob dependency set can be trusted to come from it.
 
     Verified on real bakes (4.2.9 and 5.2.3, bracketing 4.5/5.0): a bake frame's meta
-    is a dict ``{"version": N, "items": {...}}`` whose ``items`` is a NON-EMPTY mapping
-    (keys ``"0"``, ``"1"``, …) — or a list — of per-socket entries, each a dict
-    carrying a ``"type"`` (``GEOMETRY``, ``FLOAT``, …) alongside its ``data``. A pure
-    value item (e.g. a FLOAT) legitimately stores its value INLINE and references no
-    blob, so a recognizable frame may reference zero blobs — "zero blobs" alone is NOT
-    a defect and must not reject a legitimate value-only bake.
+    is a dict ``{"version": 3, "items": {...}}`` whose ``items`` is a NON-EMPTY mapping
+    (keys ``"0"``, ``"1"``, …) — or a list — of per-socket entries. EVERY entry is a
+    dict carrying a non-empty ``"type"`` string (``GEOMETRY``, ``FLOAT``, …) AND a
+    ``"data"`` payload, which Blender ALWAYS serialises per item. The data
+    representation is type-appropriate: a GEOMETRY item's ``data`` is a dict (the
+    mesh/pointcloud/curve/instances payload), while a value item (FLOAT, …) stores its
+    value inline (a scalar or list).
 
-    Syntactically-valid JSON that LACKS this shape — ``{}``, a bare list, ``items``
-    missing / empty / not a mapping of typed dicts — is NOT trustworthy bake metadata:
-    its real blob dependency set can't be established, so the caller must treat it as
-    unreadable and force 'Couldn't verify', never accept an empty dependency set as a
-    clean PASS (review R6-1)."""
+    Two facts established from real bakes guard against over-rejection:
+      * A pure value item stores its value INLINE and references NO blob.
+      * An EMPTY-geometry item is a GEOMETRY whose ``data`` is an empty dict ``{}`` with
+        NO blob on disk — a legitimate, blob-free geometry frame.
+    So a recognizable frame may reference ZERO blobs: "zero blobs" is NOT a defect and
+    must not reject a legitimate value-only or empty-geometry bake.
+
+    What it REJECTS (valid JSON that Blender never writes, so its real dependency set
+    can't be trusted — route to 'Couldn't verify', never accept an empty dependency set
+    as a clean PASS — review R6-1/R7-1): a non-dict; a missing/non-int ``version``;
+    ``items`` missing / empty / not a mapping-or-list; any entry that isn't a dict, or
+    lacks a ``type`` string, or LACKS a ``data`` key (the R7-1 counterexample
+    ``{"type": "GEOMETRY"}`` has no ``data``), or a GEOMETRY entry whose ``data`` isn't
+    a dict."""
     if not isinstance(data, dict):
+        return False
+    ver = data.get("version")
+    if not isinstance(ver, int) or isinstance(ver, bool):
         return False
     items = data.get("items")
     if isinstance(items, dict):
@@ -1163,7 +1176,17 @@ def _gn_meta_is_recognizable(data):
         return False
     if not vals:
         return False
-    return all(isinstance(it, dict) and "type" in it for it in vals)
+    for it in vals:
+        if not isinstance(it, dict):
+            return False
+        t = it.get("type")
+        if not isinstance(t, str) or not t:
+            return False
+        if "data" not in it:                 # Blender always serialises a per-item payload
+            return False
+        if t == "GEOMETRY" and not isinstance(it.get("data"), dict):
+            return False                     # geometry data is a dict (empty {} if empty geo)
+    return True
 
 
 def _iter_json_strings(obj):
@@ -1209,11 +1232,12 @@ def _gn_referenced_blob_names(meta_paths):
       encoding) and under-count the dependency set, so an absent blob would read as a
       clean PASS (review R5-1); OR
     * it parses but is NOT a recognizable GN bake frame
-      (:func:`_gn_meta_is_recognizable`) — e.g. ``{}`` or any valid JSON lacking the
-      ``items`` structure. Its real dependency set can't be established, so accepting
-      its empty blob set would let a frame whose blob was deleted read as a clean PASS
-      (review R6-1). A recognizable frame that references zero blobs (a pure value-only
-      item stores its value inline) is fine and is NOT flagged.
+      (:func:`_gn_meta_is_recognizable`) — e.g. ``{}``, a bad ``version``, or an item
+      missing its ``data`` payload (``{"type": "GEOMETRY"}``). Its real dependency set
+      can't be established, so accepting its empty blob set would let a frame whose blob
+      was deleted read as a clean PASS (review R6-1/R7-1). A recognizable frame that
+      references zero blobs (a value-only item stores its value inline, or an empty
+      geometry has empty data) is fine and is NOT flagged.
 
     Read-only; never raises on a bad file."""
     names = set()

@@ -806,7 +806,7 @@ def build_fluid_missing_mesh_frame(outdir):
 
 
 def _make_gn_disk_blend(outdir, frame_end=6, packed=False, scene_sim_range=None,
-                        custom_bake_dir=None):
+                        custom_bake_dir=None, float_item=False, empty_geometry=False):
     """Create a Geometry Nodes simulation-zone bake with a REAL moving simulation,
     stored on DISK, so the GN cache-hash tests run on a genuine bake that writes
     both ``meta/*.json`` AND ``blobs/*.blob`` (the heavy attribute data).
@@ -857,18 +857,49 @@ def _make_gn_disk_blend(outdir, frame_end=6, packed=False, scene_sim_range=None,
                 return i
         return 0
 
-    setp = n.new("GeometryNodeSetPosition")
-    off = n.new("ShaderNodeCombineXYZ")
-    try:
-        off.inputs[2].default_value = 0.05
-    except Exception:
-        pass
+    # A value-only (FLOAT) state item: Blender stores its value INLINE in the meta
+    # (no blob), so this proves a recognizable frame can carry a blob-free item
+    # (review R6-1/R7-1 over-rejection guard).
+    if float_item:
+        try:
+            so.state_items.new("FLOAT", "Accum")
+        except Exception:
+            pass
+
     L = ng.links.new
-    L(gi.outputs[0], si.inputs[_geo_in(si)])          # initial geometry
-    L(si.outputs[_geo_out(si)], setp.inputs[0])       # previous state -> Set Position
-    L(off.outputs[0], setp.inputs[3])                 # Offset (+Z each step)
-    L(setp.outputs[0], so.inputs[_geo_in(so)])        # store new state
-    L(so.outputs[_geo_out(so)], go.inputs[0])
+    if empty_geometry:
+        # A GEOMETRY state item whose baked geometry is EMPTY: Blender serialises its
+        # data as an empty dict with NO blob on disk — a legitimate, blob-free geometry
+        # frame that must still verify (not be over-rejected). Delete all geometry
+        # inside the zone.
+        dg = n.new("GeometryNodeDeleteGeometry")
+        tb = n.new("FunctionNodeInputBool")
+        try:
+            tb.boolean = True
+        except Exception:
+            pass
+        sel = None
+        for i, s in enumerate(dg.inputs):
+            if s.name.lower().startswith("selection"):
+                sel = i
+        L(gi.outputs[0], si.inputs[_geo_in(si)])
+        L(si.outputs[_geo_out(si)], dg.inputs[_geo_in(dg)])
+        if sel is not None:
+            L(tb.outputs[0], dg.inputs[sel])
+        L(dg.outputs[_geo_out(dg)], so.inputs[_geo_in(so)])
+        L(so.outputs[_geo_out(so)], go.inputs[0])
+    else:
+        setp = n.new("GeometryNodeSetPosition")
+        off = n.new("ShaderNodeCombineXYZ")
+        try:
+            off.inputs[2].default_value = 0.05
+        except Exception:
+            pass
+        L(gi.outputs[0], si.inputs[_geo_in(si)])          # initial geometry
+        L(si.outputs[_geo_out(si)], setp.inputs[0])       # previous state -> Set Position
+        L(off.outputs[0], setp.inputs[3])                 # Offset (+Z each step)
+        L(setp.outputs[0], so.inputs[_geo_in(so)])        # store new state
+        L(so.outputs[_geo_out(so)], go.inputs[0])
 
     # A scene-wide custom simulation range OVERRIDES the scene frame range for sim
     # zones (verified on real bakes) — used to prove #27 honours it (review B4a).

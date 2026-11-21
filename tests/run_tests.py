@@ -381,19 +381,38 @@ def gn_unit_tests():
                  "data": {"mesh": {"poly_offsets": {"name": "00001_00000.blob"}}}}}}
     value_only = {"version": 3, "items": {"0": {"name": "Accum", "type": "FLOAT",
                   "data": 1.0}}}            # legit: recognizable, references no blob
+    empty_geo = {"version": 3, "items": {"0": {"type": "GEOMETRY", "data": {}}}}
     items_list = {"version": 3, "items": [{"type": "GEOMETRY", "data": {}}]}
     rec_cases = [
         ("real geometry-frame shape is recognizable", real_like, True),
         ("value-only frame (zero blobs) is recognizable (not over-rejected)",
          value_only, True),
+        ("empty-geometry frame (GEOMETRY data {} , zero blobs) is recognizable",
+         empty_geo, True),
         ("items as a typed LIST is recognizable", items_list, True),
         ("empty object {} is NOT recognizable (R6-1)", {}, False),
         ("version only, no items -> NOT recognizable", {"version": 3}, False),
         ("empty items mapping -> NOT recognizable", {"version": 3, "items": {}}, False),
-        ("items present but an entry lacks 'type' -> NOT recognizable",
-         {"items": {"0": {"name": "x", "data": {}}}}, False),
+        # R7-1: an entry that declares a type but has NO 'data' payload is not
+        # something Blender writes; accepting it would hide an omitted dependency.
+        ("R7-1: GEOMETRY entry missing 'data' -> NOT recognizable",
+         {"version": 3, "items": {"0": {"type": "GEOMETRY"}}}, False),
+        ("R7-1: value entry missing 'data' -> NOT recognizable",
+         {"version": 3, "items": {"0": {"type": "FLOAT"}}}, False),
+        ("R7-1: GEOMETRY 'data' must be a dict, not a scalar -> NOT recognizable",
+         {"version": 3, "items": {"0": {"type": "GEOMETRY", "data": 5}}}, False),
+        ("R7-1: missing version -> NOT recognizable",
+         {"items": {"0": {"type": "FLOAT", "data": 0.0}}}, False),
+        ("R7-1: non-int version -> NOT recognizable",
+         {"version": "3", "items": {"0": {"type": "FLOAT", "data": 0.0}}}, False),
+        ("R7-1: boolean version -> NOT recognizable",
+         {"version": True, "items": {"0": {"type": "FLOAT", "data": 0.0}}}, False),
+        ("entry lacks 'type' -> NOT recognizable",
+         {"version": 3, "items": {"0": {"name": "x", "data": {}}}}, False),
+        ("entry 'type' not a string -> NOT recognizable",
+         {"version": 3, "items": {"0": {"type": 7, "data": {}}}}, False),
         ("items not a mapping/list -> NOT recognizable",
-         {"items": "garbage"}, False),
+         {"version": 3, "items": "garbage"}, False),
         ("a bare list is NOT recognizable", [], False),
         ("a bare string is NOT recognizable", "nope", False),
     ]
@@ -3501,6 +3520,107 @@ def hash_gn_tests():
     out.append(("GN R6-1: '{}' metas -> requested verify nonzero",
                 cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                 cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (R7-1, round 7) The reviewer's counterexample: a GEOMETRY entry with its 'data'
+    # payload REMOVED is valid JSON but not something Blender writes — it references no
+    # blobs, so a deleted blob could hide behind it. Strip 'data' from every frame's
+    # GEOMETRY items and delete the blobs; the recognizer must reject it -> UNKNOWN.
+    r7 = os.path.join(tmp, "r7_nodata")
+    os.makedirs(r7, exist_ok=True)
+    fixtures._make_gn_disk_blend(r7)
+    r7bd = fixtures.gn_bake_dir(r7)
+    r7meta = os.path.join(r7bd, "meta")
+    r7blob = os.path.join(r7bd, "blobs")
+    for fn in os.listdir(r7meta):
+        if not fn.endswith(".json"):
+            continue
+        fp = os.path.join(r7meta, fn)
+        d = _json.load(open(fp, encoding="utf-8"))
+        items = d.get("items")
+        entries = items.values() if isinstance(items, dict) else (items or [])
+        for it in entries:
+            if isinstance(it, dict):
+                it.pop("data", None)          # strip the per-item payload
+        with open(fp, "w", encoding="utf-8") as fh:
+            _json.dump(d, fh)
+    r7blobs = sorted(os.listdir(r7blob)) if os.path.isdir(r7blob) else []
+    for bf in r7blobs:
+        os.remove(os.path.join(r7blob, bf))
+    _n7, u7 = ci._gn_referenced_blob_names(
+        [os.path.join(r7meta, f) for f in os.listdir(r7meta) if f.endswith(".json")])
+    out.append(("GN R7-1: data-stripped GEOMETRY metas are UNREADABLE (not recognizable)",
+                bool(u7), len(u7), ">=1 unreadable"))
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(r7, "gn.blend"))
+    recs_r7 = list(ci.iter_gn_cache_files(list(bpy.data.scenes)))
+    out.append(("GN R7-1: data-stripped metas -> meta flagged, NO blobs record",
+                any(r.identity.endswith("/meta") and r.meta_unreadable for r in recs_r7)
+                and not any(r.identity.endswith("/blobs") for r in recs_r7),
+                [(r.identity.split("::")[-1], bool(r.meta_unreadable)) for r in recs_r7],
+                "meta flagged; no blobs"))
+    man_r7 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_r7)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN R7-1: data-stripped GEOMETRY -> S_META_UNREADABLE (never UNCHANGED)",
+                bool(ms) and all(s.state == ch.S_META_UNREADABLE for s in ms),
+                [s.state for s in ms], ch.S_META_UNREADABLE))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("GN R7-1: data-stripped GEOMETRY + deleted blob -> #27 UNKNOWN",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("GN R7-1: data-stripped GEOMETRY -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (R7-1 over-rejection guard A) A REAL value-only FLOAT bake: the FLOAT item stores
+    # its value inline (no blob), and the recognizer must still accept it -> #27 PASS.
+    fv = os.path.join(tmp, "r7_floatval")
+    os.makedirs(fv, exist_ok=True)
+    fixtures._make_gn_disk_blend(fv, float_item=True)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(fv, "gn.blend"))
+    man_fv = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_fv)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms, bs = _meta(rep), _blobs(rep)
+    out.append(("GN R7-1 guard: value-only FLOAT bake verifies (not over-rejected)",
+                bool(ms) and all(s.state == ch.S_UNCHANGED for s in ms + bs),
+                [s.state for s in ms + bs], "UNCHANGED"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("GN R7-1 guard: value-only FLOAT bake -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+
+    # (R7-1 over-rejection guard B) A REAL empty-geometry bake: a GEOMETRY item whose
+    # data is {} with NO blob on disk is legitimate and must verify -> #27 PASS. This
+    # is the exact "geometry item without a blob" the fix must NOT reject.
+    eg = os.path.join(tmp, "r7_emptygeo")
+    os.makedirs(eg, exist_ok=True)
+    fixtures._make_gn_disk_blend(eg, empty_geometry=True)
+    egbd = fixtures.gn_bake_dir(eg)
+    eg_blobs = (sorted(os.listdir(os.path.join(egbd, "blobs")))
+                if egbd and os.path.isdir(os.path.join(egbd, "blobs")) else [])
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(eg, "gn.blend"))
+    recs_eg = list(ci.iter_gn_cache_files(list(bpy.data.scenes)))
+    out.append(("GN R7-1 guard: empty-geometry bake has recognizable metas, zero blobs",
+                not any(r.identity.endswith("/meta") and r.meta_unreadable
+                        for r in recs_eg) and len(eg_blobs) == 0,
+                (len(eg_blobs), [bool(r.meta_unreadable) for r in recs_eg
+                                 if r.identity.endswith("/meta")]),
+                "0 blobs; meta not flagged"))
+    man_eg = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_eg)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN R7-1 guard: empty-geometry bake verifies UNCHANGED (not over-rejected)",
+                bool(ms) and all(s.state == ch.S_UNCHANGED for s in ms),
+                [s.state for s in ms], "UNCHANGED"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("GN R7-1 guard: empty-geometry bake -> #27 PASS (not UNKNOWN)",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
 
     # (5) relocation (// bake dir) -> meta UNCHANGED
     reloc = os.path.join(tmp, "moved", "x")
