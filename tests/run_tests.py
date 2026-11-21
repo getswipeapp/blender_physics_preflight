@@ -493,8 +493,51 @@ def fluid_matcher_unit_tests():
         ("guiding rejects a data file", bool(rx["guiding"].match("fluid_data_0001.vdb")), False),
         ("data rejects a guiding file", bool(rx["data"].match("fluid_guiding_0001.vdb")), False),
     ]
-    return [("fluid matcher: %s" % label, got == expect, got, expect)
-            for label, got, expect in checks]
+    res = [("fluid matcher: %s" % label, got == expect, got, expect)
+           for label, got, expect in checks]
+
+    # R9-1: the matcher is FORMAT-AWARE — it matches only the extension the domain is
+    # configured to write for that stage, so a wrong-format file (a renamed .vdb -> .uni)
+    # can't be counted as the required frame. Verified formats (real bakes): data
+    # OPENVDB -> .vdb, UNI -> .uni; mesh BOBJECT -> .bobj.gz, OBJECT -> .obj.
+    class FakeDS:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    cr = ci._fluid_component_re
+    vdb_ds = FakeDS(cache_data_format="OPENVDB", cache_mesh_format="BOBJECT")
+    uni_ds = FakeDS(cache_data_format="UNI", cache_mesh_format="BOBJECT")
+    obj_ds = FakeDS(cache_data_format="OPENVDB", cache_mesh_format="OBJECT")
+    unk_ds = FakeDS()      # no format attrs -> union fallback (never over-reject)
+    fmt_checks = [
+        ("OPENVDB data matches .vdb",
+         bool(cr("data", vdb_ds).match("fluid_data_0003.vdb")), True),
+        ("OPENVDB data REJECTS a renamed .uni (R9-1)",
+         bool(cr("data", vdb_ds).match("fluid_data_0003.uni")), False),
+        ("OPENVDB data REJECTS a renamed .raw (R9-1)",
+         bool(cr("data", vdb_ds).match("fluid_data_0003.raw")), False),
+        ("UNI data matches .uni",
+         bool(cr("data", uni_ds).match("fluid_data_0003.uni")), True),
+        ("UNI data REJECTS a .vdb",
+         bool(cr("data", uni_ds).match("fluid_data_0003.vdb")), False),
+        ("BOBJECT mesh matches .bobj.gz",
+         bool(cr("mesh", vdb_ds).match("fluid_mesh_0003.bobj.gz")), True),
+        ("BOBJECT mesh REJECTS .obj",
+         bool(cr("mesh", vdb_ds).match("fluid_mesh_0003.obj")), False),
+        ("OBJECT mesh matches .obj",
+         bool(cr("mesh", obj_ds).match("fluid_mesh_0003.obj")), True),
+        ("OBJECT mesh REJECTS .bobj.gz",
+         bool(cr("mesh", obj_ds).match("fluid_mesh_0003.bobj.gz")), False),
+        ("config always .uni regardless of format",
+         bool(cr("config", vdb_ds).match("config_0003.uni")), True),
+        ("unknown data format falls back to union (accepts .vdb, no over-reject)",
+         bool(cr("data", unk_ds).match("fluid_data_0003.vdb")), True),
+        ("unknown data format union still accepts .uni (prior behaviour preserved)",
+         bool(cr("data", unk_ds).match("fluid_data_0003.uni")), True),
+    ]
+    res += [("fluid matcher fmt: %s" % label, got == expect, got, expect)
+            for label, got, expect in fmt_checks]
+    return res
 
 
 def _run_check_entries(cid, entries):
@@ -2958,6 +3001,45 @@ def hash_fluid_tests():
         raised = True
     out.append(("fluid cancelled capture raises Cancelled", raised, raised, True))
 
+    # (R9-1, round 9) WRONG-FORMAT file can't satisfy the required frame. The domain is
+    # OpenVDB (default), so a data frame is fluid_data_NNNN.vdb. Rename a real
+    # fluid_data_0003.vdb -> fluid_data_0003.uni (a format Blender never writes for this
+    # domain) BEFORE baseline. The format-aware matcher must NOT count the .uni file as
+    # frame 3, so the required .vdb frame 3 is uncovered -> data stage not a clean PASS,
+    # #27 UNKNOWN, requested verify nonzero. A frame-number-only matcher would count it.
+    r9 = _open("r9fmt")
+    r9data = os.path.join(r9, "fluidcache", "data")
+    vdb3 = os.path.join(r9data, "fluid_data_0003.vdb")
+    uni3 = os.path.join(r9data, "fluid_data_0003.uni")
+    out.append(("fluid R9-1: OpenVDB data frame 3 exists to rename (precondition)",
+                os.path.exists(vdb3), os.path.exists(vdb3), True))
+    os.rename(vdb3, uni3)
+    man_r9 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_r9)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ds9 = _stage(rep, "data")
+    out.append(("fluid R9-1: wrong-format .uni does NOT cover required .vdb frame 3",
+                bool(ds9) and ds9[0].state != ch.S_UNCHANGED
+                and (3 in (ds9[0].uncovered or []) or 3 in (ds9[0].missing or [])),
+                [(s.state, s.uncovered, s.missing) for s in ds9],
+                "frame 3 uncovered/missing"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R9-1: wrong-format data frame -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R9-1: wrong-format data frame -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+    # Structural inspector must also not count the .uni as frame 3 present.
+    for sobj in bpy.data.objects:
+        for smod in sobj.modifiers:
+            if smod.type == "FLUID" and getattr(smod, "fluid_type", "") == "DOMAIN":
+                se = ci.inspect_fluid_domain(sobj, smod, bpy.context.scene)
+                out.append(("fluid R9-1: structural data does NOT count .uni as frame 3",
+                            3 not in (se.frames_present or set()),
+                            sorted(se.frames_present or []), "3 absent"))
+
     return out
 
 
@@ -3631,6 +3713,17 @@ def hash_gn_tests():
     out.append(("GN R7-1 guard: empty-geometry bake -> #27 PASS (not UNKNOWN)",
                 worst_for_check(results, 27) == Status.PASS,
                 worst_for_check(results, 27), Status.PASS))
+    # Non-blocker (R8 note): the STRUCTURAL inspector must not warn 'missing blob data'
+    # for a legitimately blob-free bake — the empty-geometry metas reference no blob, so
+    # an empty blobs/ dir is expected, not a defect.
+    struct_missing = []
+    for sobj in bpy.data.objects:
+        for smod in sobj.modifiers:
+            if smod.type == "NODES":
+                for se in ci.inspect_gn_bakes(sobj, smod, bpy.context.scene):
+                    struct_missing += list(se.components_missing or [])
+    out.append(("GN blob-free: structural does NOT falsely warn 'blob data' missing",
+                "blob data" not in struct_missing, struct_missing, "no 'blob data'"))
 
     # (R8-1, round 8) SUBFRAME coverage collision. A GN bake file is named
     # <frame>_<subframe>; the WHOLE frame is subframe 0. Coverage is keyed by the EXACT

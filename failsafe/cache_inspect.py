@@ -822,6 +822,52 @@ _FLUID_COMPONENT_RE = {
     "config": re.compile(r"^config_(\d{4})\.uni$", re.IGNORECASE),
 }
 
+# A fluid sub-cache's on-disk EXTENSION is set by the domain's configured cache FORMAT
+# for that stage, not by the frame number — so matching only the frame number lets a
+# wrong-format file (a renamed .vdb -> .uni) be counted as the required frame (review
+# R9-1). Verified on real bakes (5.2.3): the data-format setter accepts only
+# UNI / OPENVDB (RAW is rejected); OPENVDB data writes fluid_data_NNNN.vdb, while a UNI
+# liquid-data cache writes pVel_NNNN.uni and siblings — NOT fluid_data_*.uni — so an
+# OPENVDB domain's data stage must match ONLY .vdb, and a hand-renamed .uni can no longer
+# stand in for the required .vdb frame. Mesh: BOBJECT -> .bobj.gz, OBJECT -> .obj.
+_FLUID_VOL_FMT_EXT = {"OPENVDB": ("vdb",), "UNI": ("uni",), "RAW": ("raw",)}
+_FLUID_MESH_FMT_EXT = {"BOBJECT": ("bobj.gz", "bobj"), "OBJECT": ("obj",),
+                       "STL": ("stl",)}
+# Which domain property sets each volumetric stage's format. Guiding has no own format
+# property; it is volumetric and follows the data format (OpenVDB -> .vdb).
+_FLUID_STAGE_FMT_PROP = {
+    "data": "cache_data_format",
+    "noise": "cache_noise_format",
+    "particles": "cache_particle_format",
+    "guiding": "cache_data_format",
+}
+
+
+def _fluid_component_re(component, ds):
+    """The FORMAT-AWARE filename pattern for one fluid stage, built from the domain's
+    configured cache format so a file of a different format can't satisfy the required
+    frame (review R9-1). ``config`` is always ``config_NNNN.uni``. When the format value
+    is missing or unrecognised (an older/newer build, or an empty setting) it falls back
+    to the format-AGNOSTIC union :data:`_FLUID_COMPONENT_RE`, so an unfamiliar build is
+    never OVER-rejected (a false UNKNOWN); the false-PASS vector is still closed for every
+    recognised format."""
+    if component == "config":
+        return _FLUID_COMPONENT_RE.get("config")
+    if component == "mesh":
+        exts = _FLUID_MESH_FMT_EXT.get(
+            (getattr(ds, "cache_mesh_format", "") or "").upper())
+        prefix = "fluid_mesh_"
+    elif component in _FLUID_STAGE_FMT_PROP:
+        exts = _FLUID_VOL_FMT_EXT.get(
+            (getattr(ds, _FLUID_STAGE_FMT_PROP[component], "") or "").upper())
+        prefix = "fluid_%s_" % component
+    else:
+        return _FLUID_COMPONENT_RE.get(component)
+    if not exts:
+        return _FLUID_COMPONENT_RE.get(component)   # unknown format -> union fallback
+    alt = "|".join(re.escape(e) for e in exts)
+    return re.compile(r"^%s(\d{4})\.(%s)$" % (re.escape(prefix), alt), re.IGNORECASE)
+
 # Which fluid sub-cache maps to which per-stage "baked" flag. An enabled stage
 # whose flag is OFF is not a valid bake even if stale files remain (R13).
 _FLUID_STAGE_FLAG = {
@@ -850,11 +896,12 @@ def _stage_flag_state(ds, flag_attr):
     return "baked" if val else "unbaked"
 
 
-def _scan_fluid_dir(data_dir, component):
-    """Scan one Mantaflow sub-cache directory for THAT component's files only.
+def _scan_fluid_dir(data_dir, component, ds):
+    """Scan one Mantaflow sub-cache directory for THAT component's files only, matching
+    the domain's CONFIGURED format for the stage (review R9-1).
     Returns (present, empty, unreadable)."""
     present, empty, unreadable = set(), set(), set()
-    rx = _FLUID_COMPONENT_RE.get(component)
+    rx = _fluid_component_re(component, ds)
     if rx is None or not data_dir or not os.path.isdir(data_dir):
         return present, empty, unreadable
     for fn in os.listdir(data_dir):
@@ -902,7 +949,7 @@ def inspect_fluid_domain(obj, mod, scene):
 
     if e.cache_dir and e.file_check_applicable and not e.replay:
         data_present, data_empty, data_unread = _scan_fluid_dir(
-            os.path.join(e.cache_dir, "data"), "data")
+            os.path.join(e.cache_dir, "data"), "data", ds)
         e.frames_present = data_present
         e.frames_empty = data_empty
         e.frames_unreadable = data_unread
@@ -942,7 +989,7 @@ def inspect_fluid_domain(obj, mod, scene):
                     e.components_missing.append("%s (stage not baked)" % comp_name)
                     continue
             cp, ce_empty, cu = _scan_fluid_dir(
-                os.path.join(e.cache_dir, comp_name), comp_name)
+                os.path.join(e.cache_dir, comp_name), comp_name, ds)
             gap = required - cp
             if gap:
                 e.components_missing.append(
@@ -989,12 +1036,13 @@ def fluid_enabled_stages(ds):
     return stages
 
 
-def _fluid_stage_files(stage_dir, component):
+def _fluid_stage_files(stage_dir, component, ds):
     """Discover the ACTUAL files for one fluid stage — matched by the component's
-    verified filename pattern, so the real extension on disk (``.vdb`` / ``.uni`` /
-    ``.bobj.gz`` …) is found rather than assumed. Returns [(frame:int, abspath)]."""
+    FORMAT-AWARE filename pattern (the domain's configured ``.vdb`` / ``.uni`` /
+    ``.bobj.gz`` … for the stage), so a wrong-format file can't be counted as the
+    required frame (review R9-1). Returns [(frame:int, abspath)]."""
     out = []
-    rx = _FLUID_COMPONENT_RE.get(component)
+    rx = _fluid_component_re(component, ds)
     if rx is None or not stage_dir or not os.path.isdir(stage_dir):
         return out
     try:
@@ -1044,7 +1092,7 @@ def iter_fluid_cache_files(scenes):
                 for stage in fluid_enabled_stages(ds):
                     stage_dir = os.path.join(cache_dir, stage)
                     files = [(fr, 0, p) for (fr, p)
-                             in sorted(_fluid_stage_files(stage_dir, stage))]
+                             in sorted(_fluid_stage_files(stage_dir, stage, ds))]
                     identity = "%s::%s::Fluid::%s/%s" % (
                         scene.name, obj.name, mod.name, stage)
                     yield PointCacheFiles(identity, "Fluid", obj.name,
@@ -1587,6 +1635,7 @@ def inspect_gn_bakes(obj, mod, scene):
             e.frames_expected = None
 
         present, empty, unreadable = set(), set(), set()
+        meta_paths = []
         if bdir:
             meta = os.path.join(bdir, "meta")
             if os.path.isdir(meta):
@@ -1598,23 +1647,32 @@ def inspect_gn_bakes(obj, mod, scene):
                     if m and int(m.group(2)) == 0:
                         fr = int(m.group(1))
                         present.add(fr)
-                        st = _file_state(os.path.join(meta, fn))
+                        mp = os.path.join(meta, fn)
+                        meta_paths.append(mp)
+                        st = _file_state(mp)
                         if st == "empty":
                             empty.add(fr)
                         elif st == "unreadable":
                             unreadable.add(fr)
-            # The meta JSON is only an index; the real data lives in blobs/.
-            # Metadata without blob data is a broken bake (R03).
+            # The meta JSON is only an index; the heavy data lives in blobs/. Metadata
+            # that REFERENCES blob data but has none on disk is a broken bake (R03). But
+            # a legitimately blob-free frame — an empty-geometry or value-only
+            # simulation stores its item inline and references NO blob (verified on real
+            # bakes) — must NOT be flagged as missing blob data just because blobs/ is
+            # empty (review R8 nonblocking note). So gate on the metas actually naming a
+            # blob.
             if present:
-                blobs = os.path.join(bdir, "blobs")
-                has_blobs = False
-                if os.path.isdir(blobs):
-                    try:
-                        has_blobs = any(os.scandir(blobs))
-                    except OSError:
-                        has_blobs = False
-                if not has_blobs:
-                    e.components_missing.append("blob data")
+                ref_names, _bad = _gn_referenced_blob_names(meta_paths)
+                if ref_names:
+                    blobs = os.path.join(bdir, "blobs")
+                    has_blobs = False
+                    if os.path.isdir(blobs):
+                        try:
+                            has_blobs = any(os.scandir(blobs))
+                        except OSError:
+                            has_blobs = False
+                    if not has_blobs:
+                        e.components_missing.append("blob data")
         e.frames_present, e.frames_empty, e.frames_unreadable = present, empty, unreadable
         e.baked_flag = bool(present) if e.file_check_applicable else None
         out.append(e)

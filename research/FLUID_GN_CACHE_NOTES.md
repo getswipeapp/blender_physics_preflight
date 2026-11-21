@@ -37,6 +37,18 @@ Key facts that shape verification:
   `guiding` appear only when their flag is on and that stage was baked. A stage
   flag that is ON but whose files are absent = an incomplete/!baked stage →
   "Couldn't verify" that stage, never a false PASS.
+- **Formats are now matched to the domain's configured setting (R9-1, 2026-11-21).**
+  Established by real bakes (5.2.3): the `cache_data_format` setter accepts only
+  `UNI`/`OPENVDB` (RAW is rejected — the `enum_items` introspection misleadingly lists
+  `['UNI','OPENVDB','RAW']` for every `cache_*_format` prop, but the real accepted values
+  differ per prop). OPENVDB data → `fluid_data_NNNN.vdb`; a UNI *liquid* data cache writes
+  `pVel_NNNN.uni` and particle siblings — NOT `fluid_data_*.uni`. Mesh: `BOBJECT` →
+  `.bobj.gz`, `OBJECT` → `.obj`. `cache_data_format`/`cache_mesh_format` exist on all four
+  versions (default OPENVDB/BOBJECT). So `_fluid_component_re(stage, ds)` now builds the
+  pattern from the configured format (`_FLUID_VOL_FMT_EXT`/`_FLUID_MESH_FMT_EXT`), falling
+  back to the format-agnostic union when a format value is missing/unrecognised (never
+  over-reject). A wrong-format file (a renamed `.vdb`→`.uni` on an OpenVDB domain) can no
+  longer be counted as the required frame.
 - **Formats vary** (`.vdb`, `.uni`, `.bobj.gz`). Hashing is format-agnostic (we
   SHA-256 the bytes), so this doesn't block change-detection — but the enumerator
   must read `cache_*_format` to build the right extension per stage, or just glob
