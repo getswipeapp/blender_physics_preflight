@@ -35,6 +35,7 @@ Filename schemes proven on official Blender 4.2.23 / 4.5.15 / 5.0.1 / 5.2.3:
 """
 import os
 import re
+import json
 import struct
 import collections
 
@@ -1127,19 +1128,41 @@ def _gn_bake_cache_dir(bake, mod):
     return os.path.join(base_dir, str(bake_id)) if bake_id is not None else None
 
 
+def _iter_json_strings(obj):
+    """Yield every string value inside a decoded JSON structure, recursively."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            for s in _iter_json_strings(v):
+                yield s
+    elif isinstance(obj, list):
+        for v in obj:
+            for s in _iter_json_strings(v):
+                yield s
+
+
 def _gn_referenced_blob_names(meta_paths):
     """The set of blob filenames the given meta JSON files reference BY NAME — the
     bake's real blob DEPENDENCY set.
 
     A GN sim bake stores a frame's heavy attribute data in ``blobs/<frame>_<idx>.blob``
-    and the per-frame ``meta/*.json`` references it by name with start/size offsets.
-    Crucially, STATIC data (mesh topology, UVs) is written ONCE — on the first baked
-    frame — and every later frame's meta references that SAME first-frame blob
-    (verified on real bakes, all four versions). So the true dependency set is the
-    union of the blob names referenced across every present meta file, not merely the
-    files that happen to sit in ``blobs/``. Deleting the first-frame blob breaks every
-    later frame, and this is what surfaces that. Read-only; tolerant of unreadable
-    meta files (they're reported via the meta record)."""
+    and the per-frame ``meta/*.json`` references it by name (in ``...data.name``
+    fields) with start/size offsets. Crucially, STATIC data (mesh topology, UVs) is
+    written ONCE — on the first baked frame — and every later frame's meta references
+    that SAME first-frame blob (verified on real bakes, all four versions). So the true
+    dependency set is the union of the blob names referenced across every present meta
+    file, not merely the files that happen to sit in ``blobs/``. Deleting the
+    first-frame blob breaks every later frame, and this is what surfaces that.
+
+    The meta is PARSED as JSON and blob names are read from the DECODED string values,
+    so a reference written with a JSON escape (e.g. ``"00004_00000\\u002eblob"``, which
+    decodes to ``00004_00000.blob``) is still seen. A raw-text regex would match only
+    the literal ``.blob`` spelling and could silently drop an escaped dependency,
+    letting an absent blob read as a clean PASS (review R4-1). If the meta can't be
+    parsed (malformed/truncated), a best-effort raw-text scan is used so references are
+    not lost — and the meta itself is separately reported as unreadable.
+    Read-only; tolerant of unreadable meta files."""
     names = set()
     for p in meta_paths:
         try:
@@ -1147,8 +1170,17 @@ def _gn_referenced_blob_names(meta_paths):
                 txt = fh.read()
         except OSError:
             continue
-        for m in _GN_BLOB_NAME_RE.finditer(txt):
-            names.add(m.group(1) + ".blob")
+        try:
+            data = json.loads(txt)
+        except (ValueError, TypeError):
+            data = None
+        if data is not None:
+            for s in _iter_json_strings(data):
+                for m in _GN_BLOB_NAME_RE.finditer(s):
+                    names.add(m.group(1) + ".blob")
+        else:
+            for m in _GN_BLOB_NAME_RE.finditer(txt):
+                names.add(m.group(1) + ".blob")
     return names
 
 
@@ -1236,23 +1268,20 @@ def iter_gn_cache_files(scenes):
                     # Expected frame set: the reliable sim-zone range (per-bake custom
                     # range, else scene-wide custom simulation range, else scene range)
                     # catches a missing HEAD or TAIL frame, not only interior holes
-                    # (review B4/B4a). Only sim zones reach here, so a range is almost
-                    # always resolvable; the present-span fallback remains only for a
-                    # degenerate inverted custom range (start > end) and still catches
-                    # interior holes without implying head/tail coverage.
+                    # (review B4/B4a). Only sim zones reach here, so the range is
+                    # normally resolvable. If it CAN'T be established — None, or a
+                    # degenerate inverted custom range (start > end) — we do NOT fall
+                    # back to the present span: that would silently accept whatever
+                    # frames exist and could hide a head/tail gap. Instead yield no
+                    # coverage so the sim reads 'Couldn't verify', never a clean pass
+                    # (review R4 hardening; cf. B1).
                     exp = _gn_expected_range(b, scene)
-                    exp_ok = exp is not None and exp[0] <= exp[1]
-                    if exp_ok:
-                        required = list(range(exp[0], exp[1] + 1))
-                    elif mfiles:
-                        present = [fr for (fr, _i, _p) in mfiles]
-                        required = list(range(min(present), max(present) + 1))
-                    else:
-                        # A disk bake located but with an empty/missing meta
-                        # directory and no establishable range. Still yielded (not
-                        # omitted): no files, no coverage -> 'Couldn't verify', never a
-                        # pass (review B1).
-                        required = []
+                    if exp is None or exp[0] > exp[1]:
+                        yield PointCacheFiles(ident_meta, "Geometry Nodes",
+                                              obj.name, "%s/meta" % label, None,
+                                              [], [])
+                        continue
+                    required = list(range(exp[0], exp[1] + 1))
                     yield PointCacheFiles(ident_meta, "Geometry Nodes", obj.name,
                                           "%s/meta" % label, meta_dir, mfiles,
                                           required)

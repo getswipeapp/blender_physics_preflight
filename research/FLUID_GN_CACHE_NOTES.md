@@ -242,6 +242,31 @@ with REAL bakes on all four versions before changing code:
 
 All four versions: 537 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
 
+### GN review round 4 (2026-11-20, re-review of b6d9731) — R4-1 + hardening, certified 4 versions
+
+Re-review confirmed B3/B4a/custom-path/bake-node closed and found one more coverage
+path plus two hardening items:
+
+- **R4-1 — JSON-escaped blob reference could be missed.** `_gn_referenced_blob_names`
+  regexed the RAW meta text for `(\d{5,}_\d+)\.blob`. A reference written with a JSON
+  Unicode escape (`"00004_00000.blob"`, which **decodes** to `00004_00000.blob`)
+  would not match the literal `.blob`, so an absent escaped dependency could be dropped
+  from the required set → false PASS. Real Blender writes literal `.blob` (verified), so
+  this is adversarial/hand-edited metadata, but the fix is strictly safer: **parse the
+  meta as JSON and read blob names from the DECODED string values** (blob refs live in
+  `...data.name` fields — confirmed by a real meta dump), with a raw-text fallback only
+  when the JSON won't parse (and the meta is separately flagged unreadable). Discriminating
+  test injects an absent blob ref via `.` → enumerated → uncovered → UNKNOWN + floor.
+- **Hardening — no optimistic present-span fallback.** When a sim zone's expected range
+  can't be established (None, or an inverted custom range start>end), the enumerator no
+  longer falls back to `min(present)..max(present)` (which could hide a head/tail gap);
+  it yields NO coverage → "Couldn't verify", never a clean pass.
+- **Hardening — custom-path test fails, not skips.** The custom-path capability exists on
+  all four certified versions, so a bake producing no files is now a cert FAILURE, not a
+  vacuous skip.
+
+All four versions: 543 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
 ## History
 
 1. `cache_inspect.iter_fluid_cache_files(scenes)` → one record per domain stage,

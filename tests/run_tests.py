@@ -3129,6 +3129,59 @@ def hash_gn_tests():
                 cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                 cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
+    # (R4-1, round 4) JSON-ESCAPED blob reference. Blob dependencies are read by
+    # PARSING the meta JSON, not regexing raw text, so a reference written with a JSON
+    # Unicode escape ("00000_00002.blob", which DECODES to 00000_00002.blob) is
+    # still enumerated. A raw-text regex would miss the escaped spelling and could drop
+    # a required dependency, letting an absent blob read as a clean PASS. Inject a
+    # reference to an ABSENT blob using the escape, BEFORE baseline; it must be in the
+    # required set, uncovered, and floor a requested verify.
+    esc = os.path.join(tmp, "escaped")
+    os.makedirs(esc, exist_ok=True)
+    fixtures._make_gn_disk_blend(esc)
+    ebdir = fixtures.gn_bake_dir(esc)
+    emeta = sorted(f for f in os.listdir(os.path.join(ebdir, "meta"))
+                   if f.endswith(".json"))
+    efirst = os.path.join(ebdir, "meta", emeta[0])
+    esc_absent = "00000_00002.blob"   # frame 0, index 2 — never written; unique token
+    with open(efirst, "r", encoding="utf-8") as fh:
+        ej = _json.load(fh)
+    ej["_failsafe_adversarial_ref"] = {"name": esc_absent, "start": 0, "size": 1}
+    etext = _json.dumps(ej)
+    # Force the JSON ESCAPE for the dot in OUR unique ref only (dumps writes it plain).
+    assert esc_absent in etext
+    etext = etext.replace(esc_absent, "00000_00002\\u002eblob")
+    with open(efirst, "w", encoding="utf-8") as fh:
+        fh.write(etext)
+    raw_check = open(efirst, "r", encoding="utf-8").read()
+    # Discriminating preconditions: the file carries the ESCAPED spelling, not the
+    # literal one, and is still valid JSON that decodes to the plain name.
+    out.append(("GN R4-1: meta carries the escaped spelling, not literal .blob (for our ref)",
+                "00000_00002\\u002eblob" in raw_check and esc_absent not in raw_check,
+                ("escaped_present=%s" % ("00000_00002\\u002eblob" in raw_check),
+                 "literal_present=%s" % (esc_absent in raw_check)), "escaped only"))
+    out.append(("GN R4-1: meta is still valid JSON decoding to the plain blob name",
+                _json.load(open(efirst, encoding="utf-8"))["_failsafe_adversarial_ref"]["name"]
+                == esc_absent, True, True))
+    names = ci._gn_referenced_blob_names([efirst])
+    out.append(("GN R4-1: escaped reference IS enumerated as a dependency",
+                esc_absent in names, esc_absent in names, True))
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(esc, "gn.blend"))
+    man_e1 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_e1)
+    rep = ch.build_report(list(bpy.data.scenes))
+    bs = _blobs(rep)
+    esc_key = ci._gn_blob_coverage_key(esc_absent)   # "00000_00002"
+    out.append(("GN R4-1: escaped absent blob is uncovered, not a clean PASS",
+                bool(bs) and bs[0].state != ch.S_UNCHANGED
+                and esc_key in (bs[0].uncovered or []),
+                [(s.state, s.uncovered) for s in bs],
+                "uncovered incl. %s" % esc_key))
+    out.append(("GN R4-1: escaped absent blob -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
     # (B4) HEAD / TAIL frame missing BEFORE the baseline is captured. The reliable
     # expected range (scene range for a sim zone) means a missing FIRST or LAST frame
     # is uncovered -> INCOMPLETE_REF, never a false complete-coverage PASS. The old
@@ -3216,6 +3269,12 @@ def hash_gn_tests():
     direct_meta = sorted(f for f in os.listdir(os.path.join(custom_dir, "meta"))
                          if f.endswith(".json")) if os.path.isdir(
                              os.path.join(custom_dir, "meta")) else []
+    # The custom-path capability exists on all four certified versions, so a bake that
+    # produced NO files is a certification FAILURE, not an acceptable skip (review R4
+    # hardening) — otherwise the test would pass vacuously if the path setup silently
+    # broke.
+    out.append(("GN custom-path: custom-path bake produced disk files (cert requires it)",
+                bool(direct_meta), len(direct_meta), ">=1 file"))
     if direct_meta:
         recs_c = [r for r in ci.iter_gn_cache_files(list(bpy.data.scenes))
                   if r.identity.endswith("/meta")]
@@ -3235,9 +3294,6 @@ def hash_gn_tests():
         out.append(("GN custom-path: full custom-path bake -> #27 PASS",
                     worst_for_check(results, 27) == Status.PASS,
                     worst_for_check(results, 27), Status.PASS))
-    else:
-        out.append(("GN custom-path: custom-path bake produced no disk files — skipped",
-                    True, "n/a", "n/a"))
 
     # (5) relocation (// bake dir) -> meta UNCHANGED
     reloc = os.path.join(tmp, "moved", "x")
