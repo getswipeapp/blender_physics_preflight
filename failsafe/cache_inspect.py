@@ -306,11 +306,18 @@ def owned_point_cache_identities(scenes):
 
 PointCacheFiles = collections.namedtuple(
     "PointCacheFiles",
-    "identity system obj_name sub_name cache_dir files required")
+    "identity system obj_name sub_name cache_dir files required meta_unreadable")
+PointCacheFiles.__new__.__defaults__ = ((),)   # meta_unreadable defaults to empty
 # files:    list of (frame:int, index:int, abspath:str) for frames present on disk.
 # required: list[int] of EVERY frame the cache range demands (range(cs, ce+1, step)),
 #           present or not — so a hash verification can tell when a baseline covers
 #           only part of the required range and must NOT report a clean PASS (B3).
+# meta_unreadable: list[str] of metadata-file basenames that could NOT be parsed
+#           (malformed JSON or invalid encoding). When non-empty the record's whole
+#           sim is forced to S_META_UNREADABLE ('Couldn't verify') — the baked data a
+#           corrupt metadata file describes, and the blob dependencies it names, can't
+#           be trusted, so it must NEVER read as a clean PASS (review R5-1). Only the
+#           Geometry Nodes meta record sets it; every other producer uses the default.
 
 
 def iter_point_cache_files(scenes):
@@ -1159,29 +1166,36 @@ def _gn_referenced_blob_names(meta_paths):
     so a reference written with a JSON escape (e.g. ``"00004_00000\\u002eblob"``, which
     decodes to ``00004_00000.blob``) is still seen. A raw-text regex would match only
     the literal ``.blob`` spelling and could silently drop an escaped dependency,
-    letting an absent blob read as a clean PASS (review R4-1). If the meta can't be
-    parsed (malformed/truncated), a best-effort raw-text scan is used so references are
-    not lost — and the meta itself is separately reported as unreadable.
-    Read-only; tolerant of unreadable meta files."""
+    letting an absent blob read as a clean PASS (review R4-1).
+
+    Returns ``(names, unreadable)``. A meta file that can't be parsed — malformed /
+    truncated JSON, or bytes that aren't valid UTF-8 — is NOT raw-text scanned as a
+    fallback: a partial raw-text scan can MISS a referenced blob (its name split across
+    a truncation, or mangled by the bad encoding) and under-count the dependency set,
+    so an absent blob would read as a clean PASS (review R5-1). Such a file's path is
+    returned in ``unreadable`` instead, and the caller forces the whole sim to
+    'Couldn't verify' — never trusting a dependency set drawn from metadata it couldn't
+    fully read. Read-only; never raises on a bad file."""
     names = set()
+    unreadable = []
     for p in meta_paths:
         try:
-            with open(p, "r", encoding="utf-8", errors="ignore") as fh:
+            # encoding="utf-8" with the default strict errors so invalid UTF-8 RAISES
+            # (it must be treated as unreadable), not silently dropped by errors="ignore".
+            with open(p, "r", encoding="utf-8") as fh:
                 txt = fh.read()
-        except OSError:
+        except (OSError, UnicodeDecodeError):
+            unreadable.append(p)
             continue
         try:
             data = json.loads(txt)
         except (ValueError, TypeError):
-            data = None
-        if data is not None:
-            for s in _iter_json_strings(data):
-                for m in _GN_BLOB_NAME_RE.finditer(s):
-                    names.add(m.group(1) + ".blob")
-        else:
-            for m in _GN_BLOB_NAME_RE.finditer(txt):
+            unreadable.append(p)
+            continue
+        for s in _iter_json_strings(data):
+            for m in _GN_BLOB_NAME_RE.finditer(s):
                 names.add(m.group(1) + ".blob")
-    return names
+    return names, unreadable
 
 
 def iter_gn_cache_files(scenes):
@@ -1282,6 +1296,23 @@ def iter_gn_cache_files(scenes):
                                               [], [])
                         continue
                     required = list(range(exp[0], exp[1] + 1))
+
+                    # The blob DEPENDENCY set is read by PARSING each present meta file.
+                    # If ANY meta can't be parsed (malformed JSON or invalid encoding),
+                    # that dependency set is untrustworthy AND the baked data the meta
+                    # describes can't be verified — so the whole bake is forced to
+                    # 'Couldn't verify' (S_META_UNREADABLE via meta_unreadable), and we
+                    # do NOT emit a blobs record that could read clean from a possibly
+                    # under-counted dependency set (review R5-1). Never a false PASS.
+                    ref_names, bad_metas = _gn_referenced_blob_names(
+                        [p for (_fr, _i, p) in mfiles])
+                    if bad_metas:
+                        yield PointCacheFiles(
+                            ident_meta, "Geometry Nodes", obj.name,
+                            "%s/meta" % label, meta_dir, mfiles, required,
+                            [os.path.basename(p) for p in bad_metas])
+                        continue
+
                     yield PointCacheFiles(ident_meta, "Geometry Nodes", obj.name,
                                           "%s/meta" % label, meta_dir, mfiles,
                                           required)
@@ -1292,8 +1323,6 @@ def iter_gn_cache_files(scenes):
                     # disk -> uncovered/missing -> floor (a broken dependency), never
                     # a silent pass (review M1).
                     blob_dir = os.path.join(bdir, "blobs")
-                    ref_names = _gn_referenced_blob_names(
-                        [p for (_fr, _i, p) in mfiles])
                     if ref_names:
                         bfiles, req_keys = [], set()
                         for nm in ref_names:

@@ -249,6 +249,8 @@ S_INCOMPLETE_REF = "INCOMPLETE_REF"  # some REQUIRED frames were never baselined
 S_NO_REF = "NO_REF"           # sim present now, but not in the baseline hashes
 S_EMPTY_REF = "EMPTY_REF"     # baseline recorded this sim but with no usable frame
 S_GONE = "GONE"               # sim in the baseline, not in the scene now
+S_META_UNREADABLE = "META_UNREADABLE"  # a GN meta file couldn't be parsed (R5-1) ->
+#                             # its blob dependency set and baked data can't be trusted
 
 # A valid stored digest is the exact lowercase-hex string hashlib produces for our
 # algorithm — nothing else. A missing / null / short / non-hex / wrong-length value
@@ -321,6 +323,17 @@ def verify_sims_iter(scenes, manifest, blend_dir, cancel=None):
     done = 0
     for rec in ci.iter_hashable_cache_files(scenes):
         seen.add(rec.identity)
+        # A record flagged with unparseable metadata can't be verified at all: the
+        # baked data a corrupt meta describes, and the blob dependencies it names,
+        # are untrustworthy. Force 'Couldn't verify' before any coverage logic, so a
+        # malformed meta can NEVER read as a clean PASS (review R5-1). The basenames
+        # ride in the 'unreadable' field for an honest message.
+        mu = getattr(rec, "meta_unreadable", None)
+        if mu:
+            out.append(SimVerify(rec.identity, rec.system, rec.obj_name,
+                                 S_META_UNREADABLE, [], [], [], list(mu),
+                                 [], [], []))
+            continue
         saved = saved_sims.get(rec.identity)
         cur = {}
         for (fr, _idx, p) in rec.files:

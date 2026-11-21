@@ -189,7 +189,8 @@ def verify_floor(report, requested):
     if report.cancelled or report.state != ch.R_OK:
         return EXIT_UNVERIFIED
     unresolved = {ch.S_UNREADABLE, ch.S_BAD_REF, ch.S_INCOMPLETE_REF,
-                  ch.S_NO_REF, ch.S_EMPTY_REF, ch.S_GONE, ch.S_DRIFT}
+                  ch.S_NO_REF, ch.S_EMPTY_REF, ch.S_GONE, ch.S_DRIFT,
+                  ch.S_META_UNREADABLE}
     for sv in report.sims:
         # The per-frame lists catch gaps masked under a CHANGED (or other) headline
         # state; the state set catches whole-sim gaps. 'missing' = baselined frames

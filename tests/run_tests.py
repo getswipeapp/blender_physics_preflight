@@ -337,10 +337,29 @@ def gn_unit_tests():
          scene, Fake(node=_node("GeometryNodeFoo"), bake_mode="STILL"), None),
         ("no node at all -> None",
          scene, Fake(bake_mode="STILL"), None),
+        ("sim zone, INVERTED per-bake custom range is returned as-is (start > end)",
+         scene, Fake(node=_node("GeometryNodeSimulationOutput"),
+              bake_mode="STILL", use_custom_simulation_frame_range=True,
+              frame_start=5, frame_end=2), (5, 2)),
     ]
     for label, sc, bake, expect in exp_cases:
         got = ci._gn_expected_range(bake, sc)
         out.append(("gn expected-range: " + label, got == expect, got, expect))
+
+    # R5-1 / R4 hardening: an INVALID frame range — None or an inverted (start > end)
+    # range — is the enumerator's cue to yield NO coverage ('Couldn't verify'), never
+    # an empty required set that would read as a clean PASS. Prove the guard condition
+    # (exp is None or exp[0] > exp[1]) fires for both degenerate shapes.
+    inv = ci._gn_expected_range(
+        Fake(node=_node("GeometryNodeSimulationOutput"), bake_mode="STILL",
+             use_custom_simulation_frame_range=True, frame_start=5, frame_end=2),
+        scene)
+    out.append(("gn expected-range: inverted range trips the no-coverage guard",
+                inv is not None and inv[0] > inv[1], inv, "start > end"))
+    none_exp = ci._gn_expected_range(Fake(node=_node("GeometryNodeFoo"),
+                                          bake_mode="STILL"), scene)
+    out.append(("gn expected-range: unknown kind trips the no-coverage guard (None)",
+                none_exp is None, none_exp, None))
 
     # _gn_is_sim_zone: only a Simulation Output node is a sim zone (hashed by #27).
     out.append(("gn sim-zone: Simulation Output is a sim zone",
@@ -2895,6 +2914,7 @@ def hash_gn_tests():
     the first-frame topology blob that every later frame depends on (review M1).
     Preserves the B1-B7 protections and adds the B1 interior-coverage protection."""
     import shutil
+    import json as _json
     from failsafe import (cachehash as ch, baseline as bl, cache_inspect as ci,
                           cli)
     out = []
@@ -2958,24 +2978,24 @@ def hash_gn_tests():
                 worst_for_check(results, 27) == Status.PASS,
                 worst_for_check(results, 27), Status.PASS))
 
-    # (2) change a meta file -> CHANGED
+    # (2) change a meta file -> CHANGED. A genuine re-bake rewrites the meta with
+    # DIFFERENT but still-VALID JSON (different bytes -> different hash). Mutate it
+    # validly (not a byte-corruption, which is a separate case that correctly reads
+    # META_UNREADABLE, below), so this tests real change-detection, not corruption.
     dst = _open("changed")
     bdir = fixtures.gn_bake_dir(dst)
     mfiles = sorted(os.path.join(bdir, "meta", f)
                     for f in os.listdir(os.path.join(bdir, "meta"))
                     if f.endswith(".json"))
     tgt = mfiles[len(mfiles) // 2]
-    with open(tgt, "r+b") as fh:
-        fh.seek(0, os.SEEK_END)
-        sz = fh.tell()
-        o = min(20, sz - 1)
-        fh.seek(o)
-        b = fh.read(1)
-        fh.seek(o)
-        fh.write(bytes([b[0] ^ 0xFF]))
+    with open(tgt, "r", encoding="utf-8") as fh:
+        _mj = _json.load(fh)
+    _mj["_failsafe_rebake_marker"] = "changed-but-valid"   # valid JSON, new bytes
+    with open(tgt, "w", encoding="utf-8") as fh:
+        _json.dump(_mj, fh)
     rep = ch.build_report(list(bpy.data.scenes))
     ms = _meta(rep)
-    out.append(("GN changed meta -> CHANGED",
+    out.append(("GN changed meta (valid JSON) -> CHANGED",
                 bool(ms) and ms[0].state == ch.S_CHANGED,
                 [s.state for s in ms], ch.S_CHANGED))
 
@@ -3081,7 +3101,6 @@ def hash_gn_tests():
     # BEFORE the baseline is captured. With exact filename-stem identities the present
     # frame-1 blob must NOT mask the absent frame-0 sibling: it stays uncovered -> never
     # a clean PASS, and floors a requested verify (review B3).
-    import json as _json
     coll = os.path.join(tmp, "collide")
     os.makedirs(coll, exist_ok=True)
     fixtures._make_gn_disk_blend(coll)
@@ -3163,7 +3182,7 @@ def hash_gn_tests():
     out.append(("GN R4-1: meta is still valid JSON decoding to the plain blob name",
                 _json.load(open(efirst, encoding="utf-8"))["_failsafe_adversarial_ref"]["name"]
                 == esc_absent, True, True))
-    names = ci._gn_referenced_blob_names([efirst])
+    names, _unread = ci._gn_referenced_blob_names([efirst])
     out.append(("GN R4-1: escaped reference IS enumerated as a dependency",
                 esc_absent in names, esc_absent in names, True))
     bpy.ops.wm.open_mainfile(filepath=os.path.join(esc, "gn.blend"))
@@ -3294,6 +3313,114 @@ def hash_gn_tests():
         out.append(("GN custom-path: full custom-path bake -> #27 PASS",
                     worst_for_check(results, 27) == Status.PASS,
                     worst_for_check(results, 27), Status.PASS))
+
+    # (R5-1, round 5) MALFORMED-JSON metadata. Blob dependencies are read by PARSING
+    # each meta file. A meta that can't be parsed is NOT raw-text scanned as a fallback
+    # — a partial raw-text scan can UNDER-count the dependency set (a name split by a
+    # truncation, or mangled by a bad encoding) and let an ABSENT blob read as a clean
+    # PASS. Instead the whole sim is forced to 'Couldn't verify' (S_META_UNREADABLE).
+    # Corrupt a meta to invalid JSON and prove it never reads clean.
+    badj = os.path.join(tmp, "badjson")
+    os.makedirs(badj, exist_ok=True)
+    fixtures._make_gn_disk_blend(badj)
+    bjd = fixtures.gn_bake_dir(badj)
+    bjmetas = sorted(f for f in os.listdir(os.path.join(bjd, "meta"))
+                     if f.endswith(".json"))
+    bjfirst = os.path.join(bjd, "meta", bjmetas[0])
+    with open(bjfirst, "w", encoding="utf-8") as fh:
+        fh.write('{ "items": [ this is not valid json ::: ')   # malformed / truncated
+    names_bj, unread_bj = ci._gn_referenced_blob_names([bjfirst])
+    out.append(("GN R5-1: malformed meta reported UNREADABLE, not raw-text scanned",
+                bjfirst in unread_bj and not names_bj,
+                (len(unread_bj), len(names_bj)), "unreadable; no names"))
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(badj, "gn.blend"))
+    recs_bj = list(ci.iter_gn_cache_files(list(bpy.data.scenes)))
+    meta_bj = [r for r in recs_bj if r.identity.endswith("/meta")]
+    blob_bj = [r for r in recs_bj if r.identity.endswith("/blobs")]
+    out.append(("GN R5-1: malformed meta -> meta record flagged meta_unreadable",
+                bool(meta_bj) and bool(meta_bj[0].meta_unreadable),
+                [list(r.meta_unreadable) for r in meta_bj], "non-empty"))
+    out.append(("GN R5-1: malformed meta -> NO blobs record (deps untrustworthy)",
+                not blob_bj, len(blob_bj), 0))
+    man_bj = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_bj)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN R5-1: malformed meta -> S_META_UNREADABLE (never UNCHANGED)",
+                bool(ms) and ms[0].state == ch.S_META_UNREADABLE,
+                [s.state for s in ms], ch.S_META_UNREADABLE))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("GN R5-1: malformed meta -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("GN R5-1: malformed meta -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (R5-1) INVALID-UTF-8 metadata. The meta is opened as STRICT utf-8, so bytes that
+    # aren't valid UTF-8 RAISE and the file is treated as unreadable — NOT silently
+    # repaired by errors='ignore', which could mangle a blob name into something the
+    # scan misses. Force invalid bytes and prove 'Couldn't verify'.
+    badu = os.path.join(tmp, "badutf8")
+    os.makedirs(badu, exist_ok=True)
+    fixtures._make_gn_disk_blend(badu)
+    bud = fixtures.gn_bake_dir(badu)
+    bumetas = sorted(f for f in os.listdir(os.path.join(bud, "meta"))
+                     if f.endswith(".json"))
+    bufirst = os.path.join(bud, "meta", bumetas[0])
+    with open(bufirst, "wb") as fh:
+        fh.write(b'\xff\xfe\x00\x80 not valid utf-8 { "items": [] }')
+    names_bu, unread_bu = ci._gn_referenced_blob_names([bufirst])
+    out.append(("GN R5-1: invalid-UTF-8 meta is UNREADABLE (strict decode), not ignored",
+                bufirst in unread_bu and not names_bu,
+                (len(unread_bu), len(names_bu)), "unreadable; no names"))
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(badu, "gn.blend"))
+    man_bu = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_bu)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _meta(rep)
+    out.append(("GN R5-1: invalid-UTF-8 meta -> S_META_UNREADABLE (never UNCHANGED)",
+                bool(ms) and ms[0].state == ch.S_META_UNREADABLE,
+                [s.state for s in ms], ch.S_META_UNREADABLE))
+    out.append(("GN R5-1: invalid-UTF-8 meta -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (R5-1 / R4 hardening) INVALID frame range, behavioral. If the expected sim range
+    # can't be established as a valid FORWARD range (None, or start > end), the
+    # enumerator yields NO coverage so the sim reads 'Couldn't verify' — never an empty
+    # required set that passes clean. Force an inverted range over a real bake.
+    invr = os.path.join(tmp, "invrange")
+    os.makedirs(invr, exist_ok=True)
+    fixtures._make_gn_disk_blend(invr)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(invr, "gn.blend"))
+    _orig_range = ci._gn_expected_range
+    try:
+        ci._gn_expected_range = lambda b, s: (9, 2)   # inverted: start > end
+        recs_iv = [r for r in ci.iter_gn_cache_files(list(bpy.data.scenes))
+                   if r.identity.endswith("/meta")]
+        out.append(("GN invalid-range: inverted range -> meta record has NO coverage",
+                    bool(recs_iv) and recs_iv[0].required == []
+                    and not recs_iv[0].files,
+                    [(r.required, len(r.files)) for r in recs_iv],
+                    "required=[], files=0"))
+        man_iv = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+        bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                         overwrite=True, cache_hashes=man_iv)
+        rep = ch.build_report(list(bpy.data.scenes))
+        # No coverage means nothing is hashed, so no sim can read UNCHANGED — the
+        # degenerate range can never produce a clean PASS — and a REQUESTED verify
+        # still floors to 'unverified' (the honest CLI outcome).
+        out.append(("GN invalid-range: inverted range -> no sim reads UNCHANGED",
+                    all(s.state != ch.S_UNCHANGED for s in rep.sims),
+                    [s.state for s in rep.sims], "none UNCHANGED"))
+        out.append(("GN invalid-range: inverted range -> requested verify nonzero",
+                    cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                    cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+    finally:
+        ci._gn_expected_range = _orig_range
 
     # (5) relocation (// bake dir) -> meta UNCHANGED
     reloc = os.path.join(tmp, "moved", "x")
