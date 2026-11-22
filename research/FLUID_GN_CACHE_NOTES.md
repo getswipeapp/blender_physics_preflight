@@ -291,3 +291,38 @@ All four versions: 543 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
 4. Fixtures: a baked fluid domain (data+noise), corruption, a missing stage frame,
    multi-scene, relocation, cancellation. Then the four-version matrix + Windows CI.
 5. GN disk bakes as a following step (packed stays "Couldn't verify").
+
+## Round-10 fluid filename facts (verified on REAL bakes, 4.2.9 + 5.2.3)
+
+Established by headless bakes (scratch probes probe_r10*.py) BEFORE coding, to fix
+reviews R10-1 (mesh ext) and R10-2 (UNI data scheme) and the format hardening:
+
+- **data OPENVDB** → one packed `fluid_data_NNNN.vdb` per frame.
+- **data UNI** → SEVERAL per-grid files, NEVER `fluid_data_*.uni`:
+  - LIQUID: `pVel_NNNN.uni`, `pp_NNNN.uni`, `vel_NNNN.uni`
+  - GAS:    `density_NNNN.uni`, `flame_NNNN.uni`, `heat_NNNN.uni`, `shadow_NNNN.uni`, `vel_NNNN.uni`
+  (the `cache_data_format` setter accepts only UNI / OPENVDB — RAW is rejected.)
+- **mesh BOBJECT** → `fluid_mesh_NNNN.bobj.gz` ONLY (bare `.bobj` is never written).
+- **mesh OBJECT**  → `fluid_mesh_NNNN.obj`. The mesh-format enum is only
+  ('BOBJECT','OBJECT') — **STL is not a valid fluid mesh format** (setter rejects it).
+- **noise** → ALWAYS `fluid_noise_NNNN.vdb`. `cache_noise_format` can be SET to UNI
+  but DOES NOT change the files on disk (still VDB). So noise is format-independent.
+- **particles** → ALWAYS `fluid_particles_NNNN.vdb`. `cache_particle_format`'s enum
+  is only ('UNI',), it DEFAULTS TO '' (matches no enum), and it likewise does not
+  change the files. So particles is format-independent too.
+- **guiding** → packed `fluid_guiding_NNNN.vdb`. **config** → `config_NNNN.uni`.
+- All extensions are written LOWER-CASE, deterministically.
+
+Design consequences (cache_inspect._fluid_component_re):
+- Only **data** and **mesh** consult a format property; config/noise/particles/guiding
+  use FIXED patterns. (Consulting cache_particle_format was wrong — it defaults to ''
+  and drove a permissive union fallback: the R10 hardening gap.)
+- UNI data matches a bare Mantaflow grid name and EXCLUDES the reserved
+  `fluid_<stage>_` prefixes, so a planted `fluid_data_NNNN.uni` (a renamed OpenVDB
+  frame) can never count as UNI data coverage (R10-2).
+- Patterns are now CASE-SENSITIVE (dropped re.IGNORECASE): an upper-case `.VDB` on a
+  case-sensitive filesystem is not a real bake output and must not be counted.
+- An UNRECOGNISED format value → NO matcher (matches nothing) → required frames read
+  as uncovered → UNKNOWN, never a permissive guess (UNKNOWN-over-false-PASS).
+
+All four versions after the fix: 636 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).

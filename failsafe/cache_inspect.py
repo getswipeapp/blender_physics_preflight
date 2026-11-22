@@ -801,72 +801,78 @@ def inspect_rigidbody_world(scene):
 
 # ------------------------------------------------------------- fluid --------
 
-# Each Mantaflow sub-cache has a COMPONENT-SPECIFIC filename, verified against
-# real 5.2.3 bakes: fluid_data_NNNN.vdb, fluid_mesh_NNNN.bobj.gz,
-# fluid_noise_NNNN.vdb, fluid_particles_NNNN.vdb. Matching per component stops a
-# file from one component (e.g. a data file sitting in mesh/) from being counted
-# as another component's frame (R10).
-_FLUID_COMPONENT_RE = {
-    "data": re.compile(r"^fluid_data_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
-    "mesh": re.compile(r"^fluid_mesh_(\d{4})\.(bobj\.gz|bobj|vdb)$", re.IGNORECASE),
-    "noise": re.compile(r"^fluid_noise_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
-    "particles": re.compile(r"^fluid_particles_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
-    # Guiding sub-cache: verified against a real 5.2.3 guide bake — directory
-    # "guiding/", files fluid_guiding_NNNN.vdb (same prefix scheme as the rest,
-    # confirmed by probe rather than assumed). (R16)
-    "guiding": re.compile(r"^fluid_guiding_(\d{4})\.(vdb|uni|raw)$", re.IGNORECASE),
-    # Mantaflow writes one solver-config file per frame (config/config_NNNN.uni,
-    # verified on real 5.2.3 bakes). A complete bake always includes these; if
-    # they go missing the cache can't be reloaded for render, so config is a
-    # REQUIRED component, not an optional sub-cache (R11).
-    "config": re.compile(r"^config_(\d{4})\.uni$", re.IGNORECASE),
+# A fluid sub-cache's filename scheme was established from REAL bakes on 4.2.9 and
+# 5.2.3 (see research/FLUID_GN_CACHE_NOTES.md). Two groups:
+#
+#   FIXED — output never varies with any format setting:
+#     config    -> config_NNNN.uni            (one solver-config file per frame; a
+#                                               complete bake always has these, so
+#                                               config is REQUIRED, not optional — R11)
+#     noise     -> fluid_noise_NNNN.vdb        (cache_noise_format is accepted but does
+#                                               NOT change the files on disk — always VDB)
+#     particles -> fluid_particles_NNNN.vdb    (cache_particle_format's enum is only
+#                                               ('UNI',), defaults to '' and likewise
+#                                               does NOT change the files — always VDB)
+#     guiding   -> fluid_guiding_NNNN.vdb      (velocity guide, packed VDB — R16)
+#
+#   FORMAT-AWARE — output genuinely depends on the stage's format setting:
+#     data  OPENVDB -> one packed fluid_data_NNNN.vdb
+#     data  UNI     -> several per-grid files pVel/pp/vel_NNNN.uni (liquid) or
+#                      density/flame/heat/shadow/vel_NNNN.uni (gas) — NEVER
+#                      fluid_data_*.uni (RAW is rejected by the setter, so unmapped)
+#     mesh  BOBJECT -> fluid_mesh_NNNN.bobj.gz
+#     mesh  OBJECT  -> fluid_mesh_NNNN.obj      (STL is not a valid mesh format — the
+#                                                enum is only BOBJECT/OBJECT — so unmapped)
+#
+# Matching per component (and per the stage's REAL format) stops a file of one
+# component or format from being counted as another's frame — the core false-PASS
+# vector behind reviews R9-1, R10-1 and R10-2. Patterns are CASE-SENSITIVE: Blender
+# writes these extensions lower-case, deterministically, so an upper-case name (a
+# hand-made .VDB surviving on a case-sensitive filesystem) is not a real bake output
+# and must not be counted toward coverage (review R10 hardening).
+_FLUID_FIXED_RE = {
+    "config":    re.compile(r"^config_(\d{4})\.uni$"),
+    "noise":     re.compile(r"^fluid_noise_(\d{4})\.vdb$"),
+    "particles": re.compile(r"^fluid_particles_(\d{4})\.vdb$"),
+    "guiding":   re.compile(r"^fluid_guiding_(\d{4})\.vdb$"),
 }
 
-# A fluid sub-cache's on-disk EXTENSION is set by the domain's configured cache FORMAT
-# for that stage, not by the frame number — so matching only the frame number lets a
-# wrong-format file (a renamed .vdb -> .uni) be counted as the required frame (review
-# R9-1). Verified on real bakes (5.2.3): the data-format setter accepts only
-# UNI / OPENVDB (RAW is rejected); OPENVDB data writes fluid_data_NNNN.vdb, while a UNI
-# liquid-data cache writes pVel_NNNN.uni and siblings — NOT fluid_data_*.uni — so an
-# OPENVDB domain's data stage must match ONLY .vdb, and a hand-renamed .uni can no longer
-# stand in for the required .vdb frame. Mesh: BOBJECT -> .bobj.gz, OBJECT -> .obj.
-_FLUID_VOL_FMT_EXT = {"OPENVDB": ("vdb",), "UNI": ("uni",), "RAW": ("raw",)}
-_FLUID_MESH_FMT_EXT = {"BOBJECT": ("bobj.gz", "bobj"), "OBJECT": ("obj",),
-                       "STL": ("stl",)}
-# Which domain property sets each volumetric stage's format. Guiding has no own format
-# property; it is volumetric and follows the data format (OpenVDB -> .vdb).
-_FLUID_STAGE_FMT_PROP = {
-    "data": "cache_data_format",
-    "noise": "cache_noise_format",
-    "particles": "cache_particle_format",
-    "guiding": "cache_data_format",
+# data-stage patterns, keyed by cache_data_format. The UNI pattern matches a bare
+# Mantaflow grid name (pVel, pp, vel, density, …) and EXCLUDES the reserved packed
+# 'fluid_<stage>_' prefixes, so a planted fluid_data_NNNN.uni — a renamed OpenVDB
+# frame — can never be counted as UNI data coverage (review R10-2).
+_FLUID_DATA_RE = {
+    "OPENVDB": re.compile(r"^fluid_data_(\d{4})\.vdb$"),
+    "UNI": re.compile(r"^(?!fluid_(?:data|noise|particles|guiding|mesh)_)"
+                      r"[A-Za-z][A-Za-z0-9]*_(\d{4})\.uni$"),
+}
+# mesh-stage patterns, keyed by cache_mesh_format (review R10-1).
+_FLUID_MESH_RE = {
+    "BOBJECT": re.compile(r"^fluid_mesh_(\d{4})\.bobj\.gz$"),
+    "OBJECT": re.compile(r"^fluid_mesh_(\d{4})\.obj$"),
 }
 
 
 def _fluid_component_re(component, ds):
-    """The FORMAT-AWARE filename pattern for one fluid stage, built from the domain's
-    configured cache format so a file of a different format can't satisfy the required
-    frame (review R9-1). ``config`` is always ``config_NNNN.uni``. When the format value
-    is missing or unrecognised (an older/newer build, or an empty setting) it falls back
-    to the format-AGNOSTIC union :data:`_FLUID_COMPONENT_RE`, so an unfamiliar build is
-    never OVER-rejected (a false UNKNOWN); the false-PASS vector is still closed for every
-    recognised format."""
-    if component == "config":
-        return _FLUID_COMPONENT_RE.get("config")
+    """The filename pattern for one fluid stage, from the stage's REAL on-disk
+    behaviour (verified on 4.2.9 + 5.2.3 bakes).
+
+    config/noise/particles/guiding have a FIXED pattern — their output never varies
+    with a format setting. data and mesh are driven by ``cache_data_format`` /
+    ``cache_mesh_format``. A format value that isn't a recognised one returns
+    ``None``: the stage is then matched by NO file, so its required frames read as
+    uncovered (UNKNOWN / incomplete) instead of being matched by a permissive guess —
+    the project's UNKNOWN-over-false-PASS rule, applied to an unfamiliar build
+    (review R10 hardening)."""
+    if component in _FLUID_FIXED_RE:
+        return _FLUID_FIXED_RE[component]
+    if component == "data":
+        return _FLUID_DATA_RE.get(
+            (getattr(ds, "cache_data_format", "") or "").upper())
     if component == "mesh":
-        exts = _FLUID_MESH_FMT_EXT.get(
+        return _FLUID_MESH_RE.get(
             (getattr(ds, "cache_mesh_format", "") or "").upper())
-        prefix = "fluid_mesh_"
-    elif component in _FLUID_STAGE_FMT_PROP:
-        exts = _FLUID_VOL_FMT_EXT.get(
-            (getattr(ds, _FLUID_STAGE_FMT_PROP[component], "") or "").upper())
-        prefix = "fluid_%s_" % component
-    else:
-        return _FLUID_COMPONENT_RE.get(component)
-    if not exts:
-        return _FLUID_COMPONENT_RE.get(component)   # unknown format -> union fallback
-    alt = "|".join(re.escape(e) for e in exts)
-    return re.compile(r"^%s(\d{4})\.(%s)$" % (re.escape(prefix), alt), re.IGNORECASE)
+    return None
 
 # Which fluid sub-cache maps to which per-stage "baked" flag. An enabled stage
 # whose flag is OFF is not a valid bake even if stale files remain (R13).

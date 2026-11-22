@@ -6,6 +6,7 @@ Exits non-zero if any case fails. Each case builds a scene that should make one
 specific check report a known status, then asserts it.
 """
 import os
+import re
 import sys
 import tempfile
 import traceback
@@ -475,68 +476,92 @@ def gn_unit_tests():
 
 
 def fluid_matcher_unit_tests():
-    """R10: each fluid sub-cache matcher accepts only ITS component's files, so
-    a file from one component can't be counted inside another's folder."""
+    """R9-1 / R10-1 / R10-2: each fluid sub-cache matcher accepts ONLY the real
+    files the domain's configured format actually writes for that stage, so no file
+    of another component, another format, or a hand-made masquerade can be counted
+    as a required frame. All filename schemes verified on real 4.2.9 + 5.2.3 bakes."""
     from failsafe import cache_inspect as ci
-    rx = ci._FLUID_COMPONENT_RE
-    checks = [
-        ("data accepts fluid_data", bool(rx["data"].match("fluid_data_0001.vdb")), True),
-        ("mesh accepts fluid_mesh", bool(rx["mesh"].match("fluid_mesh_0001.bobj.gz")), True),
-        ("noise accepts fluid_noise", bool(rx["noise"].match("fluid_noise_0001.vdb")), True),
-        ("particles accepts fluid_particles", bool(rx["particles"].match("fluid_particles_0001.vdb")), True),
-        ("mesh rejects a data file", bool(rx["mesh"].match("fluid_data_0001.vdb")), False),
-        ("data rejects a mesh file", bool(rx["data"].match("fluid_mesh_0001.bobj.gz")), False),
-        ("data rejects unrelated file", bool(rx["data"].match("unrelated_0001.vdb")), False),
-        ("noise rejects a data file", bool(rx["noise"].match("fluid_data_0001.vdb")), False),
-        # R16: guiding matcher accepts only fluid_guiding files.
-        ("guiding accepts fluid_guiding", bool(rx["guiding"].match("fluid_guiding_0001.vdb")), True),
-        ("guiding rejects a data file", bool(rx["guiding"].match("fluid_data_0001.vdb")), False),
-        ("data rejects a guiding file", bool(rx["data"].match("fluid_guiding_0001.vdb")), False),
-    ]
-    res = [("fluid matcher: %s" % label, got == expect, got, expect)
-           for label, got, expect in checks]
 
-    # R9-1: the matcher is FORMAT-AWARE — it matches only the extension the domain is
-    # configured to write for that stage, so a wrong-format file (a renamed .vdb -> .uni)
-    # can't be counted as the required frame. Verified formats (real bakes): data
-    # OPENVDB -> .vdb, UNI -> .uni; mesh BOBJECT -> .bobj.gz, OBJECT -> .obj.
     class FakeDS:
         def __init__(self, **kw):
             self.__dict__.update(kw)
 
     cr = ci._fluid_component_re
+
+    def m(component, ds, name):
+        """True iff the stage's matcher accepts `name` (False when there is no
+        matcher, i.e. an unrecognised format -> matched by nothing)."""
+        rx = cr(component, ds)
+        return bool(rx and rx.match(name))
+
     vdb_ds = FakeDS(cache_data_format="OPENVDB", cache_mesh_format="BOBJECT")
     uni_ds = FakeDS(cache_data_format="UNI", cache_mesh_format="BOBJECT")
     obj_ds = FakeDS(cache_data_format="OPENVDB", cache_mesh_format="OBJECT")
-    unk_ds = FakeDS()      # no format attrs -> union fallback (never over-reject)
-    fmt_checks = [
-        ("OPENVDB data matches .vdb",
-         bool(cr("data", vdb_ds).match("fluid_data_0003.vdb")), True),
+    any_ds = FakeDS(cache_data_format="OPENVDB", cache_mesh_format="BOBJECT")
+
+    checks = [
+        # --- FIXED stages (output independent of any format setting) ---
+        ("config accepts config_NNNN.uni", m("config", any_ds, "config_0001.uni"), True),
+        ("config rejects a data file", m("config", any_ds, "fluid_data_0001.vdb"), False),
+        ("noise accepts fluid_noise .vdb", m("noise", any_ds, "fluid_noise_0001.vdb"), True),
+        ("noise rejects .uni (always VDB)", m("noise", any_ds, "fluid_noise_0001.uni"), False),
+        ("noise rejects a data file", m("noise", any_ds, "fluid_data_0001.vdb"), False),
+        ("particles accepts fluid_particles .vdb",
+         m("particles", any_ds, "fluid_particles_0001.vdb"), True),
+        ("particles rejects .uni (always VDB)",
+         m("particles", any_ds, "fluid_particles_0001.uni"), False),
+        ("guiding accepts fluid_guiding .vdb",
+         m("guiding", any_ds, "fluid_guiding_0001.vdb"), True),
+        ("guiding rejects a data file", m("guiding", any_ds, "fluid_data_0001.vdb"), False),
+
+        # --- data OPENVDB (one packed .vdb per frame) ---
+        ("OPENVDB data matches fluid_data .vdb", m("data", vdb_ds, "fluid_data_0003.vdb"), True),
         ("OPENVDB data REJECTS a renamed .uni (R9-1)",
-         bool(cr("data", vdb_ds).match("fluid_data_0003.uni")), False),
+         m("data", vdb_ds, "fluid_data_0003.uni"), False),
         ("OPENVDB data REJECTS a renamed .raw (R9-1)",
-         bool(cr("data", vdb_ds).match("fluid_data_0003.raw")), False),
-        ("UNI data matches .uni",
-         bool(cr("data", uni_ds).match("fluid_data_0003.uni")), True),
-        ("UNI data REJECTS a .vdb",
-         bool(cr("data", uni_ds).match("fluid_data_0003.vdb")), False),
-        ("BOBJECT mesh matches .bobj.gz",
-         bool(cr("mesh", vdb_ds).match("fluid_mesh_0003.bobj.gz")), True),
-        ("BOBJECT mesh REJECTS .obj",
-         bool(cr("mesh", vdb_ds).match("fluid_mesh_0003.obj")), False),
-        ("OBJECT mesh matches .obj",
-         bool(cr("mesh", obj_ds).match("fluid_mesh_0003.obj")), True),
-        ("OBJECT mesh REJECTS .bobj.gz",
-         bool(cr("mesh", obj_ds).match("fluid_mesh_0003.bobj.gz")), False),
-        ("config always .uni regardless of format",
-         bool(cr("config", vdb_ds).match("config_0003.uni")), True),
-        ("unknown data format falls back to union (accepts .vdb, no over-reject)",
-         bool(cr("data", unk_ds).match("fluid_data_0003.vdb")), True),
-        ("unknown data format union still accepts .uni (prior behaviour preserved)",
-         bool(cr("data", unk_ds).match("fluid_data_0003.uni")), True),
+         m("data", vdb_ds, "fluid_data_0003.raw"), False),
+        ("OPENVDB data REJECTS an upper-case .VDB (case hardening)",
+         m("data", vdb_ds, "fluid_data_0003.VDB"), False),
+        ("OPENVDB data rejects a mesh file", m("data", vdb_ds, "fluid_mesh_0003.bobj.gz"), False),
+
+        # --- data UNI (per-grid .uni; NEVER fluid_data_*.uni) ---
+        ("UNI data matches pVel grid", m("data", uni_ds, "pVel_0003.uni"), True),
+        ("UNI data matches vel grid", m("data", uni_ds, "vel_0003.uni"), True),
+        ("UNI data matches pp grid", m("data", uni_ds, "pp_0003.uni"), True),
+        ("UNI data matches density grid (gas)", m("data", uni_ds, "density_0003.uni"), True),
+        ("UNI data REJECTS the fluid_data_*.uni masquerade (R10-2)",
+         m("data", uni_ds, "fluid_data_0003.uni"), False),
+        ("UNI data REJECTS a reserved fluid_noise prefix",
+         m("data", uni_ds, "fluid_noise_0003.uni"), False),
+        ("UNI data REJECTS a reserved fluid_particles prefix",
+         m("data", uni_ds, "fluid_particles_0003.uni"), False),
+        ("UNI data REJECTS a .vdb (wrong ext for UNI)",
+         m("data", uni_ds, "pVel_0003.vdb"), False),
+
+        # --- mesh BOBJECT / OBJECT (R10-1) ---
+        ("BOBJECT mesh matches .bobj.gz", m("mesh", vdb_ds, "fluid_mesh_0003.bobj.gz"), True),
+        ("BOBJECT mesh REJECTS bare .bobj (R10-1)",
+         m("mesh", vdb_ds, "fluid_mesh_0003.bobj"), False),
+        ("BOBJECT mesh REJECTS .vdb", m("mesh", vdb_ds, "fluid_mesh_0003.vdb"), False),
+        ("OBJECT mesh matches .obj", m("mesh", obj_ds, "fluid_mesh_0003.obj"), True),
+        ("OBJECT mesh REJECTS .bobj.gz", m("mesh", obj_ds, "fluid_mesh_0003.bobj.gz"), False),
+
+        # --- unrecognised format -> matched by NOTHING (UNKNOWN, not a guess) ---
+        ("STL mesh (not a real format) matches nothing",
+         m("mesh", FakeDS(cache_mesh_format="STL"), "fluid_mesh_0003.bobj.gz"), False),
+        ("RAW data (rejected by setter) matches nothing",
+         m("data", FakeDS(cache_data_format="RAW"), "fluid_data_0003.vdb"), False),
+        ("missing data-format attr matches nothing",
+         m("data", FakeDS(), "fluid_data_0003.vdb"), False),
     ]
-    res += [("fluid matcher fmt: %s" % label, got == expect, got, expect)
-            for label, got, expect in fmt_checks]
+    res = [("fluid matcher: %s" % label, got == expect, got, expect)
+           for label, got, expect in checks]
+
+    # Frame number is parsed from the per-grid UNI filename, so coverage keys the
+    # right frame (pVel_0003.uni -> 3), not the grid name.
+    mo = cr("data", uni_ds).match("pVel_0007.uni")
+    res.append(("fluid matcher: UNI grid frame parses to 0007",
+                bool(mo) and mo.group(1) == "0007", mo and mo.group(1), "0007"))
     return res
 
 
@@ -3039,6 +3064,89 @@ def hash_fluid_tests():
                 out.append(("fluid R9-1: structural data does NOT count .uni as frame 3",
                             3 not in (se.frames_present or set()),
                             sorted(se.frames_present or []), "3 absent"))
+
+    # (R10-1, round 10) BOBJECT mesh writes ONLY fluid_mesh_NNNN.bobj.gz (verified on
+    # real 4.2.9 + 5.2.3 bakes — bare .bobj is never produced). Rename a real
+    # fluid_mesh_0003.bobj.gz -> fluid_mesh_0003.bobj BEFORE baseline. The matcher must
+    # NOT count the .bobj as frame 3, so the required mesh frame 3 is uncovered -> mesh
+    # stage not a clean PASS, #27 UNKNOWN. The default src bake already has BOBJECT mesh.
+    r10m = _open("r10mesh")
+    r10mesh = os.path.join(r10m, "fluidcache", "mesh")
+    gz3 = os.path.join(r10mesh, "fluid_mesh_0003.bobj.gz")
+    bobj3 = os.path.join(r10mesh, "fluid_mesh_0003.bobj")
+    out.append(("fluid R10-1: BOBJECT mesh frame 3 exists to rename (precondition)",
+                os.path.exists(gz3), os.path.exists(gz3), True))
+    os.rename(gz3, bobj3)
+    man_r10m = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_r10m)
+    rep = ch.build_report(list(bpy.data.scenes))
+    ms = _stage(rep, "mesh")
+    out.append(("fluid R10-1: bare .bobj does NOT cover required .bobj.gz frame 3",
+                bool(ms) and ms[0].state != ch.S_UNCHANGED
+                and (3 in (ms[0].uncovered or []) or 3 in (ms[0].missing or [])),
+                [(s.state, s.uncovered, s.missing) for s in ms],
+                "frame 3 uncovered/missing"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R10-1: bare .bobj mesh frame -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R10-1: bare .bobj mesh frame -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+    for sobj in bpy.data.objects:
+        for smod in sobj.modifiers:
+            if smod.type == "FLUID" and getattr(smod, "fluid_type", "") == "DOMAIN":
+                se = ci.inspect_fluid_domain(sobj, smod, bpy.context.scene)
+                mm = [x for x in (se.components_missing or []) if x.startswith("mesh")]
+                out.append(("fluid R10-1: structural mesh stage reports missing frame",
+                            bool(mm), se.components_missing, "mesh missing"))
+
+    # (R10-2, round 10) UNI data writes per-grid pVel/pp/vel_NNNN.uni — NEVER
+    # fluid_data_*.uni (verified on real 4.2.9 + 5.2.3 bakes). Replace every real UNI
+    # grid file with a synthetic fluid_data_NNNN.uni (the kind of masquerade a renamed
+    # OpenVDB frame would create) BEFORE baseline. The matcher must count NONE of them,
+    # so the data stage has no coverage at all -> #27 UNKNOWN, never a clean PASS.
+    u10 = os.path.join(tmp, "r10uni")
+    os.makedirs(u10, exist_ok=True)
+    fixtures.build_fluid_uni_data(u10)
+    u10data = os.path.join(u10, "fluidcache", "data")
+    real_uni = sorted(f for f in os.listdir(u10data) if f.endswith(".uni"))
+    out.append(("fluid R10-2: UNI data wrote per-grid .uni (not fluid_data_*)",
+                bool(real_uni) and not any(f.startswith("fluid_data_") for f in real_uni),
+                real_uni[:4], "per-grid .uni files"))
+    # Replace the real grid files with the synthetic masquerade, one per frame.
+    frames_seen = set()
+    for f in real_uni:
+        mo = re.search(r"_(\d{4})\.uni$", f)
+        if mo:
+            frames_seen.add(mo.group(1))
+        os.remove(os.path.join(u10data, f))
+    for fr in sorted(frames_seen):
+        with open(os.path.join(u10data, "fluid_data_%s.uni" % fr), "wb") as fh:
+            fh.write(b"not a real mantaflow uni grid file")
+    man_u10 = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man_u10)
+    rep = ch.build_report(list(bpy.data.scenes))
+    us = _stage(rep, "data")
+    out.append(("fluid R10-2: synthetic fluid_data_*.uni gives data stage NO coverage",
+                bool(us) and us[0].state != ch.S_UNCHANGED,
+                [(s.state, s.uncovered, s.missing) for s in us], "not UNCHANGED"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R10-2: synthetic .uni masquerade -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R10-2: synthetic .uni masquerade -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+    for sobj in bpy.data.objects:
+        for smod in sobj.modifiers:
+            if smod.type == "FLUID" and getattr(smod, "fluid_type", "") == "DOMAIN":
+                se = ci.inspect_fluid_domain(sobj, smod, bpy.context.scene)
+                out.append(("fluid R10-2: structural data counts NONE of the synthetic .uni",
+                            not (se.frames_present or set()),
+                            sorted(se.frames_present or []), "empty"))
 
     return out
 

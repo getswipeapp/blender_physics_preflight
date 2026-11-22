@@ -750,7 +750,7 @@ def _make_two_sim_blend(outdir, frame_end=6):
     return blend
 
 
-def _make_fluid_blend(outdir, frame_end=4, use_mesh=True):
+def _make_fluid_blend(outdir, frame_end=4, use_mesh=True, data_format=None):
     reset()
     sc = bpy.context.scene
     sc.frame_start, sc.frame_end = 1, frame_end
@@ -763,6 +763,11 @@ def _make_fluid_blend(outdir, frame_end=4, use_mesh=True):
     ds.domain_type = "LIQUID"
     ds.resolution_max = 16
     ds.use_mesh = use_mesh
+    # data_format: None keeps Blender's default (OpenVDB -> fluid_data_NNNN.vdb);
+    # "UNI" writes the per-grid liquid scheme (pVel/pp/vel_NNNN.uni) used by the
+    # R10-2 regression. The setter accepts only UNI/OPENVDB.
+    if data_format is not None:
+        ds.cache_data_format = data_format
     ds.cache_type = "ALL"
     ds.cache_frame_start, ds.cache_frame_end = 1, frame_end
     ds.cache_directory = "//fluidcache"
@@ -802,6 +807,14 @@ def build_fluid_missing_mesh_frame(outdir):
     files = sorted(f for f in os.listdir(mesh))
     assert files, "expected baked fluid mesh files"
     os.remove(os.path.join(mesh, files[-1]))  # delete a required mesh frame
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_fluid_uni_data(outdir):
+    """A real LIQUID bake with the DATA stage in UNI format, so data/ holds the
+    per-grid pVel/pp/vel_NNNN.uni files (NOT fluid_data_*.uni) — the R10-2 regression
+    baseline. use_mesh off to keep the bake focused on the data stage."""
+    blend = _make_fluid_blend(outdir, use_mesh=False, data_format="UNI")
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
