@@ -857,23 +857,38 @@ _FLUID_MESH_RE = {
 #     LIQUID -> pVel_NNNN.uni, pp_NNNN.uni, vel_NNNN.uni
 #     GAS    -> density_NNNN.uni, flame_NNNN.uni, heat_NNNN.uni, shadow_NNNN.uni,
 #               vel_NNNN.uni
-# These are the grids EVERY genuine bake of that domain type writes, so UNI data
-# coverage must require EACH of them FOR EACH frame — not merely "the frame has some
-# .uni file". Keying coverage on the bare integer frame let a surviving sibling grid
-# (pp/vel) — or a planted junk_NNNN.uni — stand in for a deleted required grid (pVel)
+# These are the grids EVERY genuine bake of that domain type writes (the MANDATORY core),
+# so UNI data coverage must require EACH of them FOR EACH frame — not merely "the frame
+# has some .uni file". Keying coverage on the bare integer frame let a surviving sibling
+# grid (pp/vel) — or a planted junk_NNNN.uni — stand in for a deleted required grid (pVel)
 # and read as a clean PASS (review R11-1). The fix mirrors the Geometry-Nodes blob B3
 # pattern: a per-(frame, grid) string coverage token that can never collapse.
+# A bake may ALSO write OPTIONAL grids on top of the core — colored smoke adds
+# color_r/color_g/color_b, a resumable cache adds restart-state grids (densityIn, flags,
+# phiIn, velTmp, color_*_in, …) — which the required set picks up per-bake from the files
+# actually present, so a deleted optional grid is caught too without forcing UNKNOWN on a
+# bake that has none (review R12-1; see _fluid_stage_required).
 _FLUID_UNI_CORE_GRIDS = {
     "LIQUID": ("pVel", "pp", "vel"),
     "GAS":    ("density", "flame", "heat", "shadow", "vel"),
 }
+# Colored smoke writes this THREE-grid set together (verified on real bakes, all four
+# versions). It is OPTIONAL — a plain smoke/fire bake writes none of it — so it can't be
+# mandatory core (that would force UNKNOWN on a legitimate plain bake). It IS tracked by
+# name as a unit so one deleted channel can't hide behind its two siblings: present any
+# of these and ALL three are required for every frame (review R12-1).
+_FLUID_UNI_COLOR_GRIDS = ("color_r", "color_g", "color_b")
 # A UNI data file: <grid>_<frame>.uni. The negative lookahead preserves the R10-2
 # masquerade rejection — a packed 'fluid_data_NNNN.uni' (and any reserved
 # 'fluid_<stage>_' name) can never be read as a per-grid data file. group(1) is the
 # grid base-name, group(2) the 4-digit frame. CASE-SENSITIVE, like every fluid pattern.
+# The grid base-name MAY contain underscores: colored smoke writes color_r/color_g/
+# color_b and a resumable cache writes restart-state grids like color_r_in (review R12-1).
+# An earlier '[A-Za-z0-9]*' class silently REJECTED every underscore name, so those files
+# were invisible to capture and verification — a deleted color channel read as a PASS.
 _FLUID_UNI_DATA_FILE_RE = re.compile(
     r"^(?!fluid_(?:data|noise|particles|guiding|mesh)_)"
-    r"([A-Za-z][A-Za-z0-9]*)_(\d{4})\.uni$")
+    r"([A-Za-z][A-Za-z0-9_]*)_(\d{4})\.uni$")
 
 
 def _fluid_component_re(component, ds):
@@ -934,12 +949,17 @@ def _fluid_file_token(component, ds, fn):
             return None
         grid, fr = m.group(1), int(m.group(2))
         core = _uni_core_grids(ds)
-        # Only a KNOWN core grid for this domain type counts as data coverage. A
-        # foreign name (junk_NNNN.uni), or any grid when the domain type is
-        # uncharacterised, is not matched — so a planted file can never masquerade as a
-        # required grid, and the real required grids stay uncovered -> UNKNOWN (R11-1).
-        if not core or grid not in core:
+        # An uncharacterised domain type has no known grids: match NO file, so required is
+        # a lone unbaselinable sentinel and coverage is forced UNKNOWN (review R11-1).
+        if not core:
             return None
+        # EVERY grid file of a characterised domain gets a per-(frame, grid) token — the
+        # mandatory core grids AND the optional ones a bake may add (color_r/g/b, resumable
+        # restart-state grids). They must be captured and verified, not ignored (review
+        # R12-1). Because the token is per-(frame, grid), a foreign name (junk_0003.uni)
+        # can only ever cover its OWN identity (0003/junk), never stand in for a required
+        # core grid (0003/density); and being then required at every other frame it is
+        # absent from, it reads UNKNOWN, never a false PASS (review R11-1).
         return (_uni_token(grid, fr), fr)
     rx = _fluid_component_re(component, ds)
     if rx is None:
@@ -951,19 +971,59 @@ def _fluid_file_token(component, ds, fn):
     return (fr, fr)
 
 
-def _fluid_stage_required(component, ds, cs, ce):
+def _fluid_stage_required(component, ds, cs, ce, observed_grids=None):
     """The coverage identities a fluid stage must have for the whole cache range
-    ``cs..ce``. For UNI data it is EVERY (frame, core-grid) token — so a frame missing
-    any required grid stays uncovered (review R11-1); for every other stage it is the
-    integer frames. For an uncharacterised UNI domain type, a lone sentinel token that
-    no real file can baseline forces UNKNOWN rather than an optimistic PASS."""
+    ``cs..ce``. For UNI data it is EVERY (frame, grid) token for every REQUIRED grid — so
+    a frame missing any required grid stays uncovered (review R11-1); for every other
+    stage it is the integer frames. For an uncharacterised UNI domain type, a lone
+    sentinel token that no real file can baseline forces UNKNOWN rather than an optimistic
+    PASS.
+
+    The required grid set is the MANDATORY core for the domain type UNION the OPTIONAL
+    grids this bake actually wrote (``observed_grids`` — color_r/g/b, resumable
+    restart-state grids, …). Deriving the optional requirement from the bake itself,
+    rather than a fixed per-domain whitelist, catches a deleted optional grid (a missing
+    color channel) WITHOUT forcing UNKNOWN on a legitimate bake that simply has none of
+    them (review R12-1). Color is required as a SET — present any of color_r/g/b and all
+    three are required — so a single deleted channel can't hide behind its siblings."""
     frames = range(cs, ce + 1)
     if component == "data" and _fluid_data_is_uni(ds):
         core = _uni_core_grids(ds)
         if not core:
             return ["?/uni-unknown-domain"]
-        return [_uni_token(g, f) for f in frames for g in core]
+        req = set(core)
+        if observed_grids:
+            req |= set(observed_grids)
+            if req & set(_FLUID_UNI_COLOR_GRIDS):
+                req |= set(_FLUID_UNI_COLOR_GRIDS)
+        return [_uni_token(g, f) for f in frames for g in sorted(req)]
     return list(frames)
+
+
+def _uni_observed_grids(stage_dir, component, ds):
+    """The grid base-names a UNI data stage ACTUALLY wrote (union across frames),
+    restricted to real per-grid files (the reserved-prefix masquerades the matcher
+    already rejects stay excluded). Lets the required set include whatever OPTIONAL grids
+    THIS bake produced — colored-smoke color_r/g/b, resumable restart-state grids — with
+    no version-specific whitelist (review R12-1). Empty for a non-UNI-data stage or an
+    uncharacterised domain type (whose coverage the sentinel path already forces to
+    UNKNOWN)."""
+    grids = set()
+    if not (component == "data" and _fluid_data_is_uni(ds)):
+        return grids
+    if not _uni_core_grids(ds):
+        return grids
+    if not stage_dir or not os.path.isdir(stage_dir):
+        return grids
+    try:
+        names = os.listdir(stage_dir)
+    except OSError:
+        return grids
+    for fn in names:
+        m = _FLUID_UNI_DATA_FILE_RE.match(fn)
+        if m:
+            grids.add(m.group(1))
+    return grids
 
 # Which fluid sub-cache maps to which per-stage "baked" flag. An enabled stage
 # whose flag is OFF is not a valid bake even if stale files remain (R13).
@@ -1231,7 +1291,8 @@ def iter_fluid_cache_files(scenes):
                     stage_dir = os.path.join(cache_dir, stage)
                     files = [(tok, 0, p) for (tok, p)
                              in sorted(_fluid_stage_files(stage_dir, stage, ds))]
-                    required = _fluid_stage_required(stage, ds, cs, ce)
+                    observed = _uni_observed_grids(stage_dir, stage, ds)
+                    required = _fluid_stage_required(stage, ds, cs, ce, observed)
                     identity = "%s::%s::Fluid::%s/%s" % (
                         scene.name, obj.name, mod.name, stage)
                     yield PointCacheFiles(identity, "Fluid", obj.name,

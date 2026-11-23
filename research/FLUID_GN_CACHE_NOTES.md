@@ -356,3 +356,41 @@ Design consequence (review R11-1):
 - A genuine untouched UNI bake has every core grid per frame → PASS (control test).
 
 All four versions after the fix: 658 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
+## Round-12 UNI data OPTIONAL grids: colored smoke + resumable (verified on REAL bakes, all four versions)
+
+Review R12-1: the R11 per-grid coverage required only the FIXED core grids, and the
+matcher's grid-name class `[A-Za-z0-9]*` REJECTED any underscore name. So two kinds of
+real grid were invisible to capture AND verification — a deleted one read as a clean PASS:
+
+- **Colored smoke** (a SMOKE flow with a non-default `smoke_color`) writes THREE extra
+  data grids every frame: `color_r_NNNN.uni`, `color_g_NNNN.uni`, `color_b_NNNN.uni`.
+  Plain smoke and fire-only write NONE of them. Identical on 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3.
+- **Resumable cache** (`ds.cache_resumable = True`) writes a larger restart-state family
+  every frame: `densityIn, emission, flags, fuel, fuelIn, heatIn, phiIn, phiObs, phiOut,
+  react, reactIn, velTmp` (GAS) / `flags, phi, phiIn, phiObs, phiOut, phiParts, phiTmp,
+  velTmp` (LIQUID), plus `color_*_in` when also colored. Absent when resumable is off.
+
+Design consequence (config/version-robust, no hardcoded optional-grid whitelist):
+- The grid-name regex now allows underscores (`[A-Za-z][A-Za-z0-9_]*`), so color_r /
+  color_r_in / densityIn files are captured and hashed. Reserved-prefix masquerades
+  (`fluid_<stage>_`) stay rejected by the negative lookahead (R10-2).
+- The required set = MANDATORY core (per domain type) UNION the OPTIONAL grids the bake
+  ACTUALLY wrote (observed in the data dir, union across frames), each required at EVERY
+  frame. Deriving the optional requirement from the bake itself catches a deleted optional
+  grid WITHOUT forcing UNKNOWN on a bake that simply has none of them (plain smoke PASSES).
+- Color is required as a SET: present any of color_r/g/b and all three are required, so a
+  single deleted channel can't hide behind its two siblings.
+- The coverage token is still per-(frame, grid) (`0003/color_r`), so a sibling/foreign/
+  cross-domain file can only ever cover its OWN identity, never a required grid (R11-1).
+- Residual (documented, not a false PASS): deleting an ENTIRE optional family (all of
+  color_r/g/b, or all restart grids) across ALL frames BEFORE baseline is indistinguishable
+  from a bake that never had it — the mandatory core still verifies. The single-file
+  deletion attack (the review's scenario) is caught.
+
+Tests added (real bakes, all four versions): plain-smoke control (#27 PASS, no false
+UNKNOWN); untouched colored control (#27 PASS); delete color_r_0003 before baseline →
+`0003/color_r` uncovered, siblings matched, #27 UNKNOWN, requested-verify floor 2;
+untouched resumable control (#27 PASS); delete one restart grid frame → uncovered → UNKNOWN.
+
+All four versions after the fix: 681 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).

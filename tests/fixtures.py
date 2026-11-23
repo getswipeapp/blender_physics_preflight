@@ -818,6 +818,83 @@ def build_fluid_uni_data(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+def _make_gas_uni_blend(outdir, frame_end=4, color=False, resumable=False):
+    """A real GAS (smoke) bake with the DATA stage in UNI format. With ``color`` the
+    SMOKE flow emits a non-default smoke colour, so Mantaflow ALSO writes the
+    color_r/color_g/color_b grids (verified on real bakes of all four versions — review
+    R12-1); with ``resumable`` the domain writes the restart-state grids. Returns the
+    .blend path (left open)."""
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_cube_add(size=4, location=(0, 0, 0))
+    dom = bpy.context.active_object
+    dom.name = "Domain"
+    m = dom.modifiers.new("Fluid", "FLUID")
+    m.fluid_type = "DOMAIN"
+    ds = m.domain_settings
+    ds.domain_type = "GAS"
+    ds.resolution_max = 16
+    ds.use_noise = False
+    # Mesh is a LIQUID-only stage; a gas domain never writes it. Turn it off so the bake
+    # is a realistic gas cache (config + data) and no empty mesh/ stage reads as UNKNOWN.
+    try:
+        ds.use_mesh = False
+    except Exception:
+        pass
+    ds.cache_type = "ALL"
+    ds.cache_frame_start, ds.cache_frame_end = 1, frame_end
+    ds.cache_directory = "//fluidcache"
+    ds.cache_data_format = "UNI"
+    if resumable:
+        for cand in ("cache_resumable", "use_resumable"):
+            if hasattr(ds, cand):
+                try:
+                    setattr(ds, cand, True)
+                except Exception:
+                    pass
+                break
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, location=(0, 0, -1.2))
+    fl = bpy.context.active_object
+    fl.name = "Inflow"
+    f = fl.modifiers.new("Fluid", "FLUID")
+    f.fluid_type = "FLOW"
+    f.flow_settings.flow_type = "SMOKE"
+    f.flow_settings.flow_behavior = "INFLOW"
+    if color and hasattr(f.flow_settings, "smoke_color"):
+        # A non-default colour makes the flow emit colour, so the domain allocates and
+        # writes color_r/color_g/color_b (plain smoke writes none of them).
+        f.flow_settings.smoke_color = (0.9, 0.1, 0.1)
+    blend = os.path.join(outdir, "gas_uni.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    with bpy.context.temp_override(scene=sc, active_object=dom, object=dom,
+                                   selected_objects=[dom]):
+        bpy.ops.fluid.bake_all()
+    bpy.ops.wm.save_mainfile()
+    return blend
+
+
+def build_fluid_uni_gas_color(outdir):
+    """A real colored-smoke GAS bake, DATA stage UNI: data/ holds the five core gas grids
+    AND color_r/color_g/color_b_NNNN.uni (review R12-1)."""
+    blend = _make_gas_uni_blend(outdir, color=True)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_fluid_uni_gas_plain(outdir):
+    """A real PLAIN smoke GAS bake, DATA stage UNI: five core gas grids, NO color grids —
+    the control proving the optional-grid requirement never forces UNKNOWN here (R12-1)."""
+    blend = _make_gas_uni_blend(outdir, color=False)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_fluid_uni_gas_resumable(outdir):
+    """A real resumable GAS smoke bake, DATA stage UNI: core gas grids PLUS the
+    restart-state grids a resumable cache writes (review R12-1)."""
+    blend = _make_gas_uni_blend(outdir, resumable=True)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
 def _make_gn_disk_blend(outdir, frame_end=6, packed=False, scene_sim_range=None,
                         custom_bake_dir=None, float_item=False, empty_geometry=False):
     """Create a Geometry Nodes simulation-zone bake with a REAL moving simulation,

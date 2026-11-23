@@ -476,12 +476,15 @@ def gn_unit_tests():
 
 
 def fluid_matcher_unit_tests():
-    """R9-1 / R10-1 / R10-2 / R11-1: each fluid sub-cache matcher accepts ONLY the real
-    files the domain's configured format actually writes for that stage, so no file of
-    another component, another format, a hand-made masquerade, or a foreign UNI grid
-    name can be counted as a required frame. UNI data is per-grid: coverage requires
-    EACH core grid per frame (never the bare frame). All filename schemes and the core
-    grid sets were verified on real bakes of all four versions (4.2.9/4.5.9/5.0.1/5.2.3)."""
+    """R9-1 / R10-1 / R10-2 / R11-1 / R12-1: each fluid sub-cache matcher accepts ONLY the
+    files the domain's configured FORMAT writes for that stage (a wrong format / reserved
+    masquerade is rejected), and UNI data is per-grid: coverage requires EACH grid per
+    frame (never the bare frame). The matcher CAPTURES every real grid file — including the
+    OPTIONAL grids a bake may add (colored-smoke color_r/g/b, resumable restart-state) so
+    they are verified (R12-1) — while the per-(frame,grid) identity and required-set
+    completeness, not matcher rejection, keep a cross-domain / foreign / deleted grid from
+    a false PASS. All filename schemes and the core grid sets were verified on real bakes
+    of all four versions (4.2.9/4.5.9/5.0.1/5.2.3)."""
     from failsafe import cache_inspect as ci
 
     class FakeDS:
@@ -525,26 +528,43 @@ def fluid_matcher_unit_tests():
          m("data", vdb_ds, "fluid_data_0003.VDB"), False),
         ("OPENVDB data rejects a mesh file", m("data", vdb_ds, "fluid_mesh_0003.bobj.gz"), False),
 
-        # --- data UNI (per-grid .uni; only KNOWN core grids; NEVER fluid_data_*.uni) ---
+        # --- data UNI (per-grid .uni) — the matcher now CAPTURES every real grid file so
+        # OPTIONAL grids (color_r/g/b, resumable restart-state) are verified too (R12-1);
+        # the reserved-prefix masquerades stay rejected, and a cross-domain / foreign name,
+        # though captured, can't cover a required core grid (per-(frame,grid) identity) and
+        # is itself required at every other frame -> UNKNOWN, never a false PASS. ---
         ("UNI liquid data matches pVel grid", m("data", uni_ds, "pVel_0003.uni"), True),
         ("UNI liquid data matches vel grid", m("data", uni_ds, "vel_0003.uni"), True),
         ("UNI liquid data matches pp grid", m("data", uni_ds, "pp_0003.uni"), True),
-        ("UNI liquid data REJECTS a gas grid (density) on a liquid",
-         m("data", uni_ds, "density_0003.uni"), False),
         ("UNI gas data matches density grid", m("data", gas_ds, "density_0003.uni"), True),
         ("UNI gas data matches flame grid", m("data", gas_ds, "flame_0003.uni"), True),
         ("UNI gas data matches heat/shadow/vel grids",
          all(m("data", gas_ds, g + "_0003.uni") for g in ("heat", "shadow", "vel")), True),
-        ("UNI gas data REJECTS a liquid grid (pVel) on a gas",
-         m("data", gas_ds, "pVel_0003.uni"), False),
-        ("UNI data REJECTS a FOREIGN grid name junk_NNNN.uni (R11-1)",
-         m("data", uni_ds, "junk_0003.uni"), False),
+        # R12-1: colored-smoke grids (underscored names) are now CAPTURED, not dropped.
+        ("UNI gas data matches color_r/color_g/color_b (R12-1)",
+         all(m("data", gas_ds, g + "_0003.uni")
+             for g in ("color_r", "color_g", "color_b")), True),
+        ("UNI data matches an underscored resumable grid color_r_in (R12-1)",
+         m("data", gas_ds, "color_r_in_0003.uni"), True),
+        ("UNI data matches a resumable restart grid densityIn (R12-1)",
+         m("data", gas_ds, "densityIn_0003.uni"), True),
+        # A cross-domain or foreign grid is CAPTURED (True); the per-(frame,grid) token and
+        # required-set completeness — not matcher rejection — keep it from a false PASS.
+        ("UNI data captures a cross-domain grid (caught later by coverage, R12-1)",
+         m("data", uni_ds, "density_0003.uni"), True),
+        ("UNI data captures a foreign grid junk_NNNN.uni (caught later by coverage)",
+         m("data", uni_ds, "junk_0003.uni"), True),
+        # Reserved-stage masquerades are STILL rejected outright (R10-2 negative lookahead).
         ("UNI data REJECTS the fluid_data_*.uni masquerade (R10-2)",
          m("data", uni_ds, "fluid_data_0003.uni"), False),
         ("UNI data REJECTS a reserved fluid_noise prefix",
          m("data", uni_ds, "fluid_noise_0003.uni"), False),
         ("UNI data REJECTS a reserved fluid_particles prefix",
          m("data", uni_ds, "fluid_particles_0003.uni"), False),
+        ("UNI data REJECTS a reserved fluid_guiding prefix",
+         m("data", uni_ds, "fluid_guiding_0003.uni"), False),
+        ("UNI data REJECTS a reserved fluid_mesh prefix",
+         m("data", uni_ds, "fluid_mesh_0003.uni"), False),
         ("UNI data REJECTS a .vdb (wrong ext for UNI)",
          m("data", uni_ds, "pVel_0003.vdb"), False),
         ("UNI data on an uncharacterised domain type matches nothing",
@@ -596,6 +616,42 @@ def fluid_matcher_unit_tests():
     res.append(("fluid matcher: OpenVDB data required stays integer frames",
                 ci._fluid_stage_required("data", vdb_ds, 1, 3) == [1, 2, 3],
                 ci._fluid_stage_required("data", vdb_ds, 1, 3), [1, 2, 3]))
+
+    # R12-1: an optional grid (color / resumable) gets a per-(frame,grid) token too.
+    ctok = ci._fluid_file_token("data", gas_ds, "color_r_0005.uni")
+    res.append(("fluid matcher: color grid token is (frame, grid) '0005/color_r' (R12-1)",
+                ctok == ("0005/color_r", 5), ctok, ("0005/color_r", 5)))
+    # With NO observed grids the required set is core only — a bake that wrote no optional
+    # grids must NOT be forced UNKNOWN (the false-UNKNOWN guard, R12-1).
+    req_core_only = ci._fluid_stage_required("data", gas_ds, 1, 1)
+    res.append(("fluid matcher: UNI gas with no observed grids = core only (R12-1)",
+                sorted(req_core_only) == sorted(["0001/density", "0001/flame", "0001/heat",
+                                                 "0001/shadow", "0001/vel"]),
+                sorted(req_core_only), "5 core tokens, no optional"))
+    # Observed optional grids become REQUIRED per frame, so a deleted one is uncovered.
+    req_color = ci._fluid_stage_required(
+        "data", gas_ds, 3, 3,
+        observed_grids={"density", "flame", "heat", "shadow", "vel",
+                        "color_r", "color_g", "color_b"})
+    res.append(("fluid matcher: observed color grids become required per frame (R12-1)",
+                all(t in req_color
+                    for t in ("0003/color_r", "0003/color_g", "0003/color_b")),
+                sorted(req_color), "core + 3 color tokens"))
+    # Color is required as a SET: observing ONE channel requires all three, so a single
+    # deleted channel can't hide behind its siblings (R12-1).
+    req_one_color = ci._fluid_stage_required(
+        "data", gas_ds, 2, 2,
+        observed_grids={"density", "flame", "heat", "shadow", "vel", "color_r"})
+    res.append(("fluid matcher: observing one color channel requires all three (R12-1)",
+                all(t in req_one_color
+                    for t in ("0002/color_r", "0002/color_g", "0002/color_b")),
+                sorted(req_one_color), "all three color tokens required"))
+    # A resumable restart-state grid the bake wrote is required too (no hardcoded list).
+    req_resume = ci._fluid_stage_required(
+        "data", gas_ds, 4, 4,
+        observed_grids={"density", "flame", "heat", "shadow", "vel", "velTmp"})
+    res.append(("fluid matcher: an observed resumable grid is required per frame (R12-1)",
+                "0004/velTmp" in req_resume, sorted(req_resume), "includes 0004/velTmp"))
     return res
 
 
@@ -3288,6 +3344,131 @@ def hash_fluid_tests():
                 out.append(("fluid R11-1: structural data counts NONE of the junk .uni",
                             not (se.frames_present or set()),
                             sorted(se.frames_present or []), "empty"))
+
+    # (R12-1, round 12) A bake may write OPTIONAL grids on top of the core: colored smoke
+    # adds color_r/color_g/color_b, a resumable cache adds restart-state grids. The matcher
+    # previously REJECTED the underscore names, so those files were invisible — a deleted
+    # color channel read as a clean PASS. The required set now UNIONs in whatever optional
+    # grids the bake actually wrote, so a deleted one is uncovered, WITHOUT forcing UNKNOWN
+    # on a bake that has none. Verified on real bakes of all four versions.
+
+    # (d) CONTROL — a PLAIN smoke bake writes NO color grids and must still PASS: the
+    # optional requirement must never force UNKNOWN on a bake that simply has none of them.
+    g12p = os.path.join(tmp, "r12plain")
+    os.makedirs(g12p, exist_ok=True)
+    fixtures.build_fluid_uni_gas_plain(g12p)
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d12 = _stage(rep, "data")
+    out.append(("fluid R12-1 control: plain smoke UNI data UNCHANGED (no false UNKNOWN)",
+                bool(d12) and d12[0].state == ch.S_UNCHANGED
+                and not (d12[0].uncovered or []),
+                [(s.state, s.uncovered) for s in d12], ch.S_UNCHANGED))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R12-1 control: plain smoke -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+
+    # (e) CONTROL — an untouched COLORED smoke bake (with color_r/g/b) must still PASS.
+    g12ok = os.path.join(tmp, "r12ok")
+    os.makedirs(g12ok, exist_ok=True)
+    fixtures.build_fluid_uni_gas_color(g12ok)
+    g12okdata = os.path.join(g12ok, "fluidcache", "data")
+    cfiles = sorted(f for f in os.listdir(g12okdata) if f.startswith("color_"))
+    out.append(("fluid R12-1: colored bake actually wrote color_r/g/b (precondition)",
+                any(f.startswith("color_r_") for f in cfiles)
+                and any(f.startswith("color_g_") for f in cfiles)
+                and any(f.startswith("color_b_") for f in cfiles),
+                cfiles[:6], "color_r/g/b present"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d12 = _stage(rep, "data")
+    out.append(("fluid R12-1 control: untouched colored bake UNCHANGED",
+                bool(d12) and d12[0].state == ch.S_UNCHANGED
+                and not (d12[0].uncovered or []),
+                [(s.state, s.uncovered) for s in d12], ch.S_UNCHANGED))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R12-1 control: untouched colored bake -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+
+    # (f) Delete ONE color channel (color_r_0003.uni) BEFORE baseline; color_g/color_b for
+    # frame 3 remain. The deleted channel must be uncovered -> #27 UNKNOWN (review R12-1).
+    g12m = os.path.join(tmp, "r12miss")
+    os.makedirs(g12m, exist_ok=True)
+    fixtures.build_fluid_uni_gas_color(g12m)
+    g12mdata = os.path.join(g12m, "fluidcache", "data")
+    cr3 = os.path.join(g12mdata, "color_r_0003.uni")
+    csib3 = [os.path.join(g12mdata, g + "_0003.uni") for g in ("color_g", "color_b")]
+    out.append(("fluid R12-1: color_r_0003 + siblings color_g/color_b_0003 present (precondition)",
+                os.path.exists(cr3) and all(os.path.exists(s) for s in csib3),
+                os.path.exists(cr3) and all(os.path.exists(s) for s in csib3), True))
+    os.remove(cr3)                                     # delete ONE color channel
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d12 = _stage(rep, "data")
+    out.append(("fluid R12-1: a deleted color channel is NOT hidden by core or siblings",
+                bool(d12) and d12[0].state != ch.S_UNCHANGED
+                and "0003/color_r" in (d12[0].uncovered or []),
+                [(s.state, s.uncovered) for s in d12], "0003/color_r uncovered"))
+    out.append(("fluid R12-1: the surviving color siblings color_g/color_b_0003 still matched",
+                bool(d12) and ("0003/color_g" in (d12[0].matched or [])
+                               or "0003/color_b" in (d12[0].matched or [])),
+                [s.matched for s in d12], "a color sibling matched"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R12-1: missing color channel -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R12-1: missing color channel -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (g) RESUMABLE cache: the restart-state grids are required too (picked up per-bake),
+    # so deleting one restart grid frame BEFORE baseline -> #27 UNKNOWN; and an untouched
+    # resumable bake still PASSes (no hardcoded restart-grid whitelist).
+    g12r = os.path.join(tmp, "r12resume")
+    os.makedirs(g12r, exist_ok=True)
+    fixtures.build_fluid_uni_gas_resumable(g12r)
+    g12rdata = os.path.join(g12r, "fluidcache", "data")
+    _CORE_GAS = {"density", "flame", "heat", "shadow", "vel"}
+    extra3 = None
+    for f in sorted(os.listdir(g12rdata)):
+        mo = re.match(r"^(.+)_0003\.uni$", f)
+        if mo and mo.group(1) not in _CORE_GAS and not mo.group(1).startswith("color_"):
+            extra3 = (mo.group(1), os.path.join(g12rdata, f))
+            break
+    out.append(("fluid R12-1: resumable bake wrote a restart-state grid (precondition)",
+                extra3 is not None, extra3[0] if extra3 else None, "an extra grid exists"))
+    if extra3 is not None:
+        man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+        bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                         overwrite=True, cache_hashes=man)
+        rep = ch.build_report(list(bpy.data.scenes))
+        results = engine.run_all(bpy.context, hash_verify=rep)
+        out.append(("fluid R12-1 control: untouched resumable bake -> #27 PASS",
+                    worst_for_check(results, 27) == Status.PASS,
+                    worst_for_check(results, 27), Status.PASS))
+        os.remove(extra3[1])                           # delete ONE restart grid frame
+        man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+        bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                         overwrite=True, cache_hashes=man)
+        rep = ch.build_report(list(bpy.data.scenes))
+        d12 = _stage(rep, "data")
+        rtok = "0003/%s" % extra3[0]
+        out.append(("fluid R12-1: a deleted resumable grid frame is uncovered -> not UNCHANGED",
+                    bool(d12) and d12[0].state != ch.S_UNCHANGED
+                    and rtok in (d12[0].uncovered or []),
+                    [(s.state, s.uncovered) for s in d12], "%s uncovered" % rtok))
+        results = engine.run_all(bpy.context, hash_verify=rep)
+        out.append(("fluid R12-1: missing resumable grid -> #27 UNKNOWN (never PASS)",
+                    worst_for_check(results, 27) == Status.UNKNOWN,
+                    worst_for_check(results, 27), Status.UNKNOWN))
 
     return out
 
