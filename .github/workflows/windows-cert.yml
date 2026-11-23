@@ -12,7 +12,6 @@ name: Windows Certification
 #   push: { branches: [failsafe-expanded-hardening] }
 on:
   workflow_dispatch:
-  push: { branches: [failsafe-expanded-hardening] }
 
 permissions:
   contents: read
