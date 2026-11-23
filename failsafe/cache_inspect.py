@@ -884,6 +884,20 @@ _FLUID_UNI_COLOR_GRIDS = ("color_r", "color_g", "color_b")
 # is the CONFIG signal that colour data must exist, used to catch an entire colour family
 # deleted before baseline (review R13-1); there is NO domain-level colour flag.
 _FLUID_SMOKE_COLOR_DEFAULT = (0.7, 0.7, 0.7)
+# The restart-state grids a RESUMABLE cache (``cache_resumable``) writes EVERY frame, by
+# domain type. Verified IDENTICAL on real resumable bakes of all four versions
+# (4.2.9/4.5.9/5.0.1/5.2.3), so requiring the WHOLE set when resumable is on never forces
+# UNKNOWN on a genuine bake. Naming them (rather than treating "any non-core grid present"
+# as proof) makes a planted non-restart file (junk_NNNN.uni) INELIGIBLE as restart
+# evidence and catches a family wiped down to a single surviving grid (review R14-2). The
+# gas+colour restart grids color_r_in/g_in/b_in are driven by the colour config, not listed
+# here: a wiped colour family is already caught by the colour requirement (review R13-1).
+_FLUID_UNI_RESTART_GRIDS = {
+    "GAS": ("densityIn", "emission", "flags", "fuel", "fuelIn", "heatIn",
+            "phiIn", "phiObs", "phiOut", "react", "reactIn", "velTmp"),
+    "LIQUID": ("flags", "phi", "phiIn", "phiObs", "phiOut", "phiParts",
+               "phiTmp", "velTmp"),
+}
 # A UNI data file: <grid>_<frame>.uni. The negative lookahead preserves the R10-2
 # masquerade rejection — a packed 'fluid_data_NNNN.uni' (and any reserved
 # 'fluid_<stage>_' name) can never be read as a per-grid data file. group(1) is the
@@ -974,6 +988,16 @@ def _uni_core_grids(ds):
     return _FLUID_UNI_CORE_GRIDS.get(dt)
 
 
+def _uni_restart_grids(ds):
+    """The restart-state grids a RESUMABLE UNI bake of THIS domain always writes (verified
+    identical on all four versions), or ``None`` for a domain type we have not characterised
+    (then resumable coverage falls back to an unbaselinable sentinel). Used so the restart
+    family is required BY NAME when ``cache_resumable`` is on — an unrelated planted grid
+    can't pose as restart evidence (review R14-2)."""
+    dt = (getattr(ds, "domain_type", "") or "").upper()
+    return _FLUID_UNI_RESTART_GRIDS.get(dt)
+
+
 def _uni_token(grid, frame):
     """The per-(frame, grid) coverage identity for one UNI data file, e.g.
     ``"0003/pVel"``. A real per-file identity (JSON-safe, stable-sorting, legible) so
@@ -1039,9 +1063,11 @@ def _fluid_stage_required(component, ds, cs, ce, observed_grids=None,
         siblings, and ALL colour deleted still reads UNKNOWN. A plain bake (no coloured
         flow) never expects colour, so it is not forced UNKNOWN.
       * resumable restart-state grids: when ``cache_resumable`` is on, a genuine bake
-        ALWAYS writes restart grids (densityIn/flags/velTmp/…). We don't enumerate them
-        (version-fragile); instead, if resumable is on but NONE is on disk, the family was
-        wiped — a lone unbaselinable sentinel forces UNKNOWN."""
+        ALWAYS writes a FIXED set of restart grids (densityIn/flags/velTmp/… — verified
+        identical on all four versions). The whole set is required BY NAME, so a wiped
+        family reads UNKNOWN (review R13-1), an unrelated planted file can't pose as restart
+        evidence, and a family wiped down to one surviving grid is still caught (review
+        R14-2). An uncharacterised domain falls back to an unbaselinable sentinel."""
     frames = range(cs, ce + 1)
     if component == "data" and _fluid_data_is_uni(ds):
         core = _uni_core_grids(ds)
@@ -1058,15 +1084,26 @@ def _fluid_stage_required(component, ds, cs, ce, observed_grids=None,
         # as the full {r,g,b} SET (review R12-1 / R13-1).
         if is_gas and (expects_color or (req & color_set)):
             req |= color_set
-        tokens = [_uni_token(g, f) for f in frames for g in sorted(req)]
-        # Config-anchored resumable family: resumable ON but no restart grid on disk means
-        # the whole restart family was deleted -> an unbaselinable sentinel -> UNKNOWN
-        # (review R13-1). A genuine resumable bake always has restart grids, so this never
-        # fires on one; a non-resumable bake never sets cache_resumable.
+        # Config-anchored resumable family: when cache_resumable is on, Blender ALWAYS
+        # writes a FIXED set of restart-state grids (verified identical on all four
+        # versions), so require the WHOLE set BY NAME. This catches an entire restart family
+        # wiped before baseline -> required-but-uncovered -> UNKNOWN (review R13-1); and
+        # because the set is named, a planted non-restart file (junk_NNNN.uni) can't pose as
+        # restart evidence, and a family wiped down to a single surviving grid is still
+        # caught (review R14-2). A genuine resumable bake has every restart grid on disk, so
+        # it stays covered and PASSES. A domain whose restart set we don't know (never
+        # reached: only characterised GAS/LIQUID get here) falls back to a lone unbaselinable
+        # sentinel rather than an optimistic PASS.
+        sentinel = None
         if _fluid_data_is_resumable(ds):
-            restart_observed = observed - core_set - color_set
-            if not restart_observed:
-                tokens.append("?/resumable-restart-wiped")
+            restart = _uni_restart_grids(ds)
+            if restart:
+                req |= set(restart)
+            else:
+                sentinel = "?/resumable-restart-wiped"
+        tokens = [_uni_token(g, f) for f in frames for g in sorted(req)]
+        if sentinel:
+            tokens.append(sentinel)
         return tokens
     return list(frames)
 

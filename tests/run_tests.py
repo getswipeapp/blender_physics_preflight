@@ -677,28 +677,97 @@ def fluid_matcher_unit_tests():
     res.append(("fluid matcher: plain gas bake needs no colour (no false UNKNOWN, R13-1)",
                 not any(t.split("/")[-1].startswith("color_") for t in req_plain),
                 sorted(req_plain), "no colour tokens"))
-    # Resumable ON but NO restart grid observed -> unbaselinable sentinel -> UNKNOWN.
+    # R14-2: a RESUMABLE cache's restart-state grids are required BY NAME — the fixed set
+    # Blender writes (verified identical on all four versions) — NOT merely "some non-core
+    # grid is present". So an entire family wiped before baseline is required-but-uncovered
+    # -> UNKNOWN; a planted junk grid can't pose as restart evidence; and a family wiped to
+    # one surviving grid is still caught.
     gas_resume_ds = FakeDS(domain_type="GAS", cache_data_format="UNI",
                            cache_mesh_format="BOBJECT", cache_resumable=True)
+    # Whole restart family wiped (observed = core only): the named restart grids are STILL
+    # required per frame, so the frame is uncovered -> UNKNOWN.
     req_resume_wiped = ci._fluid_stage_required(
         "data", gas_resume_ds, 1, 1,
         observed_grids={"density", "flame", "heat", "shadow", "vel"})
-    res.append(("fluid matcher: resumable with no restart grid -> wiped sentinel (R13-1)",
-                "?/resumable-restart-wiped" in req_resume_wiped,
-                sorted(req_resume_wiped), "sentinel present"))
-    # Resumable WITH a restart grid present -> no sentinel (a genuine resumable bake PASSES).
+    res.append(("fluid matcher: resumable requires the named restart set even if none observed (R14-2)",
+                all(t in req_resume_wiped for t in
+                    ("0001/densityIn", "0001/flags", "0001/velTmp", "0001/phiIn")),
+                sorted(req_resume_wiped), "core + named restart grids required"))
+    # A planted non-restart file (junk) is NOT accepted as restart evidence: the named
+    # restart grids stay required, so the wiped family is still caught.
+    req_resume_junk = ci._fluid_stage_required(
+        "data", gas_resume_ds, 1, 1,
+        observed_grids={"density", "flame", "heat", "shadow", "vel", "junk"})
+    res.append(("fluid matcher: a junk grid is NOT restart evidence (R14-2)",
+                all(t in req_resume_junk for t in
+                    ("0001/densityIn", "0001/flags", "0001/velTmp")),
+                sorted(req_resume_junk), "named restart still required despite junk"))
+    # A LIQUID resumable domain requires its OWN restart set (phi/phiParts/phiTmp/…), not
+    # the gas set.
+    liq_resume_ds = FakeDS(domain_type="LIQUID", cache_data_format="UNI",
+                           cache_mesh_format="BOBJECT", cache_resumable=True)
+    req_liq_resume = ci._fluid_stage_required(
+        "data", liq_resume_ds, 1, 1, observed_grids={"pVel", "pp", "vel"})
+    res.append(("fluid matcher: liquid resumable requires the liquid restart set (R14-2)",
+                all(t in req_liq_resume for t in
+                    ("0001/phi", "0001/phiParts", "0001/phiTmp", "0001/velTmp"))
+                and "0001/densityIn" not in req_liq_resume,
+                sorted(req_liq_resume), "liquid restart grids, not gas"))
+    # A genuine resumable bake (every restart grid present) has them required AND covered,
+    # so it is NOT forced UNKNOWN (no false UNKNOWN on a real resumable cache).
     req_resume_ok = ci._fluid_stage_required(
         "data", gas_resume_ds, 1, 1,
-        observed_grids={"density", "flame", "heat", "shadow", "vel", "velTmp"})
-    res.append(("fluid matcher: resumable with a restart grid present -> no sentinel (R13-1)",
-                "?/resumable-restart-wiped" not in req_resume_ok
-                and "0001/velTmp" in req_resume_ok,
-                sorted(req_resume_ok), "no sentinel, velTmp required"))
-    # A non-resumable bake never gets the restart sentinel.
-    res.append(("fluid matcher: non-resumable never gets the restart sentinel (R13-1)",
-                "?/resumable-restart-wiped" not in ci._fluid_stage_required(
-                    "data", gas_ds, 1, 1, observed_grids=set()),
-                "no sentinel", "no sentinel"))
+        observed_grids={"density", "flame", "heat", "shadow", "vel"}
+        | set(ci._FLUID_UNI_RESTART_GRIDS["GAS"]))
+    res.append(("fluid matcher: genuine resumable bake requires its restart grids (R14-2)",
+                "0001/velTmp" in req_resume_ok and "0001/densityIn" in req_resume_ok
+                and "?/resumable-restart-wiped" not in req_resume_ok,
+                sorted(req_resume_ok), "restart grids required, no sentinel"))
+    # A non-resumable bake never requires restart grids (no false UNKNOWN).
+    req_nonresume = ci._fluid_stage_required("data", gas_ds, 1, 1, observed_grids=set())
+    res.append(("fluid matcher: non-resumable requires no restart grids (R14-2)",
+                not any(t.split("/")[-1] in ci._FLUID_UNI_RESTART_GRIDS["GAS"]
+                        for t in req_nonresume)
+                and "?/resumable-restart-wiped" not in req_nonresume,
+                sorted(req_nonresume), "core only, no restart"))
+
+    # R14-1: the colour trigger is a SMOKE/BOTH flow's non-default smoke_color — and ONLY
+    # that. On all four versions a FIRE flow (even with a smoke_color set) and a changed
+    # domain flame_smoke_color write NO colour grids, so the scene detector must key on
+    # SMOKE/BOTH smoke_color alone: requiring colour for fire/flame would be a false UNKNOWN,
+    # ignoring a real SMOKE/BOTH colour would be the false PASS this guards.
+    class _FS:
+        def __init__(self, flow_type, smoke_color=(0.7, 0.7, 0.7)):
+            self.flow_type = flow_type
+            self.smoke_color = smoke_color
+
+    class _Mod:
+        def __init__(self, fs):
+            self.type = "FLUID"
+            self.fluid_type = "FLOW"
+            self.flow_settings = fs
+
+    class _Obj:
+        def __init__(self, *fss):
+            self.modifiers = [_Mod(fs) for fs in fss]
+
+    class _Scene:
+        def __init__(self, *objs):
+            self.objects = list(objs)
+
+    det = ci._scene_has_colored_smoke_flow
+    res.append(("fluid matcher: FIRE flow with non-default smoke_color is NOT colour (R14-1)",
+                det(_Scene(_Obj(_FS("FIRE", (0.1, 0.2, 0.9))))) is False,
+                "fire not colour", "fire not colour"))
+    res.append(("fluid matcher: default-grey SMOKE flow is NOT colour (R14-1)",
+                det(_Scene(_Obj(_FS("SMOKE", (0.7, 0.7, 0.7))))) is False,
+                "default grey not colour", "default grey not colour"))
+    res.append(("fluid matcher: non-default SMOKE flow IS colour (R14-1)",
+                det(_Scene(_Obj(_FS("SMOKE", (0.9, 0.1, 0.1))))) is True,
+                "smoke colour", "smoke colour"))
+    res.append(("fluid matcher: non-default BOTH flow IS colour (R14-1)",
+                det(_Scene(_Obj(_FS("BOTH", (0.2, 0.8, 0.3))))) is True,
+                "both colour", "both colour"))
     return res
 
 
@@ -3576,10 +3645,12 @@ def hash_fluid_tests():
                      overwrite=True, cache_hashes=man)
     rep = ch.build_report(list(bpy.data.scenes))
     d13 = _stage(rep, "data")
-    out.append(("fluid R13-1: whole restart family wiped -> restart sentinel uncovered (config)",
+    out.append(("fluid R13-1: whole restart family wiped -> named restart tokens uncovered (config)",
                 bool(d13) and d13[0].state != ch.S_UNCHANGED
-                and "?/resumable-restart-wiped" in (d13[0].uncovered or []),
-                [(s.state, s.uncovered) for s in d13], "restart sentinel uncovered"))
+                and any(t.split("/")[-1] in ci._FLUID_UNI_RESTART_GRIDS["GAS"]
+                        for t in (d13[0].uncovered or [])),
+                [(s.state, (s.uncovered or [])[:3]) for s in d13],
+                "named restart tokens uncovered"))
     results = engine.run_all(bpy.context, hash_verify=rep)
     out.append(("fluid R13-1: whole restart family wiped -> #27 UNKNOWN (config caught it)",
                 worst_for_check(results, 27) == Status.UNKNOWN,
@@ -3587,6 +3658,92 @@ def hash_fluid_tests():
     out.append(("fluid R13-1: whole restart family wiped -> requested verify nonzero",
                 cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                 cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (R14-2, round 14) The restart family is required BY NAME, so neither a planted junk
+    # grid nor a lone surviving restart grid can cover for a deleted family. Both verified
+    # on real resumable bakes.
+
+    # (j) JUNK-SPOOF: delete the ENTIRE genuine restart family, then plant junk_NNNN.uni for
+    # every frame before baseline. The old "any non-core grid present" check would have
+    # accepted the junk as restart evidence; now the named restart grids stay required and
+    # uncovered -> #27 UNKNOWN.
+    g14j = os.path.join(tmp, "r14junk")
+    os.makedirs(g14j, exist_ok=True)
+    fixtures.build_fluid_uni_gas_resumable(g14j)
+    g14jdata = os.path.join(g14j, "fluidcache", "data")
+    _CORE_GAS = {"density", "flame", "heat", "shadow", "vel"}
+    restart_set = set(ci._FLUID_UNI_RESTART_GRIDS["GAS"])
+    frames_seen = set()
+    jrem = 0
+    for f in sorted(os.listdir(g14jdata)):
+        mo = re.match(r"^(.+)_(\d{4})\.uni$", f)
+        if not mo:
+            continue
+        frames_seen.add(mo.group(2))
+        if mo.group(1) in restart_set:
+            os.remove(os.path.join(g14jdata, f))
+            jrem += 1
+    for fr in sorted(frames_seen):                      # plant junk for every frame
+        with open(os.path.join(g14jdata, "junk_%s.uni" % fr), "wb") as fh:
+            fh.write(b"not a real restart grid")
+    left = {re.match(r"^(.+)_\d{4}\.uni$", f).group(1)
+            for f in os.listdir(g14jdata) if re.match(r"^(.+)_\d{4}\.uni$", f)}
+    out.append(("fluid R14-2: real restart family removed, junk planted (precondition)",
+                jrem > 0 and not (left & restart_set)
+                and any(n == "junk" for n in left),
+                sorted(left), "no restart grids, junk present"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d14 = _stage(rep, "data")
+    out.append(("fluid R14-2: junk can't pose as restart -> named restart tokens uncovered",
+                bool(d14) and d14[0].state != ch.S_UNCHANGED
+                and any(t.split("/")[-1] in restart_set
+                        for t in (d14[0].uncovered or [])),
+                [(s.state, (s.uncovered or [])[:3]) for s in d14],
+                "named restart tokens uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R14-2: junk-spoofed restart family -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R14-2: junk-spoofed restart family -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (k) KEEP-ONE: delete every restart grid EXCEPT one surviving family (velTmp). The lone
+    # survivor must not cover for the rest -> the other named restart grids stay uncovered
+    # -> #27 UNKNOWN.
+    g14k = os.path.join(tmp, "r14keepone")
+    os.makedirs(g14k, exist_ok=True)
+    fixtures.build_fluid_uni_gas_resumable(g14k)
+    g14kdata = os.path.join(g14k, "fluidcache", "data")
+    krem = 0
+    for f in sorted(os.listdir(g14kdata)):
+        mo = re.match(r"^(.+)_\d{4}\.uni$", f)
+        if mo and mo.group(1) in restart_set and mo.group(1) != "velTmp":
+            os.remove(os.path.join(g14kdata, f))
+            krem += 1
+    kleft = {re.match(r"^(.+)_\d{4}\.uni$", f).group(1)
+             for f in os.listdir(g14kdata) if re.match(r"^(.+)_\d{4}\.uni$", f)}
+    out.append(("fluid R14-2: all restart grids removed except velTmp (precondition)",
+                krem > 0 and "velTmp" in kleft and len(kleft & restart_set) == 1,
+                sorted(kleft & restart_set), "only velTmp survives"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    dk = _stage(rep, "data")
+    out.append(("fluid R14-2: one surviving restart grid can't cover the family -> uncovered",
+                bool(dk) and dk[0].state != ch.S_UNCHANGED
+                and any(t.split("/")[-1] in (restart_set - {"velTmp"})
+                        for t in (dk[0].uncovered or [])),
+                [(s.state, (s.uncovered or [])[:3]) for s in dk],
+                "other restart tokens uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R14-2: restart family wiped to one grid -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
 
     return out
 

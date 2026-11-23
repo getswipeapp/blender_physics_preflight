@@ -429,3 +429,56 @@ resumable bakes still PASS; plus matcher-unit assertions for expects_color (gas-
 the resumable sentinel.
 
 All four versions after the fix: 695 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
+## Round 14 — restart family required by name; colour trigger re-verified (R14-1 / R14-2)
+
+Independent review of `c0e864b` raised two source-level claims. Both were taken back to
+REAL bakes on all four versions (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3) before any code change.
+
+### R14-1 — "domain `flame_smoke_color` / fire activates colour grids" — NOT REPRODUCED
+Probed every plausible colour-activation path on all four versions. Only a SMOKE or BOTH
+FLOW with a non-default `smoke_color` writes `color_r/g/b`:
+
+| config                                                        | color grids? |
+| ------------------------------------------------------------- | ------------ |
+| SMOKE flow, default grey (0.7,0.7,0.7)                        | no           |
+| SMOKE flow, non-default smoke_color                          | **yes**      |
+| BOTH flow, non-default smoke_color                          | **yes**      |
+| FIRE flow only                                               | no           |
+| FIRE flow + domain `flame_smoke_color` changed              | **no**       |
+| FIRE flow with its OWN non-default `smoke_color`            | **no**       |
+
+`flame_smoke_color` exists on the domain on all four versions but is a flame-shading
+colour, NOT a transported colour field — it writes no `color_*` grids. So the existing
+`_scene_has_colored_smoke_flow` (keys on SMOKE/BOTH `smoke_color`) is already complete for
+the real trigger; requiring colour for fire/flame would be a false UNKNOWN. R14-1 is a
+false finding. Pinned by matcher-unit tests (fire / flame / default grey -> not colour;
+SMOKE / BOTH non-default -> colour).
+
+### R14-2 — a planted file could pose as restart evidence — CONFIRMED, FIXED
+The round-13 check treated "any observed grid outside core+colour" as proof the restart
+family exists, so a planted `junk_NNNN.uni` (or a single surviving restart grid) hid a
+wiped family and read PASS.
+
+Fix: require the restart family BY NAME. The restart-state grids a resumable bake writes
+are IDENTICAL on all four versions, so they can be required as a fixed set per domain:
+- GAS: densityIn, emission, flags, fuel, fuelIn, heatIn, phiIn, phiObs, phiOut, react,
+  reactIn, velTmp
+- LIQUID: flags, phi, phiIn, phiObs, phiOut, phiParts, phiTmp, velTmp
+
+When `cache_resumable` is on, `_fluid_stage_required` adds the whole named set to the
+required per-(frame,grid) tokens (`_FLUID_UNI_RESTART_GRIDS` / `_uni_restart_grids`). An
+entire family wiped -> all uncovered -> UNKNOWN; a planted junk grid is not in the set, so
+it's ignored as evidence; a family wiped down to one surviving grid still leaves the rest
+uncovered -> UNKNOWN. A genuine resumable bake has every restart grid on disk -> covered ->
+PASS (no false UNKNOWN). The gas+colour restart grids color_*_in are driven by the colour
+config, so a wiped colour family is still caught by the colour requirement. The old
+`?/resumable-restart-wiped` sentinel remains only as a fallback for an uncharacterised
+domain (never reached by GAS/LIQUID).
+
+Tests added (real bakes): junk-spoof (delete the whole restart family, plant junk for every
+frame) -> named restart tokens uncovered, #27 UNKNOWN, floor 2; keep-one (delete all restart
+grids except velTmp) -> the rest uncovered, #27 UNKNOWN; the round-13 whole-family-wipe test
+now asserts named restart tokens (not the retired sentinel); untouched resumable still PASS.
+
+All four versions after the fix: 708 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
