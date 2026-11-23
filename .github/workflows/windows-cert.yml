@@ -56,7 +56,16 @@ jobs:
           & "$env:BLENDER" -b --factory-startup -P tests/run_tests.py 2>&1 | Tee-Object -FilePath "run_win_${{ matrix.version }}.log"
           $code = $LASTEXITCODE
           Write-Host "Suite exit code: $code"
-          if ($code -ne 0) { exit $code }
+          # Do NOT trust the exit code: Blender exits 0 even after a Python
+          # SystemError (e.g. the 4.2.9 fluid ViewLayer.update() crash), which
+          # previously let a crashed, half-run suite pass CI. The verdict comes
+          # from gate_check.py: it requires the SUITE_DONE completion sentinel,
+          # zero failures, a consistent/above-floor count, and no crash signature.
+          python tests/gate_check.py "run_win_${{ matrix.version }}.log" --exit-code $code --min-total 700
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Certification gate REJECTED Blender ${{ matrix.version }} headless suite"
+            exit 1
+          }
 
       - name: Build + install extension, functional acceptance (Windows, 5.2.3)
         if: matrix.version == '5.2.3'

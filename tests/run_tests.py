@@ -839,13 +839,24 @@ def fluid_matcher_unit_tests():
         ("non-default flame + smoke flow but NO fire is NOT colour",
          _Scene(_Obj(_FlowMod(_FS("SMOKE", GREY))),
                 _Obj(_DomMod(_DS("GAS", FLAME)))), False),
-        # R16-1: a flame deviating by a SINGLE float32 step (0.70001) still activates colour.
-        ("BOTH flow + flame off default by one float32 step IS colour (R16-1)",
+        # R16-1: a flame deviating from the default grey (0.70001 is ~168 float32
+        # steps above the stored default) still activates colour.
+        ("BOTH flow + flame off default (0.70001) IS colour (R16-1)",
          _Scene(_Obj(_FlowMod(_FS("BOTH", GREY))),
                 _Obj(_DomMod(_DS("GAS", (0.70001, 0.7, 0.7))))), True),
         # A tiny smoke_color deviation likewise activates colour.
-        ("SMOKE flow off default by one float32 step IS colour (R16-1)",
+        ("SMOKE flow off default (0.70001) IS colour (R16-1)",
          _Scene(_Obj(_FlowMod(_FS("SMOKE", (0.70001, 0.7, 0.7))))), True),
+        # R16-1 boundary: the FIRST representable float32 above the stored default
+        # (0.7000000476837158, exactly one ULP up) is still distinct -> colour.
+        ("BOTH flow + flame one ULP above default IS colour (R16-1 boundary)",
+         _Scene(_Obj(_FlowMod(_FS("BOTH", GREY))),
+                _Obj(_DomMod(_DS("GAS", (0.7000000476837158, 0.7, 0.7))))), True),
+        # R16-1 boundary: a sub-ULP deviation (0.70000001) quantises BACK to the
+        # stored default in float32, so Blender writes no colour and neither does
+        # the detector -- no false UNKNOWN.
+        ("SMOKE flow sub-ULP deviation quantises to default -> NOT colour (R16-1 boundary)",
+         _Scene(_Obj(_FlowMod(_FS("SMOKE", (0.70000001, 0.7, 0.7))))), False),
     ]
     for label, scene, expect in cases:
         res.append(("fluid matcher: %s" % label, det(scene) is expect,
@@ -867,6 +878,18 @@ def fluid_matcher_unit_tests():
     res.append(("fluid matcher: a clearly different grey (0.5) is non-default (R16-1)",
                 ci._color_is_noncat((0.5, 0.5, 0.5)) is True,
                 "non-default", "non-default"))
+    # R16-1 boundary (reviewer note on 1c0bb02): prove the exact float32 edge, not an
+    # approximation. 0.70001 is ~168 ULPs above the default; the TRUE next float32 value
+    # is 0.7000000476837158 (one ULP up) and must still read as colour, while a sub-ULP
+    # deviation (0.70000001) must quantise back to the default and NOT be flagged.
+    next_f32 = struct.unpack("<f", struct.pack("<I",
+               struct.unpack("<I", struct.pack("<f", 0.7))[0] + 1))[0]
+    res.append(("fluid matcher: one ULP above default (0.7000000476837158) is non-default (R16-1 boundary)",
+                ci._color_is_noncat((next_f32, 0.7, 0.7)) is True,
+                next_f32, "non-default"))
+    res.append(("fluid matcher: sub-ULP deviation (0.70000001) quantises to default, NOT flagged (R16-1 boundary)",
+                ci._color_is_noncat((0.70000001, 0.7, 0.7)) is False,
+                struct.unpack("<f", struct.pack("<f", 0.70000001))[0], "not flagged"))
     return res
 
 
@@ -3937,7 +3960,8 @@ def hash_fluid_tests():
                 cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
     # (R16-1, round 16) Blender compares colours in float32 exactly: a flame_smoke_color of
-    # (0.70001, 0.7, 0.7) -- one float32 step off the default grey -- still writes colour
+    # (0.70001, 0.7, 0.7) -- a small deviation (~168 float32 ULPs above the stored default,
+    # below the old 4-decimal rounding threshold) -- still writes colour
     # grids on all four versions, far below any decimal rounding. The detector must expect
     # colour here (float32 comparison), so a wiped colour family reads UNKNOWN; a genuine
     # default bake must still PASS (no false UNKNOWN from float32(0.7) != Python 0.7).
@@ -3945,7 +3969,7 @@ def hash_fluid_tests():
     os.makedirs(g16, exist_ok=True)
     fixtures.build_fluid_uni_gas_fire_flame_tiny(g16)
     g16data = os.path.join(g16, "fluidcache", "data")
-    out.append(("fluid R16-1: flame off default by one float32 step wrote colour (precondition)",
+    out.append(("fluid R16-1: flame off default (0.70001) wrote colour (precondition)",
                 any(f.startswith("color_") for f in os.listdir(g16data)),
                 sorted(f for f in os.listdir(g16data) if f.startswith("color_"))[:3],
                 "colour grids present"))
@@ -4842,6 +4866,90 @@ def couldnt_verify_tests():
     return out
 
 
+def gate_selfcheck_tests():
+    """R17 (owner directive point 4): prove the certification gate FAILS CLOSED.
+
+    A crashed, incomplete, short, inconsistent, or failing suite — or one where
+    Blender lied with exit code 0 after a Python crash — must NEVER be read as a
+    pass by ``gate_check.evaluate_log`` (the logic both the macOS and Windows
+    gates call). These run inside the suite itself, on all four versions."""
+    import gate_check as gc
+    res = []
+
+    good = (
+        "  PASS  unit: x  -> ok\n"
+        "============================================================\n"
+        "Blender 4.2.9 LTS  |  745 passed, 0 failed, 745 total\n"
+        "SUITE_DONE version=4.2.9 passed=745 failed=0 total=745 "
+        "consistent=yes ok=yes\n"
+    )
+    res.append(("gate_check: a genuine complete all-pass run is ACCEPTED (R17)",
+                gc.evaluate_log(good, exit_code=0, min_total=700).ok is True,
+                "accepted", "accepted"))
+
+    crash = (
+        "bake: frame 1 :: 10\n"
+        "Traceback (most recent call last):\n"
+        "  File \"run_tests.py\", line 1, in <module>\n"
+        "AttributeError: 'NoneType' object has no attribute 'getDataPointer'\n"
+        "SystemError: <bpy_func ViewLayer.update()> returned a result with an "
+        "exception set\n"
+        "Blender quit\n"
+    )
+    res.append(("gate_check: a crash that exits 0 is REJECTED (R17 core bug)",
+                gc.evaluate_log(crash, exit_code=0).ok is False,
+                "rejected", "rejected"))
+
+    res.append(("gate_check: a missing completion sentinel is REJECTED",
+                gc.evaluate_log("  PASS  unit: x  -> ok\n",
+                                exit_code=0).ok is False,
+                "rejected", "rejected"))
+
+    res.append(("gate_check: a crash signature overrides a passing sentinel",
+                gc.evaluate_log(good + "getDataPointer\n",
+                                exit_code=0, min_total=700).ok is False,
+                "rejected", "rejected"))
+
+    failing = (
+        "Blender 5.2.3 LTS  |  740 passed, 5 failed, 745 total\n"
+        "SUITE_DONE version=5.2.3 passed=740 failed=5 total=745 "
+        "consistent=yes ok=no\n"
+    )
+    res.append(("gate_check: a recorded test failure is REJECTED",
+                gc.evaluate_log(failing, exit_code=1).ok is False,
+                "rejected", "rejected"))
+
+    incons = (
+        "Blender 5.0.1  |  700 passed, 0 failed, 745 total\n"
+        "SUITE_DONE version=5.0.1 passed=700 failed=0 total=745 "
+        "consistent=no ok=no\n"
+    )
+    res.append(("gate_check: an inconsistent passed+failed!=total is REJECTED",
+                gc.evaluate_log(incons, exit_code=0).ok is False,
+                "rejected", "rejected"))
+
+    short = (
+        "Blender 4.2.9 LTS  |  12 passed, 0 failed, 12 total\n"
+        "SUITE_DONE version=4.2.9 passed=12 failed=0 total=12 "
+        "consistent=yes ok=yes\n"
+    )
+    res.append(("gate_check: a short suite below the count floor is REJECTED",
+                gc.evaluate_log(short, exit_code=0, min_total=700).ok is False,
+                "rejected", "rejected"))
+
+    res.append(("gate_check: a good log with nonzero exit code is REJECTED",
+                gc.evaluate_log(good, exit_code=1, min_total=700).ok is False,
+                "rejected", "rejected"))
+
+    res.append(("gate_check: a good run missing the human summary line is REJECTED",
+                gc.evaluate_log(
+                    "SUITE_DONE version=4.2.9 passed=745 failed=0 total=745 "
+                    "consistent=yes ok=yes\n",
+                    exit_code=0, min_total=700).ok is False,
+                "rejected", "rejected"))
+    return res
+
+
 def main():
     passed = 0
     failed = 0
@@ -4906,27 +5014,48 @@ def main():
             print(msg)
             fails.append(msg)
 
-    # ---- verdict + GN + read-only unit tests (fast) ------------------------
-    for label, ok, got, expect in (verdict_unit_tests() + gn_unit_tests()
-                                   + fluid_matcher_unit_tests()
-                                   + memory_reliability_tests()
-                                   + stage_flag_state_tests() + readonly_tests()
-                                   + readonly_filesystem_tests()
-                                   + roundtrip_fix_tests()
-                                   + render_check_tests() + title_tests()
-                                   + new_feature_tests() + baseline_tests()
-                                   + batch_adversarial_tests()
-                                   + batch_isolation_tests()
-                                   + review_blocker_tests()
-                                   + integrity_header_tests()
-                                   + cache_coverage_tests()
-                                   + cache_hash_tests()
-                                   + hash_blocker_tests()
-                                   + hash_edge_tests()
-                                   + hash_edge2_tests()
-                                   + hash_fluid_tests()
-                                   + hash_gn_tests()
-                                   + couldnt_verify_tests()):
+    # ---- verdict + GN + read-only unit tests + bake-backed groups ----------
+    # Each group runs EXACTLY ONCE (the old code re-ran every group a second
+    # time just to count tests, double-baking the fluid/GN groups). A group that
+    # raises is recorded as a single FAILED result instead of silently aborting
+    # the run, so a crash can never masquerade as a pass, and ``total`` is derived
+    # from the results actually produced — never from a second execution.
+    unit_groups = [
+        ("verdict_unit_tests", verdict_unit_tests),
+        ("gn_unit_tests", gn_unit_tests),
+        ("fluid_matcher_unit_tests", fluid_matcher_unit_tests),
+        ("memory_reliability_tests", memory_reliability_tests),
+        ("stage_flag_state_tests", stage_flag_state_tests),
+        ("readonly_tests", readonly_tests),
+        ("readonly_filesystem_tests", readonly_filesystem_tests),
+        ("roundtrip_fix_tests", roundtrip_fix_tests),
+        ("render_check_tests", render_check_tests),
+        ("title_tests", title_tests),
+        ("new_feature_tests", new_feature_tests),
+        ("baseline_tests", baseline_tests),
+        ("batch_adversarial_tests", batch_adversarial_tests),
+        ("batch_isolation_tests", batch_isolation_tests),
+        ("review_blocker_tests", review_blocker_tests),
+        ("integrity_header_tests", integrity_header_tests),
+        ("cache_coverage_tests", cache_coverage_tests),
+        ("cache_hash_tests", cache_hash_tests),
+        ("hash_blocker_tests", hash_blocker_tests),
+        ("hash_edge_tests", hash_edge_tests),
+        ("hash_edge2_tests", hash_edge2_tests),
+        ("hash_fluid_tests", hash_fluid_tests),
+        ("hash_gn_tests", hash_gn_tests),
+        ("gate_selfcheck_tests", gate_selfcheck_tests),
+        ("couldnt_verify_tests", couldnt_verify_tests),
+    ]
+    unit_results = []
+    for gname, gfn in unit_groups:
+        try:
+            unit_results.extend(gfn())
+        except Exception:
+            unit_results.append(
+                ("GROUP CRASHED: %s" % gname, False,
+                 traceback.format_exc(), "group runs to completion"))
+    for label, ok, got, expect in unit_results:
         if ok:
             passed += 1
             print("  PASS  unit: %s  -> %s" % (label, got))
@@ -4936,19 +5065,7 @@ def main():
             print(msg)
             fails.append(msg)
 
-    total = (len(CASES) + len(CACHE_REGRESSION) + len(verdict_unit_tests())
-             + len(gn_unit_tests()) + len(fluid_matcher_unit_tests())
-             + len(memory_reliability_tests()) + len(stage_flag_state_tests())
-             + len(readonly_tests()) + len(readonly_filesystem_tests())
-             + len(roundtrip_fix_tests()) + len(render_check_tests())
-             + len(title_tests()) + len(new_feature_tests())
-             + len(baseline_tests()) + len(batch_adversarial_tests())
-             + len(batch_isolation_tests()) + len(review_blocker_tests())
-             + len(integrity_header_tests()) + len(cache_coverage_tests())
-             + len(cache_hash_tests()) + len(hash_blocker_tests())
-             + len(hash_edge_tests()) + len(hash_edge2_tests())
-             + len(hash_fluid_tests()) + len(hash_gn_tests())
-             + len(couldnt_verify_tests()))
+    total = len(CASES) + len(CACHE_REGRESSION) + len(unit_results)
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))
@@ -4956,8 +5073,22 @@ def main():
         print("\nFAILURES:")
         for m in fails:
             print(m)
-    # exit code for CI
-    sys.exit(1 if failed else 0)
+    # Machine-readable completion sentinel. This line is reached ONLY if main()
+    # ran to the end without an uncaught abort. The certification gates
+    # (tests/run_all_versions.sh and .github/workflows/windows-cert.yml) treat its
+    # ABSENCE as a hard failure, so a crashed suite can never be read as a pass
+    # even when Blender exits 0. ``consistent`` cross-checks that every assembled
+    # test produced exactly one result (guards an incomplete/short count).
+    consistent = (passed + failed == total) and total > 0
+    ok_overall = (failed == 0) and consistent
+    # Space-free version token so the gate's `version=\S+` field parses cleanly
+    # (bpy.app.version_string is e.g. "4.2.9 LTS").
+    ver_token = "%d.%d.%d" % tuple(bpy.app.version)
+    print("SUITE_DONE version=%s passed=%d failed=%d total=%d consistent=%s ok=%s"
+          % (ver_token, passed, failed, total,
+             "yes" if consistent else "no", "yes" if ok_overall else "no"))
+    # Exit code for CI (belt-and-braces; the gates also parse SUITE_DONE above).
+    sys.exit(0 if ok_overall else 1)
 
 
 if __name__ == "__main__":

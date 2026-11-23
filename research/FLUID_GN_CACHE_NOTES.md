@@ -562,3 +562,78 @@ written, wipe colour -> #27 UNKNOWN, floor 2, untouched control PASS; a genuine 
 and stored-float32(0.7) NOT flagged; 0.5 non-default; tiny-deviation scene detector cases.
 
 All four versions after the fix: 741 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
+================================================================================
+ROUND 17 — CERTIFICATION GATE INTEGRITY (false-green on Blender 4.2.9)
+================================================================================
+
+DISCOVERY (while verifying the R16-1 boundary-test note). The "all four versions
+pass" claim was FALSE for Blender 4.2.9 — on BOTH macOS-local and Windows CI. The
+headless suite aborted inside hash_fluid_tests() at the first fluid fixture
+(build_fluid_uni_gas_plain -> _make_gas_uni_blend -> wm.save_as_mainfile), with:
+
+    AttributeError: 'NoneType' object has no attribute 'getDataPointer'
+    SystemError: <bpy_func ViewLayer.update()> returned a result with an exception set
+
+Blender then EXITED CODE 0 despite the traceback. Both gates trusted that exit
+code (run_all_versions.sh printed ">> OK on Blender 4.2"; windows-cert.yml logged
+"Suite exit code: 0"), so a crashed, half-run suite was scored as a pass. No
+"Blender 4.2.9 LTS | N passed" summary line was ever printed on 4.2.9. Confirmed
+on clean committed HEAD (1c0bb02/5834203), i.e. pre-existing — NOT caused by the
+R16-1 boundary tests. Consequence: the fluid hardening R12-1..R16-1 had never
+actually executed on 4.2.9 anywhere; 4.5.9/5.0.1/5.2.3 genuinely reached their
+summaries. Owner decision: fix the certification system properly (Option 1).
+
+ROOT CAUSE of the 4.2.9 crash. Saving a .blend whose FLUID domain has not been
+depsgraph-evaluated triggers a null-pointer deref in the save-time
+ViewLayer.update() on Blender 4.2.x headless. FIX: force one depsgraph
+evaluation before the save. New fixtures._save_fluid_mainfile(blend) calls
+bpy.context.evaluated_depsgraph_get() then wm.save_as_mainfile; applied to every
+fluid-domain save site (_make_fluid_blend, _make_gas_uni_blend,
+_make_gas_uni_flame_blend, _make_fluid_guide_blend, build_22_fail, build_21_fail).
+
+EVIDENCE — strategy probe on 4.2.9, each run as the sole/first bake in a fresh
+process (the crash is first-bake sensitive):
+    strategy     outcome
+    none         0/3  OK   (3/3 crash)            <- current behaviour
+    view_layer.update() before save   1/3 OK      (flaky)
+    evaluated_depsgraph_get() before save  3/3 OK  <- chosen
+    both (vlupdate+depsgraph)         1/3 OK       (flaky)
+    retry-6x around whole build       2/3 OK       (flaky; can exhaust)
+Confirmation at higher N with the depsgraph fix: 10/10 OK (SMOKE, 20 files) and
+6/6 OK (BOTH flow + non-default flame, 32 files incl. colour grids) = 19/19 clean,
+0 crashes. Harmless on 4.5/5.0/5.2.
+
+SECOND BUG (source-confirmed by the reviewer). run_tests.py main() called every
+test-group function a SECOND time just to compute `total` (len(...)), re-running —
+and re-baking — hash_fluid_tests()/hash_gn_tests() etc. FIX: assemble each group's
+results exactly ONCE into `unit_results`; total = len(CASES)+len(CACHE_REGRESSION)
++len(unit_results). Each group is now wrapped so an exception becomes a single
+recorded FAILURE (never a silent abort, never a double run).
+
+GATE HARDENING (fail-closed, both platforms). run_tests.py now prints a
+machine-readable completion sentinel ONLY if main() runs to the end:
+    SUITE_DONE version=<x.y.z> passed=N failed=M total=T consistent=yes|no ok=yes|no
+(version token is the numeric tuple, space-free, so it parses). New shared
+checker tests/gate_check.py (evaluate_log + CLI) returns PASS only if: the
+sentinel is present, failed==0, passed+failed==total, total>=floor, no crash
+signature ("Traceback (most recent call last)", "getDataPointer",
+"ViewLayer.update()> returned a result with an exception" — all verified ABSENT
+from clean passing runs), the human "N passed, M failed, T total" summary line is
+present, and the process exit code (when supplied) is 0. Both gates now call it
+instead of trusting the exit code; run_all_versions.sh additionally requires all
+four versions to report the SAME total (catches a silently short/incomplete run).
+
+FAIL-CLOSED REGRESSION (gate_selfcheck_tests, runs on all four versions): proves
+gate_check REJECTS a crash-that-exited-0, a missing sentinel, a crash signature
+over a passing sentinel, a recorded failure, an inconsistent count, a short count
+below the floor, a nonzero exit code, and a missing summary line — and ACCEPTS a
+genuine complete all-pass log. Also verified live: the hardened gate rejects the
+real pre-fix 4.2.9 crash log (rc=1).
+
+RESULT. First genuine completion on 4.2.9 of the fluid tests. All four versions
+now reach their summary AND sentinel: 754 passed, 0 failed, 754 total
+(4.2.9 / 4.5.9 / 5.0.1 / 5.2.3); counts equal; gate verified completion, not exit
+codes. (754 = 745 after the R16-1 boundary tests + 9 gate_selfcheck assertions.)
+Prior rounds' "4.2.9 verified" claims are retroactively INVALID and must not be
+relied on; 4.2.9 fluid coverage is validated for the first time here.

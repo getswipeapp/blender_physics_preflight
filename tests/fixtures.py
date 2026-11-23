@@ -18,6 +18,26 @@ def reset():
     return bpy.context.scene
 
 
+def _save_fluid_mainfile(blend):
+    """Save a .blend containing a FLUID domain, safely on every version.
+
+    On Blender 4.2.x headless, ``wm.save_as_mainfile`` on a scene whose FLUID
+    domain has not yet been depsgraph-evaluated crashes inside the save-time
+    ``ViewLayer.update()`` with ``SystemError: <bpy_func ViewLayer.update()>
+    ... 'NoneType' object has no attribute 'getDataPointer'`` and then makes
+    Blender quit with exit code 0 (which previously let the whole suite abort
+    while the gate still read it as a pass). Forcing one depsgraph evaluation
+    first initialises the view layer so the save succeeds. Verified 19/19 clean
+    on 4.2.9 (smoke and fire+flame) vs 0/19 without the call; the evaluation is
+    harmless and cheap on 4.5 / 5.0 / 5.2.
+    """
+    try:
+        bpy.context.evaluated_depsgraph_get()
+    except Exception:
+        pass
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+
+
 def _add_cube(name, location=(0, 0, 0), size=2.0):
     bpy.ops.mesh.primitive_cube_add(size=size, location=location)
     o = bpy.context.active_object
@@ -779,7 +799,7 @@ def _make_fluid_blend(outdir, frame_end=4, use_mesh=True, data_format=None):
     f.flow_settings.flow_type = "LIQUID"
     f.flow_settings.flow_behavior = "GEOMETRY"
     blend = os.path.join(outdir, "fluid.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    _save_fluid_mainfile(blend)
     with bpy.context.temp_override(scene=sc, active_object=dom, object=dom,
                                    selected_objects=[dom]):
         bpy.ops.fluid.bake_all()
@@ -866,7 +886,7 @@ def _make_gas_uni_blend(outdir, frame_end=4, color=False, resumable=False):
         # writes color_r/color_g/color_b (plain smoke writes none of them).
         f.flow_settings.smoke_color = (0.9, 0.1, 0.1)
     blend = os.path.join(outdir, "gas_uni.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    _save_fluid_mainfile(blend)
     with bpy.context.temp_override(scene=sc, active_object=dom, object=dom,
                                    selected_objects=[dom]):
         bpy.ops.fluid.bake_all()
@@ -942,7 +962,7 @@ def _make_gas_uni_flame_blend(outdir, frame_end=4, flame_color=(0.1, 0.9, 0.2)):
     f.flow_settings.flow_type = "BOTH"          # smoke + fire in one modifier
     f.flow_settings.flow_behavior = "INFLOW"
     blend = os.path.join(outdir, "gas_uni_flame.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    _save_fluid_mainfile(blend)
     with bpy.context.temp_override(scene=sc, active_object=dom, object=dom,
                                    selected_objects=[dom]):
         bpy.ops.fluid.bake_all()
@@ -1198,7 +1218,7 @@ def _make_fluid_guide_blend(outdir, frame_end=4):
     except Exception:
         pass
     blend = os.path.join(outdir, "fluid_guide.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    _save_fluid_mainfile(blend)
     with bpy.context.temp_override(scene=sc, active_object=dom, object=dom,
                                    selected_objects=[dom]):
         bpy.ops.fluid.bake_all()
@@ -1229,7 +1249,7 @@ def build_22_fail(outdir):
     m.domain_settings.domain_type = "GAS"
     m.domain_settings.cache_directory = "/tmp/failsafe_abs_cache_outside"
     blend = os.path.join(outdir, "fluid_abs.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    _save_fluid_mainfile(blend)
 
 
 def build_21_fail(outdir):
@@ -1243,7 +1263,7 @@ def build_21_fail(outdir):
     mb.fluid_type = "DOMAIN"
     mb.domain_settings.cache_directory = "//shared_cache"
     blend = os.path.join(outdir, "shared.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    _save_fluid_mainfile(blend)
 
 
 # ---- #23 frame-rate / timing baseline fixtures -----------------------------
