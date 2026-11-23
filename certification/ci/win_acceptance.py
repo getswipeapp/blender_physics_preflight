@@ -204,10 +204,15 @@ def main():
     # complete 27-check report via the shared gate_check.valid_cli_report.
     def cli_json_child(body_expr):
         jp = os.path.join(d, "cli_report.json")
-        try:
-            os.remove(jp)
-        except OSError:
-            pass
+        cp = jp + ".code"
+        # Clear BOTH the report and the exit-code sidecar first, so a stale file
+        # from a previous child can never stand in for this one's result (a child
+        # that writes neither must read back as rc=None / empty, not a cached 0).
+        for f in (jp, cp):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
         subprocess.run([binp, "-b", "--python-expr", body_expr % jp],
                        capture_output=True, text=True, timeout=180)
         raw = ""
@@ -217,7 +222,6 @@ def main():
         # The child's own exit code is written alongside the report so the gate
         # sees exactly what the scan returned.
         rc = None
-        cp = jp + ".code"
         if os.path.isfile(cp):
             try:
                 rc = int(open(cp).read().strip())
