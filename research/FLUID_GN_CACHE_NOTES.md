@@ -326,3 +326,33 @@ Design consequences (cache_inspect._fluid_component_re):
   as uncovered → UNKNOWN, never a permissive guess (UNKNOWN-over-false-PASS).
 
 All four versions after the fix: 636 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
+## Round-11 UNI data per-grid coverage (verified on REAL bakes, all four versions)
+
+UNI data is MULTI-FILE: each frame is SEVERAL per-grid `.uni` files, and WHICH grids a
+genuine bake writes is fixed by the domain type. Enumerated on real headless bakes of
+4.2.9 / 4.5.9 / 5.0.1 / 5.2.3, IDENTICAL across minimal / secondary-particles / mesh /
+smoke / fire configs:
+
+- **LIQUID** data grids = `pVel_NNNN.uni`, `pp_NNNN.uni`, `vel_NNNN.uni` (exactly these
+  three in every tested config; secondary particles add a separate `particles/` stage,
+  not data grids; `mesh` is its own stage).
+- **GAS** data grids = `density_NNNN.uni`, `flame_NNNN.uni`, `heat_NNNN.uni`,
+  `shadow_NNNN.uni`, `vel_NNNN.uni` (identical for smoke-only AND fire — the domain
+  allocates flame/heat regardless of the flow type).
+
+Design consequence (review R11-1):
+- Coverage keyed on the bare integer frame let a surviving sibling grid (pp/vel) — or a
+  planted `junk_NNNN.uni` — stand in for a DELETED required grid (pVel) and read as a
+  clean PASS. The fix mirrors the GN-blob B3 pattern: a per-`(frame, grid)` string
+  coverage token (`"0003/pVel"`) that never collapses.
+- `required` for a UNI data stage is the PRODUCT `frames × core-grids` (every core grid
+  per frame), so a missing core grid is `uncovered` → `S_INCOMPLETE_REF` → #27 UNKNOWN,
+  even though its siblings still match.
+- The matcher counts ONLY a KNOWN core grid for the domain type; a foreign name
+  (`junk_0003.uni`) is not matched at all, so it can neither cover a required grid nor be
+  captured. An uncharacterised domain type → a lone unbaselinable sentinel in `required`
+  → UNKNOWN, never an optimistic PASS.
+- A genuine untouched UNI bake has every core grid per frame → PASS (control test).
+
+All four versions after the fix: 658 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).

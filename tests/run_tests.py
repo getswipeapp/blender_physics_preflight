@@ -476,28 +476,29 @@ def gn_unit_tests():
 
 
 def fluid_matcher_unit_tests():
-    """R9-1 / R10-1 / R10-2: each fluid sub-cache matcher accepts ONLY the real
-    files the domain's configured format actually writes for that stage, so no file
-    of another component, another format, or a hand-made masquerade can be counted
-    as a required frame. All filename schemes verified on real 4.2.9 + 5.2.3 bakes."""
+    """R9-1 / R10-1 / R10-2 / R11-1: each fluid sub-cache matcher accepts ONLY the real
+    files the domain's configured format actually writes for that stage, so no file of
+    another component, another format, a hand-made masquerade, or a foreign UNI grid
+    name can be counted as a required frame. UNI data is per-grid: coverage requires
+    EACH core grid per frame (never the bare frame). All filename schemes and the core
+    grid sets were verified on real bakes of all four versions (4.2.9/4.5.9/5.0.1/5.2.3)."""
     from failsafe import cache_inspect as ci
 
     class FakeDS:
         def __init__(self, **kw):
             self.__dict__.update(kw)
 
-    cr = ci._fluid_component_re
-
     def m(component, ds, name):
-        """True iff the stage's matcher accepts `name` (False when there is no
-        matcher, i.e. an unrecognised format -> matched by nothing)."""
-        rx = cr(component, ds)
-        return bool(rx and rx.match(name))
+        """True iff `name` is counted as a file of this stage — i.e. gets a coverage
+        token from the real per-file matcher (False for an unrecognised format/grid,
+        which is matched by nothing: UNKNOWN, not a guess)."""
+        return ci._fluid_file_token(component, ds, name) is not None
 
-    vdb_ds = FakeDS(cache_data_format="OPENVDB", cache_mesh_format="BOBJECT")
-    uni_ds = FakeDS(cache_data_format="UNI", cache_mesh_format="BOBJECT")
-    obj_ds = FakeDS(cache_data_format="OPENVDB", cache_mesh_format="OBJECT")
-    any_ds = FakeDS(cache_data_format="OPENVDB", cache_mesh_format="BOBJECT")
+    vdb_ds = FakeDS(domain_type="LIQUID", cache_data_format="OPENVDB", cache_mesh_format="BOBJECT")
+    uni_ds = FakeDS(domain_type="LIQUID", cache_data_format="UNI", cache_mesh_format="BOBJECT")
+    gas_ds = FakeDS(domain_type="GAS", cache_data_format="UNI", cache_mesh_format="BOBJECT")
+    obj_ds = FakeDS(domain_type="LIQUID", cache_data_format="OPENVDB", cache_mesh_format="OBJECT")
+    any_ds = FakeDS(domain_type="LIQUID", cache_data_format="OPENVDB", cache_mesh_format="BOBJECT")
 
     checks = [
         # --- FIXED stages (output independent of any format setting) ---
@@ -524,11 +525,20 @@ def fluid_matcher_unit_tests():
          m("data", vdb_ds, "fluid_data_0003.VDB"), False),
         ("OPENVDB data rejects a mesh file", m("data", vdb_ds, "fluid_mesh_0003.bobj.gz"), False),
 
-        # --- data UNI (per-grid .uni; NEVER fluid_data_*.uni) ---
-        ("UNI data matches pVel grid", m("data", uni_ds, "pVel_0003.uni"), True),
-        ("UNI data matches vel grid", m("data", uni_ds, "vel_0003.uni"), True),
-        ("UNI data matches pp grid", m("data", uni_ds, "pp_0003.uni"), True),
-        ("UNI data matches density grid (gas)", m("data", uni_ds, "density_0003.uni"), True),
+        # --- data UNI (per-grid .uni; only KNOWN core grids; NEVER fluid_data_*.uni) ---
+        ("UNI liquid data matches pVel grid", m("data", uni_ds, "pVel_0003.uni"), True),
+        ("UNI liquid data matches vel grid", m("data", uni_ds, "vel_0003.uni"), True),
+        ("UNI liquid data matches pp grid", m("data", uni_ds, "pp_0003.uni"), True),
+        ("UNI liquid data REJECTS a gas grid (density) on a liquid",
+         m("data", uni_ds, "density_0003.uni"), False),
+        ("UNI gas data matches density grid", m("data", gas_ds, "density_0003.uni"), True),
+        ("UNI gas data matches flame grid", m("data", gas_ds, "flame_0003.uni"), True),
+        ("UNI gas data matches heat/shadow/vel grids",
+         all(m("data", gas_ds, g + "_0003.uni") for g in ("heat", "shadow", "vel")), True),
+        ("UNI gas data REJECTS a liquid grid (pVel) on a gas",
+         m("data", gas_ds, "pVel_0003.uni"), False),
+        ("UNI data REJECTS a FOREIGN grid name junk_NNNN.uni (R11-1)",
+         m("data", uni_ds, "junk_0003.uni"), False),
         ("UNI data REJECTS the fluid_data_*.uni masquerade (R10-2)",
          m("data", uni_ds, "fluid_data_0003.uni"), False),
         ("UNI data REJECTS a reserved fluid_noise prefix",
@@ -537,6 +547,8 @@ def fluid_matcher_unit_tests():
          m("data", uni_ds, "fluid_particles_0003.uni"), False),
         ("UNI data REJECTS a .vdb (wrong ext for UNI)",
          m("data", uni_ds, "pVel_0003.vdb"), False),
+        ("UNI data on an uncharacterised domain type matches nothing",
+         m("data", FakeDS(domain_type="FOG", cache_data_format="UNI"), "pVel_0003.uni"), False),
 
         # --- mesh BOBJECT / OBJECT (R10-1) ---
         ("BOBJECT mesh matches .bobj.gz", m("mesh", vdb_ds, "fluid_mesh_0003.bobj.gz"), True),
@@ -550,18 +562,40 @@ def fluid_matcher_unit_tests():
         ("STL mesh (not a real format) matches nothing",
          m("mesh", FakeDS(cache_mesh_format="STL"), "fluid_mesh_0003.bobj.gz"), False),
         ("RAW data (rejected by setter) matches nothing",
-         m("data", FakeDS(cache_data_format="RAW"), "fluid_data_0003.vdb"), False),
+         m("data", FakeDS(domain_type="LIQUID", cache_data_format="RAW"), "fluid_data_0003.vdb"), False),
         ("missing data-format attr matches nothing",
-         m("data", FakeDS(), "fluid_data_0003.vdb"), False),
+         m("data", FakeDS(domain_type="LIQUID"), "fluid_data_0003.vdb"), False),
     ]
     res = [("fluid matcher: %s" % label, got == expect, got, expect)
            for label, got, expect in checks]
 
-    # Frame number is parsed from the per-grid UNI filename, so coverage keys the
-    # right frame (pVel_0003.uni -> 3), not the grid name.
-    mo = cr("data", uni_ds).match("pVel_0007.uni")
-    res.append(("fluid matcher: UNI grid frame parses to 0007",
-                bool(mo) and mo.group(1) == "0007", mo and mo.group(1), "0007"))
+    # The coverage token keys the right frame AND grid (pVel_0007.uni -> "0007/pVel"),
+    # so two grids sharing a frame never collapse to one coverage key (R11-1).
+    tok = ci._fluid_file_token("data", uni_ds, "pVel_0007.uni")
+    res.append(("fluid matcher: UNI token is (frame, grid) '0007/pVel'",
+                tok == ("0007/pVel", 7), tok, ("0007/pVel", 7)))
+
+    # Required coverage for a UNI data stage is the PRODUCT of frames x core grids —
+    # every core grid per frame, not the bare frame (R11-1).
+    req_liq = ci._fluid_stage_required("data", uni_ds, 1, 2)
+    res.append(("fluid matcher: UNI liquid required = frames x {pVel,pp,vel}",
+                sorted(req_liq) == sorted(["0001/pVel", "0001/pp", "0001/vel",
+                                           "0002/pVel", "0002/pp", "0002/vel"]),
+                sorted(req_liq), "6 (frame,grid) tokens"))
+    req_gas = ci._fluid_stage_required("data", gas_ds, 1, 1)
+    res.append(("fluid matcher: UNI gas required = {density,flame,heat,shadow,vel}",
+                sorted(req_gas) == sorted(["0001/density", "0001/flame", "0001/heat",
+                                           "0001/shadow", "0001/vel"]),
+                sorted(req_gas), "5 gas grid tokens"))
+    # An uncharacterised domain type yields a sentinel no real file can baseline ->
+    # forces UNKNOWN rather than an optimistic PASS.
+    req_unk = ci._fluid_stage_required("data", FakeDS(domain_type="FOG", cache_data_format="UNI"), 1, 3)
+    res.append(("fluid matcher: UNI unknown-domain required is an unbaselinable sentinel",
+                req_unk == ["?/uni-unknown-domain"], req_unk, ["?/uni-unknown-domain"]))
+    # OpenVDB data (single file per frame) still uses the bare integer frame.
+    res.append(("fluid matcher: OpenVDB data required stays integer frames",
+                ci._fluid_stage_required("data", vdb_ds, 1, 3) == [1, 2, 3],
+                ci._fluid_stage_required("data", vdb_ds, 1, 3), [1, 2, 3]))
     return res
 
 
@@ -3145,6 +3179,113 @@ def hash_fluid_tests():
             if smod.type == "FLUID" and getattr(smod, "fluid_type", "") == "DOMAIN":
                 se = ci.inspect_fluid_domain(sobj, smod, bpy.context.scene)
                 out.append(("fluid R10-2: structural data counts NONE of the synthetic .uni",
+                            not (se.frames_present or set()),
+                            sorted(se.frames_present or []), "empty"))
+
+    # (R11-1, round 11) UNI data is MULTI-FILE: a liquid frame is pVel/pp/vel_NNNN.uni
+    # (verified identical on real bakes of all four versions). Coverage must require EACH
+    # core grid PER FRAME, not merely "the frame has some .uni file" — otherwise a
+    # surviving sibling grid, or a planted foreign name, lets a deleted required grid
+    # read as a clean PASS. Each case captures the baseline from the TAMPERED/pristine
+    # cache, so the attack is 'incomplete AT baseline time' — which pure change-detection
+    # cannot see without the independent per-grid requirement.
+
+    # (a) CONTROL — a genuine, untouched UNI liquid bake must STILL PASS.
+    u11ok = os.path.join(tmp, "r11ok")
+    os.makedirs(u11ok, exist_ok=True)
+    fixtures.build_fluid_uni_data(u11ok)
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d11 = _stage(rep, "data")
+    out.append(("fluid R11-1 control: genuine UNI data stage UNCHANGED",
+                bool(d11) and d11[0].state == ch.S_UNCHANGED
+                and not (d11[0].uncovered or []),
+                [(s.state, s.uncovered) for s in d11], ch.S_UNCHANGED))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R11-1 control: genuine UNI bake -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+
+    # (b) Delete ONE core grid (pVel_0003.uni) BEFORE baseline; its siblings pp/vel for
+    # frame 3 remain. Frame-only coverage would let a sibling stand in; per-grid coverage
+    # must flag '0003/pVel' uncovered -> #27 UNKNOWN, even though pp/vel still match.
+    u11m = os.path.join(tmp, "r11miss")
+    os.makedirs(u11m, exist_ok=True)
+    fixtures.build_fluid_uni_data(u11m)
+    d11m = os.path.join(u11m, "fluidcache", "data")
+    pvel3 = os.path.join(d11m, "pVel_0003.uni")
+    sib3 = [os.path.join(d11m, g + "_0003.uni") for g in ("pp", "vel")]
+    out.append(("fluid R11-1: pVel_0003 and siblings pp/vel_0003 present (precondition)",
+                os.path.exists(pvel3) and all(os.path.exists(s) for s in sib3),
+                os.path.exists(pvel3) and all(os.path.exists(s) for s in sib3), True))
+    os.remove(pvel3)                                   # delete ONE required grid
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d11 = _stage(rep, "data")
+    out.append(("fluid R11-1: a deleted core grid is NOT hidden by its siblings",
+                bool(d11) and d11[0].state != ch.S_UNCHANGED
+                and "0003/pVel" in (d11[0].uncovered or []),
+                [(s.state, s.uncovered) for s in d11], "0003/pVel uncovered"))
+    out.append(("fluid R11-1: the surviving siblings pp/vel_0003 still matched",
+                bool(d11) and ("0003/pp" in (d11[0].matched or [])
+                               or "0003/vel" in (d11[0].matched or [])),
+                [s.matched for s in d11], "a sibling matched"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R11-1: missing core grid -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R11-1: missing core grid -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+    for sobj in bpy.data.objects:
+        for smod in sobj.modifiers:
+            if smod.type == "FLUID" and getattr(smod, "fluid_type", "") == "DOMAIN":
+                se = ci.inspect_fluid_domain(sobj, smod, bpy.context.scene)
+                out.append(("fluid R11-1: structural data frame 3 NOT present (grid incomplete)",
+                            3 not in (se.frames_present or set()),
+                            sorted(se.frames_present or []), "3 absent"))
+
+    # (c) Replace EVERY real grid with a foreign junk_NNNN.uni BEFORE baseline. The
+    # matcher counts none of them (not a known core grid), so the data stage has no
+    # coverage at all -> #27 UNKNOWN. A fake name can't satisfy a required grid.
+    u11j = os.path.join(tmp, "r11junk")
+    os.makedirs(u11j, exist_ok=True)
+    fixtures.build_fluid_uni_data(u11j)
+    d11jdir = os.path.join(u11j, "fluidcache", "data")
+    realj = sorted(f for f in os.listdir(d11jdir) if f.endswith(".uni"))
+    framesj = set()
+    for f in realj:
+        mo = re.search(r"_(\d{4})\.uni$", f)
+        if mo:
+            framesj.add(mo.group(1))
+        os.remove(os.path.join(d11jdir, f))
+    for fr in sorted(framesj):
+        with open(os.path.join(d11jdir, "junk_%s.uni" % fr), "wb") as fh:
+            fh.write(b"not a real mantaflow grid file")
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d11 = _stage(rep, "data")
+    out.append(("fluid R11-1: foreign junk_NNNN.uni gives data stage NO coverage",
+                bool(d11) and d11[0].state != ch.S_UNCHANGED,
+                [(s.state, s.uncovered, s.missing) for s in d11], "not UNCHANGED"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R11-1: junk grid names -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R11-1: junk grid names -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+    for sobj in bpy.data.objects:
+        for smod in sobj.modifiers:
+            if smod.type == "FLUID" and getattr(smod, "fluid_type", "") == "DOMAIN":
+                se = ci.inspect_fluid_domain(sobj, smod, bpy.context.scene)
+                out.append(("fluid R11-1: structural data counts NONE of the junk .uni",
                             not (se.frames_present or set()),
                             sorted(se.frames_present or []), "empty"))
 

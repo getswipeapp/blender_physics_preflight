@@ -837,20 +837,43 @@ _FLUID_FIXED_RE = {
     "guiding":   re.compile(r"^fluid_guiding_(\d{4})\.vdb$"),
 }
 
-# data-stage patterns, keyed by cache_data_format. The UNI pattern matches a bare
-# Mantaflow grid name (pVel, pp, vel, density, …) and EXCLUDES the reserved packed
-# 'fluid_<stage>_' prefixes, so a planted fluid_data_NNNN.uni — a renamed OpenVDB
-# frame — can never be counted as UNI data coverage (review R10-2).
+# data-stage patterns, keyed by cache_data_format. OPENVDB packs a whole frame into
+# ONE fluid_data_NNNN.vdb; UNI is multi-file (one per grid) and is handled per-file by
+# _FLUID_UNI_DATA_FILE_RE / _fluid_file_token below, NOT here — so this map only needs
+# the single-file OpenVDB form (review R10-2, R11-1).
 _FLUID_DATA_RE = {
     "OPENVDB": re.compile(r"^fluid_data_(\d{4})\.vdb$"),
-    "UNI": re.compile(r"^(?!fluid_(?:data|noise|particles|guiding|mesh)_)"
-                      r"[A-Za-z][A-Za-z0-9]*_(\d{4})\.uni$"),
 }
 # mesh-stage patterns, keyed by cache_mesh_format (review R10-1).
 _FLUID_MESH_RE = {
     "BOBJECT": re.compile(r"^fluid_mesh_(\d{4})\.bobj\.gz$"),
     "OBJECT": re.compile(r"^fluid_mesh_(\d{4})\.obj$"),
 }
+
+# UNI data is MULTI-FILE: each frame is several per-grid files, and WHICH grids a
+# genuine bake writes is fixed by the domain type. Verified IDENTICAL on real bakes of
+# 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3, across minimal / secondary-particles / mesh / smoke /
+# fire configs:
+#     LIQUID -> pVel_NNNN.uni, pp_NNNN.uni, vel_NNNN.uni
+#     GAS    -> density_NNNN.uni, flame_NNNN.uni, heat_NNNN.uni, shadow_NNNN.uni,
+#               vel_NNNN.uni
+# These are the grids EVERY genuine bake of that domain type writes, so UNI data
+# coverage must require EACH of them FOR EACH frame — not merely "the frame has some
+# .uni file". Keying coverage on the bare integer frame let a surviving sibling grid
+# (pp/vel) — or a planted junk_NNNN.uni — stand in for a deleted required grid (pVel)
+# and read as a clean PASS (review R11-1). The fix mirrors the Geometry-Nodes blob B3
+# pattern: a per-(frame, grid) string coverage token that can never collapse.
+_FLUID_UNI_CORE_GRIDS = {
+    "LIQUID": ("pVel", "pp", "vel"),
+    "GAS":    ("density", "flame", "heat", "shadow", "vel"),
+}
+# A UNI data file: <grid>_<frame>.uni. The negative lookahead preserves the R10-2
+# masquerade rejection — a packed 'fluid_data_NNNN.uni' (and any reserved
+# 'fluid_<stage>_' name) can never be read as a per-grid data file. group(1) is the
+# grid base-name, group(2) the 4-digit frame. CASE-SENSITIVE, like every fluid pattern.
+_FLUID_UNI_DATA_FILE_RE = re.compile(
+    r"^(?!fluid_(?:data|noise|particles|guiding|mesh)_)"
+    r"([A-Za-z][A-Za-z0-9]*)_(\d{4})\.uni$")
 
 
 def _fluid_component_re(component, ds):
@@ -873,6 +896,74 @@ def _fluid_component_re(component, ds):
         return _FLUID_MESH_RE.get(
             (getattr(ds, "cache_mesh_format", "") or "").upper())
     return None
+
+
+def _fluid_data_is_uni(ds):
+    """True iff the domain's data stage is configured to write the multi-file UNI
+    format (so a per-grid completeness check applies instead of one file per frame)."""
+    return (getattr(ds, "cache_data_format", "") or "").upper() == "UNI"
+
+
+def _uni_core_grids(ds):
+    """The per-frame grid files a genuine UNI data bake of THIS domain ALWAYS writes
+    (verified on real bakes, all four versions), or ``None`` for a domain type we have
+    not characterised — then UNI data coverage is forced UNKNOWN rather than guessed
+    (the project's UNKNOWN-over-false-PASS rule)."""
+    dt = (getattr(ds, "domain_type", "") or "").upper()
+    return _FLUID_UNI_CORE_GRIDS.get(dt)
+
+
+def _uni_token(grid, frame):
+    """The per-(frame, grid) coverage identity for one UNI data file, e.g.
+    ``"0003/pVel"``. A real per-file identity (JSON-safe, stable-sorting, legible) so
+    two grids sharing a frame never collapse and a missing required grid can't hide
+    behind a present sibling (review R11-1; mirrors the GN-blob B3 key)."""
+    return "%04d/%s" % (int(frame), grid)
+
+
+def _fluid_file_token(component, ds, fn):
+    """Map a filename in a fluid stage directory to ``(coverage_token, frame_int)``, or
+    ``None`` if it is not a file of THIS stage in the domain's configured format.
+
+    For the UNI data stage the token is the per-(frame, grid) string so sibling grids
+    never collapse (review R11-1); every other stage (and OpenVDB data) uses the bare
+    integer frame, which is also its token."""
+    if component == "data" and _fluid_data_is_uni(ds):
+        m = _FLUID_UNI_DATA_FILE_RE.match(fn)
+        if not m:
+            return None
+        grid, fr = m.group(1), int(m.group(2))
+        core = _uni_core_grids(ds)
+        # Only a KNOWN core grid for this domain type counts as data coverage. A
+        # foreign name (junk_NNNN.uni), or any grid when the domain type is
+        # uncharacterised, is not matched — so a planted file can never masquerade as a
+        # required grid, and the real required grids stay uncovered -> UNKNOWN (R11-1).
+        if not core or grid not in core:
+            return None
+        return (_uni_token(grid, fr), fr)
+    rx = _fluid_component_re(component, ds)
+    if rx is None:
+        return None
+    m = rx.match(fn)
+    if not m:
+        return None
+    fr = int(m.group(1))
+    return (fr, fr)
+
+
+def _fluid_stage_required(component, ds, cs, ce):
+    """The coverage identities a fluid stage must have for the whole cache range
+    ``cs..ce``. For UNI data it is EVERY (frame, core-grid) token — so a frame missing
+    any required grid stays uncovered (review R11-1); for every other stage it is the
+    integer frames. For an uncharacterised UNI domain type, a lone sentinel token that
+    no real file can baseline forces UNKNOWN rather than an optimistic PASS."""
+    frames = range(cs, ce + 1)
+    if component == "data" and _fluid_data_is_uni(ds):
+        core = _uni_core_grids(ds)
+        if not core:
+            return ["?/uni-unknown-domain"]
+        return [_uni_token(g, f) for f in frames for g in core]
+    return list(frames)
 
 # Which fluid sub-cache maps to which per-stage "baked" flag. An enabled stage
 # whose flag is OFF is not a valid bake even if stale files remain (R13).
@@ -903,14 +994,53 @@ def _stage_flag_state(ds, flag_attr):
 
 
 def _scan_fluid_dir(data_dir, component, ds):
-    """Scan one Mantaflow sub-cache directory for THAT component's files only, matching
-    the domain's CONFIGURED format for the stage (review R9-1).
-    Returns (present, empty, unreadable)."""
+    """Scan one Mantaflow sub-cache directory for THAT component's frames, matching the
+    domain's CONFIGURED format for the stage (review R9-1). Returns
+    (present, empty, unreadable) as sets of INT frame numbers.
+
+    For the UNI data stage a frame is 'present' only when EVERY required core grid for
+    the domain type is on disk for it (review R11-1): a frame missing a core grid — or
+    represented only by a foreign/sibling file such as a planted junk_NNNN.uni — is NOT
+    present, so the structural checks report it missing instead of reading complete. An
+    empty/unreadable core-grid file marks its frame (only among present frames)."""
     present, empty, unreadable = set(), set(), set()
-    rx = _fluid_component_re(component, ds)
-    if rx is None or not data_dir or not os.path.isdir(data_dir):
+    if not data_dir or not os.path.isdir(data_dir):
         return present, empty, unreadable
-    for fn in os.listdir(data_dir):
+    try:
+        names = os.listdir(data_dir)
+    except OSError:
+        return present, empty, unreadable
+
+    if component == "data" and _fluid_data_is_uni(ds):
+        core = _uni_core_grids(ds)
+        if not core:
+            # Uncharacterised domain type: don't guess which grids are required, so no
+            # frame reads complete -> structural 'missing' upstream (UNKNOWN, not PASS).
+            return present, empty, unreadable
+        core_set = set(core)
+        frame_grids = {}
+        frame_empty, frame_unread = set(), set()
+        for fn in names:
+            m = _FLUID_UNI_DATA_FILE_RE.match(fn)
+            if not m:
+                continue
+            grid, fr = m.group(1), int(m.group(2))
+            frame_grids.setdefault(fr, set()).add(grid)
+            if grid in core_set:
+                st = _file_state(os.path.join(data_dir, fn))
+                if st == "empty":
+                    frame_empty.add(fr)
+                elif st == "unreadable":
+                    frame_unread.add(fr)
+        for fr, grids in frame_grids.items():
+            if core_set <= grids:
+                present.add(fr)
+        return present, frame_empty & present, frame_unread & present
+
+    rx = _fluid_component_re(component, ds)
+    if rx is None:
+        return present, empty, unreadable
+    for fn in names:
         m = rx.match(fn)
         if not m:
             continue
@@ -1043,22 +1173,23 @@ def fluid_enabled_stages(ds):
 
 
 def _fluid_stage_files(stage_dir, component, ds):
-    """Discover the ACTUAL files for one fluid stage — matched by the component's
-    FORMAT-AWARE filename pattern (the domain's configured ``.vdb`` / ``.uni`` /
-    ``.bobj.gz`` … for the stage), so a wrong-format file can't be counted as the
-    required frame (review R9-1). Returns [(frame:int, abspath)]."""
+    """Discover the ACTUAL files for one fluid stage as ``(coverage_token, abspath)`` —
+    matched by the component's FORMAT-AWARE scheme (the domain's configured ``.vdb`` /
+    ``.uni`` / ``.bobj.gz`` … for the stage), so a wrong-format file can't be counted as
+    a required frame (review R9-1). The token is the per-file coverage identity the hash
+    verifier tracks: a per-(frame, grid) string for UNI data so a sibling grid can't
+    stand in for a deleted required grid (review R11-1); the integer frame otherwise."""
     out = []
-    rx = _fluid_component_re(component, ds)
-    if rx is None or not stage_dir or not os.path.isdir(stage_dir):
+    if not stage_dir or not os.path.isdir(stage_dir):
         return out
     try:
         names = os.listdir(stage_dir)
     except OSError:
         return out
     for fn in names:
-        m = rx.match(fn)
-        if m:
-            out.append((int(m.group(1)), os.path.join(stage_dir, fn)))
+        tok = _fluid_file_token(component, ds, fn)
+        if tok is not None:
+            out.append((tok[0], os.path.join(stage_dir, fn)))
     return out
 
 
@@ -1069,11 +1200,13 @@ def iter_fluid_cache_files(scenes):
     distinct from a changed data stage.
 
     ``identity`` is the relocation-stable ``Scene::Owner::Fluid::<modifier>/<stage>``.
-    ``required`` is the domain's OWN cache range (``cache_frame_start..end``), NOT
-    the scene range. ``files`` are the stage's actual on-disk frame files, their
-    real extensions discovered. ``index`` is always 0 (fluid frames aren't indexed
-    like point caches). A REPLAY cache is a playback cache, not a bake, and is
-    skipped (the structural checks report it as a Warning). Read-only."""
+    ``required`` is the stage's coverage set over the domain's OWN cache range
+    (``cache_frame_start..end``), NOT the scene range — integer frames for most stages,
+    but per-(frame, grid) tokens for UNI data so a missing required grid can't hide
+    behind a present sibling (review R11-1). ``files`` are the stage's actual on-disk
+    files paired with the SAME coverage token. ``index`` is always 0 (fluid frames
+    aren't indexed like point caches). A REPLAY cache is a playback cache, not a bake,
+    and is skipped (the structural checks report it as a Warning). Read-only."""
     for scene in scenes:
         for obj in scene.objects:
             for mod in obj.modifiers:
@@ -1094,11 +1227,11 @@ def iter_fluid_cache_files(scenes):
                     continue
                 cs = int(getattr(ds, "cache_frame_start", scene.frame_start))
                 ce = int(getattr(ds, "cache_frame_end", scene.frame_end))
-                required = list(range(cs, ce + 1))
                 for stage in fluid_enabled_stages(ds):
                     stage_dir = os.path.join(cache_dir, stage)
-                    files = [(fr, 0, p) for (fr, p)
+                    files = [(tok, 0, p) for (tok, p)
                              in sorted(_fluid_stage_files(stage_dir, stage, ds))]
+                    required = _fluid_stage_required(stage, ds, cs, ce)
                     identity = "%s::%s::Fluid::%s/%s" % (
                         scene.name, obj.name, mod.name, stage)
                     yield PointCacheFiles(identity, "Fluid", obj.name,
