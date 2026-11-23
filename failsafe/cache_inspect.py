@@ -878,6 +878,12 @@ _FLUID_UNI_CORE_GRIDS = {
 # name as a unit so one deleted channel can't hide behind its two siblings: present any
 # of these and ALL three are required for every frame (review R12-1).
 _FLUID_UNI_COLOR_GRIDS = ("color_r", "color_g", "color_b")
+# Blender's colour trigger: a SMOKE/BOTH flow writes colour grids IFF its smoke_color
+# differs from this default grey (verified on real bakes of all four versions — ANY
+# deviation, including another grey, turns colour on; exactly the default does not). This
+# is the CONFIG signal that colour data must exist, used to catch an entire colour family
+# deleted before baseline (review R13-1); there is NO domain-level colour flag.
+_FLUID_SMOKE_COLOR_DEFAULT = (0.7, 0.7, 0.7)
 # A UNI data file: <grid>_<frame>.uni. The negative lookahead preserves the R10-2
 # masquerade rejection — a packed 'fluid_data_NNNN.uni' (and any reserved
 # 'fluid_<stage>_' name) can never be read as a per-grid data file. group(1) is the
@@ -917,6 +923,46 @@ def _fluid_data_is_uni(ds):
     """True iff the domain's data stage is configured to write the multi-file UNI
     format (so a per-grid completeness check applies instead of one file per frame)."""
     return (getattr(ds, "cache_data_format", "") or "").upper() == "UNI"
+
+
+def _fluid_data_is_resumable(ds):
+    """True iff the domain is configured for a RESUMABLE cache, which writes extra
+    restart-state grids every frame. A reliable per-domain config signal (verified on all
+    four versions), used to catch an entire restart-grid family wiped before baseline
+    (review R13-1)."""
+    return bool(getattr(ds, "cache_resumable", False))
+
+
+def _scene_has_colored_smoke_flow(scene):
+    """True iff the scene contains a SMOKE or BOTH fluid FLOW whose ``smoke_color`` is not
+    the default grey — Blender's exact trigger for writing colour grids (review R13-1).
+
+    There is NO domain-level colour flag, and a flow is not linked in RNA to a particular
+    domain, so this is deliberately SCENE-WIDE: it can only ever OVER-report colour (a
+    safe false UNKNOWN on a mixed multi-domain scene), never UNDER-report it — under-
+    reporting would reintroduce the very false PASS this closes. Any colour value that
+    can't be read is treated as 'colour possible' (conservative)."""
+    for obj in getattr(scene, "objects", ()):
+        for mod in getattr(obj, "modifiers", ()):
+            if getattr(mod, "type", "") != "FLUID":
+                continue
+            if getattr(mod, "fluid_type", "") != "FLOW":
+                continue
+            fs = getattr(mod, "flow_settings", None)
+            if fs is None:
+                continue
+            if (getattr(fs, "flow_type", "") or "").upper() not in ("SMOKE", "BOTH"):
+                continue
+            col = getattr(fs, "smoke_color", None)
+            if col is None:
+                continue
+            try:
+                vals = tuple(round(float(c), 4) for c in col)
+            except Exception:
+                return True  # unreadable colour -> assume colour is possible (safe)
+            if vals != _FLUID_SMOKE_COLOR_DEFAULT:
+                return True
+    return False
 
 
 def _uni_core_grids(ds):
@@ -971,7 +1017,8 @@ def _fluid_file_token(component, ds, fn):
     return (fr, fr)
 
 
-def _fluid_stage_required(component, ds, cs, ce, observed_grids=None):
+def _fluid_stage_required(component, ds, cs, ce, observed_grids=None,
+                          expects_color=False):
     """The coverage identities a fluid stage must have for the whole cache range
     ``cs..ce``. For UNI data it is EVERY (frame, grid) token for every REQUIRED grid — so
     a frame missing any required grid stays uncovered (review R11-1); for every other
@@ -980,23 +1027,47 @@ def _fluid_stage_required(component, ds, cs, ce, observed_grids=None):
     PASS.
 
     The required grid set is the MANDATORY core for the domain type UNION the OPTIONAL
-    grids this bake actually wrote (``observed_grids`` — color_r/g/b, resumable
-    restart-state grids, …). Deriving the optional requirement from the bake itself,
-    rather than a fixed per-domain whitelist, catches a deleted optional grid (a missing
-    color channel) WITHOUT forcing UNKNOWN on a legitimate bake that simply has none of
-    them (review R12-1). Color is required as a SET — present any of color_r/g/b and all
-    three are required — so a single deleted channel can't hide behind its siblings."""
+    grids this bake actually wrote (``observed_grids`` — review R12-1) UNION the families
+    the DOMAIN CONFIG says must exist (review R13-1). A single deleted optional file is
+    caught by the observed union; an ENTIRE family deleted before baseline leaves no
+    on-disk evidence, so it is caught instead from config — which cannot be erased by
+    deleting cache files:
+
+      * color_r/g/b: required (gas only) when ``expects_color`` — a SMOKE/BOTH flow in the
+        scene has a non-default smoke_color, Blender's own colour trigger (verified on all
+        four versions). Required as a SET, so one deleted channel can't hide behind its
+        siblings, and ALL colour deleted still reads UNKNOWN. A plain bake (no coloured
+        flow) never expects colour, so it is not forced UNKNOWN.
+      * resumable restart-state grids: when ``cache_resumable`` is on, a genuine bake
+        ALWAYS writes restart grids (densityIn/flags/velTmp/…). We don't enumerate them
+        (version-fragile); instead, if resumable is on but NONE is on disk, the family was
+        wiped — a lone unbaselinable sentinel forces UNKNOWN."""
     frames = range(cs, ce + 1)
     if component == "data" and _fluid_data_is_uni(ds):
         core = _uni_core_grids(ds)
         if not core:
             return ["?/uni-unknown-domain"]
-        req = set(core)
-        if observed_grids:
-            req |= set(observed_grids)
-            if req & set(_FLUID_UNI_COLOR_GRIDS):
-                req |= set(_FLUID_UNI_COLOR_GRIDS)
-        return [_uni_token(g, f) for f in frames for g in sorted(req)]
+        core_set = set(core)
+        color_set = set(_FLUID_UNI_COLOR_GRIDS)
+        observed = set(observed_grids or ())
+        req = set(core_set)
+        req |= observed
+        is_gas = (getattr(ds, "domain_type", "") or "").upper() == "GAS"
+        # Config-anchored colour family (gas only): required when the scene configures
+        # colour, OR whenever any colour grid is present (observed closure) — either way
+        # as the full {r,g,b} SET (review R12-1 / R13-1).
+        if is_gas and (expects_color or (req & color_set)):
+            req |= color_set
+        tokens = [_uni_token(g, f) for f in frames for g in sorted(req)]
+        # Config-anchored resumable family: resumable ON but no restart grid on disk means
+        # the whole restart family was deleted -> an unbaselinable sentinel -> UNKNOWN
+        # (review R13-1). A genuine resumable bake always has restart grids, so this never
+        # fires on one; a non-resumable bake never sets cache_resumable.
+        if _fluid_data_is_resumable(ds):
+            restart_observed = observed - core_set - color_set
+            if not restart_observed:
+                tokens.append("?/resumable-restart-wiped")
+        return tokens
     return list(frames)
 
 
@@ -1268,6 +1339,10 @@ def iter_fluid_cache_files(scenes):
     aren't indexed like point caches). A REPLAY cache is a playback cache, not a bake,
     and is skipped (the structural checks report it as a Warning). Read-only."""
     for scene in scenes:
+        # Scene-wide colour config (there is no per-domain colour flag): does any
+        # SMOKE/BOTH flow set a non-default smoke_color? Used to require the colour family
+        # even when every colour file was deleted before baseline (review R13-1).
+        scene_expects_color = _scene_has_colored_smoke_flow(scene)
         for obj in scene.objects:
             for mod in obj.modifiers:
                 if mod.type != "FLUID":
@@ -1292,7 +1367,9 @@ def iter_fluid_cache_files(scenes):
                     files = [(tok, 0, p) for (tok, p)
                              in sorted(_fluid_stage_files(stage_dir, stage, ds))]
                     observed = _uni_observed_grids(stage_dir, stage, ds)
-                    required = _fluid_stage_required(stage, ds, cs, ce, observed)
+                    required = _fluid_stage_required(
+                        stage, ds, cs, ce, observed,
+                        expects_color=scene_expects_color)
                     identity = "%s::%s::Fluid::%s/%s" % (
                         scene.name, obj.name, mod.name, stage)
                     yield PointCacheFiles(identity, "Fluid", obj.name,

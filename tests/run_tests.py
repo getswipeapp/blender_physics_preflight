@@ -652,6 +652,53 @@ def fluid_matcher_unit_tests():
         observed_grids={"density", "flame", "heat", "shadow", "vel", "velTmp"})
     res.append(("fluid matcher: an observed resumable grid is required per frame (R12-1)",
                 "0004/velTmp" in req_resume, sorted(req_resume), "includes 0004/velTmp"))
+
+    # R13-1: an ENTIRE optional family wiped before baseline leaves NO on-disk evidence,
+    # so the required set is anchored to CONFIG, not just observed files.
+    # Colour (gas only) is required from config even with NO colour grid observed.
+    req_cfg_color = ci._fluid_stage_required("data", gas_ds, 1, 1,
+                                             observed_grids=set(), expects_color=True)
+    res.append(("fluid matcher: expects_color requires colour set with none observed (R13-1)",
+                all(t in req_cfg_color
+                    for t in ("0001/color_r", "0001/color_g", "0001/color_b")),
+                sorted(req_cfg_color), "core + colour set"))
+    # Colour is GAS-only: a liquid domain never requires colour, even in a coloured scene.
+    req_liq_color = ci._fluid_stage_required("data", uni_ds, 1, 1,
+                                             observed_grids=set(), expects_color=True)
+    res.append(("fluid matcher: expects_color adds NO colour to a LIQUID domain (R13-1)",
+                not any(t.split("/")[-1] in ("color_r", "color_g", "color_b")
+                        for t in req_liq_color),
+                sorted(req_liq_color), "no colour tokens on liquid"))
+    # A plain gas bake (expects_color False, no colour observed) is NOT forced UNKNOWN.
+    req_plain = ci._fluid_stage_required("data", gas_ds, 1, 1,
+                                         observed_grids={"density", "flame", "heat",
+                                                         "shadow", "vel"},
+                                         expects_color=False)
+    res.append(("fluid matcher: plain gas bake needs no colour (no false UNKNOWN, R13-1)",
+                not any(t.split("/")[-1].startswith("color_") for t in req_plain),
+                sorted(req_plain), "no colour tokens"))
+    # Resumable ON but NO restart grid observed -> unbaselinable sentinel -> UNKNOWN.
+    gas_resume_ds = FakeDS(domain_type="GAS", cache_data_format="UNI",
+                           cache_mesh_format="BOBJECT", cache_resumable=True)
+    req_resume_wiped = ci._fluid_stage_required(
+        "data", gas_resume_ds, 1, 1,
+        observed_grids={"density", "flame", "heat", "shadow", "vel"})
+    res.append(("fluid matcher: resumable with no restart grid -> wiped sentinel (R13-1)",
+                "?/resumable-restart-wiped" in req_resume_wiped,
+                sorted(req_resume_wiped), "sentinel present"))
+    # Resumable WITH a restart grid present -> no sentinel (a genuine resumable bake PASSES).
+    req_resume_ok = ci._fluid_stage_required(
+        "data", gas_resume_ds, 1, 1,
+        observed_grids={"density", "flame", "heat", "shadow", "vel", "velTmp"})
+    res.append(("fluid matcher: resumable with a restart grid present -> no sentinel (R13-1)",
+                "?/resumable-restart-wiped" not in req_resume_ok
+                and "0001/velTmp" in req_resume_ok,
+                sorted(req_resume_ok), "no sentinel, velTmp required"))
+    # A non-resumable bake never gets the restart sentinel.
+    res.append(("fluid matcher: non-resumable never gets the restart sentinel (R13-1)",
+                "?/resumable-restart-wiped" not in ci._fluid_stage_required(
+                    "data", gas_ds, 1, 1, observed_grids=set()),
+                "no sentinel", "no sentinel"))
     return res
 
 
@@ -3469,6 +3516,77 @@ def hash_fluid_tests():
         out.append(("fluid R12-1: missing resumable grid -> #27 UNKNOWN (never PASS)",
                     worst_for_check(results, 27) == Status.UNKNOWN,
                     worst_for_check(results, 27), Status.UNKNOWN))
+
+    # (R13-1, round 13) An ENTIRE optional family deleted BEFORE baseline leaves no
+    # on-disk evidence, so the observed-from-disk union alone would require only the core
+    # and read PASS. The required set is now ALSO anchored to DOMAIN CONFIG — a signal
+    # deleting cache files can't erase: a non-default smoke_color flow (colour expected)
+    # and cache_resumable (restart grids expected). Both verified on real bakes.
+
+    # (h) Delete EVERY color_r/g/b file across ALL frames of a colored bake before baseline.
+    # The scene still configures colour (the flow's smoke_color), so #27 must be UNKNOWN.
+    g13c = os.path.join(tmp, "r13color")
+    os.makedirs(g13c, exist_ok=True)
+    fixtures.build_fluid_uni_gas_color(g13c)
+    g13cdata = os.path.join(g13c, "fluidcache", "data")
+    removed = 0
+    for f in sorted(os.listdir(g13cdata)):
+        if f.startswith("color_"):
+            os.remove(os.path.join(g13cdata, f))
+            removed += 1
+    out.append(("fluid R13-1: colored bake had color files, now ALL removed (precondition)",
+                removed > 0 and not any(f.startswith("color_")
+                                        for f in os.listdir(g13cdata)),
+                removed, ">0 removed, none left"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d13 = _stage(rep, "data")
+    out.append(("fluid R13-1: whole color family wiped -> colour tokens uncovered (config)",
+                bool(d13) and d13[0].state != ch.S_UNCHANGED
+                and any(t.split("/")[-1] in ("color_r", "color_g", "color_b")
+                        for t in (d13[0].uncovered or [])),
+                [(s.state, (s.uncovered or [])[:3]) for s in d13], "colour tokens uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R13-1: whole color family wiped -> #27 UNKNOWN (config caught it)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R13-1: whole color family wiped -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (i) Delete the ENTIRE restart-state family of a resumable bake before baseline.
+    # cache_resumable is still on, so a bake with no restart grid at all is incomplete.
+    g13r = os.path.join(tmp, "r13resume")
+    os.makedirs(g13r, exist_ok=True)
+    fixtures.build_fluid_uni_gas_resumable(g13r)
+    g13rdata = os.path.join(g13r, "fluidcache", "data")
+    _CORE_GAS = {"density", "flame", "heat", "shadow", "vel"}
+    rrem = 0
+    for f in sorted(os.listdir(g13rdata)):
+        mo = re.match(r"^(.+)_\d{4}\.uni$", f)
+        if mo and mo.group(1) not in _CORE_GAS and not mo.group(1).startswith("color_"):
+            os.remove(os.path.join(g13rdata, f))
+            rrem += 1
+    out.append(("fluid R13-1: resumable bake had restart grids, now ALL removed (precondition)",
+                rrem > 0, rrem, ">0 restart files removed"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d13 = _stage(rep, "data")
+    out.append(("fluid R13-1: whole restart family wiped -> restart sentinel uncovered (config)",
+                bool(d13) and d13[0].state != ch.S_UNCHANGED
+                and "?/resumable-restart-wiped" in (d13[0].uncovered or []),
+                [(s.state, s.uncovered) for s in d13], "restart sentinel uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R13-1: whole restart family wiped -> #27 UNKNOWN (config caught it)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R13-1: whole restart family wiped -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
     return out
 

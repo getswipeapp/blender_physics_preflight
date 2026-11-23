@@ -394,3 +394,38 @@ UNKNOWN); untouched colored control (#27 PASS); delete color_r_0003 before basel
 untouched resumable control (#27 PASS); delete one restart grid frame → uncovered → UNKNOWN.
 
 All four versions after the fix: 681 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
+## Round-13 UNI data: ENTIRE optional family deleted before baseline (config anchor, all four versions)
+
+Review R13-1: the R12 observed-from-disk union catches a SINGLE deleted optional file
+(siblings survive to mark the family present), but deleting an ENTIRE optional family
+across ALL frames BEFORE baseline leaves no on-disk evidence, so the union required only
+the core grids -> #27 PASS. Fixed by anchoring the required set to DOMAIN CONFIG (which
+deleting cache files can't erase), established from real bakes on all four versions:
+
+- **Colour has NO domain-level flag.** The only signal is the FLOW: a SMOKE or BOTH flow
+  writes color_r/g/b IFF its `smoke_color` != the default grey `(0.7, 0.7, 0.7)` (ANY
+  deviation turns colour on; exactly the default does not — identical on 4.2.9 / 4.5.9 /
+  5.0.1 / 5.2.3). `_scene_has_colored_smoke_flow(scene)` reports this SCENE-WIDE: flows
+  aren't linked in RNA to a domain, so it can only OVER-report colour (a safe false
+  UNKNOWN on a mixed multi-domain scene), NEVER under-report (which would reintroduce the
+  false PASS). Colour is required (gas only) as the full {r,g,b} SET whenever the scene
+  configures colour — so even all-colour-deleted reads UNKNOWN. Fire-only flows don't
+  emit colour, so only SMOKE/BOTH count.
+- **Resumable** is a clean per-domain boolean (`ds.cache_resumable`). A genuine resumable
+  bake always writes restart-state grids; we DON'T enumerate them (version-fragile).
+  Instead, if resumable is on but NO restart grid (observed − core − colour) is on disk,
+  the family was wiped -> a lone unbaselinable sentinel `?/resumable-restart-wiped` forces
+  UNKNOWN.
+
+False-UNKNOWN guard: a plain bake (no coloured flow, not resumable) expects neither
+family, so it still PASSES. Colour is gas-only (never required on a liquid domain). A
+genuine colored/resumable bake has the families present -> PASS.
+
+Tests added (real bakes, all four versions): delete ALL color_r/g/b before baseline ->
+colour tokens uncovered, #27 UNKNOWN, floor 2; delete the ENTIRE restart family before
+baseline -> restart sentinel uncovered, #27 UNKNOWN, floor 2; untouched plain / colored /
+resumable bakes still PASS; plus matcher-unit assertions for expects_color (gas-only) and
+the resumable sentinel.
+
+All four versions after the fix: 695 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
