@@ -4947,7 +4947,112 @@ def gate_selfcheck_tests():
                     "consistent=yes ok=yes\n",
                     exit_code=0, min_total=700).ok is False,
                 "rejected", "rejected"))
+
+    # ---- R18-1: independent expected-inventory enforcement ----------------
+    # A completed, internally consistent, above-floor run can STILL be wrong if
+    # a group silently shrank or vanished. The suite declares an independent
+    # expected count and emits it as expected=; the gate rejects total!=expected.
+    good_expected = (
+        "Blender 4.2.9 LTS  |  754 passed, 0 failed, 754 total\n"
+        "SUITE_DONE version=4.2.9 passed=754 failed=0 total=754 "
+        "expected=754 consistent=yes ok=yes\n"
+    )
+    res.append(("gate_check R18-1: a run matching its declared inventory is ACCEPTED",
+                gc.evaluate_log(good_expected, exit_code=0, min_total=700).ok is True,
+                "accepted", "accepted"))
+    shrunk = (
+        "Blender 4.2.9 LTS  |  745 passed, 0 failed, 745 total\n"
+        "SUITE_DONE version=4.2.9 passed=745 failed=0 total=745 "
+        "expected=754 consistent=yes ok=yes\n"
+    )
+    res.append(("gate_check R18-1: fewer tests than declared (745 vs 754) is REJECTED",
+                gc.evaluate_log(shrunk, exit_code=0, min_total=700).ok is False,
+                "rejected", "rejected"))
+
+    # ---- R18-2: Blender version identity enforcement ----------------------
+    res.append(("gate_check R18-2: matching --version is ACCEPTED",
+                gc.evaluate_log(good_expected, exit_code=0, min_total=700,
+                                expected_version="4.2.9").ok is True,
+                "accepted", "accepted"))
+    res.append(("gate_check R18-2: a slot running the wrong Blender version is REJECTED",
+                gc.evaluate_log(good_expected, exit_code=0, min_total=700,
+                                expected_version="9.9.9").ok is False,
+                "rejected", "rejected"))
+
+    # ---- R18-3: require_marker fail-closed for non-suite proof steps -------
+    MARK = "REAL BATCH PROOF: ALL CHECKS PASSED"
+    FORBID = ("REAL BATCH PROOF: FAILED",)
+    ok_proof = "=== REAL batch ===\n%s (real subprocesses)\n" % MARK
+    res.append(("gate_check R18-3: a proof printing its success marker is ACCEPTED",
+                gc.require_marker(ok_proof, MARK, forbidden=FORBID,
+                                  exit_code=0).ok is True,
+                "accepted", "accepted"))
+    crash_proof = (
+        "=== REAL batch ===\n"
+        "Traceback (most recent call last):\n"
+        "SystemError: <bpy_func ViewLayer.update()> returned a result with an "
+        "exception set\nBlender quit\n"
+    )
+    res.append(("gate_check R18-3: a proof that crashes then exits 0 is REJECTED",
+                gc.require_marker(crash_proof, MARK, forbidden=FORBID,
+                                  exit_code=0).ok is False,
+                "rejected", "rejected"))
+    failed_proof = "=== REAL batch ===\nREAL BATCH PROOF: FAILED\n  - good.blend not clean\n"
+    res.append(("gate_check R18-3: a proof printing its FAILED marker is REJECTED",
+                gc.require_marker(failed_proof, MARK, forbidden=FORBID,
+                                  exit_code=1).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R18-3: a proof with its marker but nonzero exit is REJECTED",
+                gc.require_marker(ok_proof, MARK, forbidden=FORBID,
+                                  exit_code=1).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R18-3: a proof missing its success marker is REJECTED",
+                gc.require_marker("nothing ran\n", MARK, forbidden=FORBID,
+                                  exit_code=0).ok is False,
+                "rejected", "rejected"))
     return res
+
+
+# ---------------------------------------------------------------------------
+# R18-1: independent expected-inventory manifest.
+#
+# Fixed, hand-maintained literals — NEVER derived from a live run — so a group
+# that silently shrinks or vanishes at runtime makes the actual count disagree
+# with this declaration and fails the suite closed on EVERY version (not merely
+# "below a floor"). ``bpy.app.version`` gates no test count, so every supported
+# version must produce exactly these numbers; a version that differs is a real
+# regression, surfaced per-group. Re-baseline after an intended change by
+# running with FAILSAFE_MEASURE=1 and copying the GROUP_COUNT / INVENTORY lines.
+# ---------------------------------------------------------------------------
+EXPECTED_CASES = 82
+EXPECTED_CACHE_REGRESSION = 8
+EXPECTED_GROUP_COUNTS = {
+    "verdict_unit_tests": 24,
+    "gn_unit_tests": 45,
+    "fluid_matcher_unit_tests": 81,
+    "memory_reliability_tests": 7,
+    "stage_flag_state_tests": 5,
+    "readonly_tests": 9,
+    "readonly_filesystem_tests": 4,
+    "roundtrip_fix_tests": 3,
+    "render_check_tests": 16,
+    "title_tests": 15,
+    "new_feature_tests": 61,
+    "baseline_tests": 25,
+    "batch_adversarial_tests": 8,
+    "batch_isolation_tests": 25,
+    "review_blocker_tests": 18,
+    "integrity_header_tests": 10,
+    "cache_coverage_tests": 12,
+    "cache_hash_tests": 30,
+    "hash_blocker_tests": 34,
+    "hash_edge_tests": 18,
+    "hash_edge2_tests": 30,
+    "hash_fluid_tests": 93,
+    "hash_gn_tests": 75,
+    "gate_selfcheck_tests": 18,
+    "couldnt_verify_tests": 7,
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 763
 
 
 def main():
@@ -5048,13 +5153,16 @@ def main():
         ("couldnt_verify_tests", couldnt_verify_tests),
     ]
     unit_results = []
+    group_counts = {}
     for gname, gfn in unit_groups:
+        before = len(unit_results)
         try:
             unit_results.extend(gfn())
         except Exception:
             unit_results.append(
                 ("GROUP CRASHED: %s" % gname, False,
                  traceback.format_exc(), "group runs to completion"))
+        group_counts[gname] = len(unit_results) - before
     for label, ok, got, expect in unit_results:
         if ok:
             passed += 1
@@ -5065,7 +5173,56 @@ def main():
             print(msg)
             fails.append(msg)
 
-    total = len(CASES) + len(CACHE_REGRESSION) + len(unit_results)
+    n_cases = len(CASES)
+    n_regr = len(CACHE_REGRESSION)
+    n_units = len(unit_results)
+    total = n_cases + n_regr + n_units
+
+    # ---- R18-1: independent expected-inventory check ----------------------
+    # Per-group counts are printed for every run (diagnostics + re-baselining)
+    # and checked against EXPECTED_GROUP_COUNTS / EXPECTED_CASES /
+    # EXPECTED_CACHE_REGRESSION, which are hand-declared literals NOT derived
+    # from this run. A group that silently shrinks or vanishes makes the live
+    # count disagree with the declaration and fails the suite closed — so the
+    # "N tests silently disappear but the run still passes the 700 floor"
+    # scenario is defeated on every version. Run with FAILSAFE_MEASURE=1 to
+    # print the numbers without enforcing (used to re-baseline after an
+    # intended test change).
+    for gname, _gfn in unit_groups:
+        print("GROUP_COUNT name=%s n=%d" % (gname, group_counts.get(gname, 0)))
+    print("INVENTORY cases=%d cache_regression=%d units=%d total=%d"
+          % (n_cases, n_regr, n_units, total))
+
+    enforce_inventory = (os.environ.get("FAILSAFE_MEASURE") != "1"
+                         and EXPECTED_GROUP_COUNTS is not None)
+    inventory_ok = True
+    expected_total = None
+    if enforce_inventory:
+        inv_problems = []
+        if n_cases != EXPECTED_CASES:
+            inv_problems.append("CASES=%d != declared %d" % (n_cases, EXPECTED_CASES))
+        if n_regr != EXPECTED_CACHE_REGRESSION:
+            inv_problems.append("CACHE_REGRESSION=%d != declared %d"
+                                % (n_regr, EXPECTED_CACHE_REGRESSION))
+        declared = set(EXPECTED_GROUP_COUNTS)
+        ran = set(group_counts)
+        for g in sorted(declared - ran):
+            inv_problems.append("required group missing from run: %s" % g)
+        for g in sorted(ran - declared):
+            inv_problems.append("undeclared group ran: %s" % g)
+        for g in sorted(declared & ran):
+            if group_counts[g] != EXPECTED_GROUP_COUNTS[g]:
+                inv_problems.append("group %s produced %d != declared %d"
+                                    % (g, group_counts[g], EXPECTED_GROUP_COUNTS[g]))
+        expected_total = (EXPECTED_CASES + EXPECTED_CACHE_REGRESSION
+                          + sum(EXPECTED_GROUP_COUNTS.values()))
+        if total != expected_total:
+            inv_problems.append("total=%d != declared expected=%d"
+                                % (total, expected_total))
+        if inv_problems:
+            inventory_ok = False
+            fails.append("  FAIL  inventory (R18-1): %s" % "; ".join(inv_problems))
+
     print("\n%s" % ("=" * 60))
     print("Blender %s  |  %d passed, %d failed, %d total"
           % (bpy.app.version_string, passed, failed, total))
@@ -5078,14 +5235,17 @@ def main():
     # (tests/run_all_versions.sh and .github/workflows/windows-cert.yml) treat its
     # ABSENCE as a hard failure, so a crashed suite can never be read as a pass
     # even when Blender exits 0. ``consistent`` cross-checks that every assembled
-    # test produced exactly one result (guards an incomplete/short count).
+    # test produced exactly one result (guards an incomplete/short count), and
+    # ``expected=`` lets the gate reject a complete-but-short inventory (R18-1)
+    # independently of this process's own self-report.
     consistent = (passed + failed == total) and total > 0
-    ok_overall = (failed == 0) and consistent
+    ok_overall = (failed == 0) and consistent and inventory_ok
     # Space-free version token so the gate's `version=\S+` field parses cleanly
     # (bpy.app.version_string is e.g. "4.2.9 LTS").
     ver_token = "%d.%d.%d" % tuple(bpy.app.version)
-    print("SUITE_DONE version=%s passed=%d failed=%d total=%d consistent=%s ok=%s"
-          % (ver_token, passed, failed, total,
+    exp_field = "" if expected_total is None else " expected=%d" % expected_total
+    print("SUITE_DONE version=%s passed=%d failed=%d total=%d%s consistent=%s ok=%s"
+          % (ver_token, passed, failed, total, exp_field,
              "yes" if consistent else "no", "yes" if ok_overall else "no"))
     # Exit code for CI (belt-and-braces; the gates also parse SUITE_DONE above).
     sys.exit(0 if ok_overall else 1)

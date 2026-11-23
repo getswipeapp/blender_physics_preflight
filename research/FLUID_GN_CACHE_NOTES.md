@@ -637,3 +637,66 @@ now reach their summary AND sentinel: 754 passed, 0 failed, 754 total
 codes. (754 = 745 after the R16-1 boundary tests + 9 gate_selfcheck assertions.)
 Prior rounds' "4.2.9 verified" claims are retroactively INVALID and must not be
 relied on; 4.2.9 fluid coverage is validated for the first time here.
+
+ROUND 18 — CERTIFICATION GATE INTEGRITY, PART 2 (independent review of 53c8b3d)
+==============================================================================
+The independent re-review of the R17 commit (53c8b3d) returned PARTIAL PASS: the
+historical crash-with-exit-0 loophole and the duplicate-execution bug were
+accepted as fixed, but three certification safeguards were still missing. All
+three are source-confirmed and are fixed here.
+
+R18-1 — Incomplete tests could still pass.
+  Before: the gate accepted any completed, internally consistent run whose total
+  was merely >= a 700 floor. If a group silently shrank or vanished (the review's
+  example: the nine gate_selfcheck assertions disappearing -> 745/745), the run
+  still passed, and all four versions sharing the same reduced count did not
+  reveal it.
+  Fix: run_tests.py now declares an INDEPENDENT inventory as fixed literals —
+  EXPECTED_CASES (82), EXPECTED_CACHE_REGRESSION (8), and a per-group
+  EXPECTED_GROUP_COUNTS manifest (25 groups) — never derived from the live run.
+  main() prints GROUP_COUNT per group and an INVENTORY line, and fails closed if
+  any group's count, the CASES/CACHE_REGRESSION lengths, or the grand total
+  disagree with the declaration. The declared total is emitted in the sentinel as
+  `expected=`, and gate_check.evaluate_log independently rejects total!=expected
+  and passed!=expected — so a complete-but-short run is caught both by the suite
+  and, defensively, by the gate reading the log. bpy.app.version gates no test
+  count, so every version must produce exactly these numbers; a version that
+  differs fails closed and names the offending group. Re-baseline after an
+  intended change with FAILSAFE_MEASURE=1 (prints the numbers without enforcing).
+
+R18-2 — Blender version identity was not enforced.
+  gate_check supported --version but neither gate passed it, so a matrix slot
+  could run the wrong Blender build and still pass.
+  Fix: tests/run_all_versions.sh carries the exact expected full version per slot
+  (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3) and passes --version; windows-cert.yml passes
+  --version "${{ matrix.version }}" on the headless step. The sentinel version
+  token must match or the slot fails.
+
+R18-3 — The Windows proof steps still trusted the process exit code.
+  The REAL multi-process batch proof (and the functional acceptance step) gated
+  only on Blender's exit code, which is 0 even after a Python crash — so a script
+  that crashed before printing its verdict could pass.
+  Fix: gate_check gained require_marker(text, marker, forbidden, exit_code): PASS
+  only if the exact success marker is present, no crash signature or forbidden
+  marker appears, and the exit code is 0. windows-cert.yml routes the real-batch
+  step through it (--marker "REAL BATCH PROOF: ALL CHECKS PASSED"
+  --forbid "REAL BATCH PROOF: FAILED") and the acceptance step through it
+  (--marker ", 0 failed," --forbid "FAIL -").
+
+Deliberate fail-closed regressions (owner directive, carried from R17): the
+in-suite gate_selfcheck_tests group grew from 9 to 18 assertions, adding live
+proofs that gate_check REJECTS a short inventory (745 vs declared 754/763-style),
+ACCEPTS/REJECTS on version match/mismatch, and — via require_marker — ACCEPTS a
+genuine proof marker while REJECTING a crash-before-marker (exit 0), a FAILED
+marker, a good marker with nonzero exit, and a missing marker. These 18 run on
+all four versions as part of the suite.
+
+RESULT: hardened suite + gates. Mac matrix: 4.2.9 / 4.5.9 / 5.0.1 / 5.2.3 each
+763 passed, 0 failed, total=763, expected=763, consistent=yes, ok=yes; versions
+enforced; counts equal; GATE PASS per version; release gate PASS. (763 = 754 +
+9 new gate_selfcheck assertions.) Clean per-version gate proofs on the real
+4.2.9 log: correct version -> GATE PASS; a fabricated short inventory
+(750 vs expected 763) -> GATE FAIL; version 9.9.9 -> GATE FAIL. Windows CI:
+pending re-run on this commit. Independent review of the corrected commit is
+still required before certification is claimed restored. No merge, publication,
+or spending.

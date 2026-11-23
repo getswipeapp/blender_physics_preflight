@@ -10,6 +10,12 @@ as a pass):
   * any recorded test FAILURE/ERROR          -> failed != 0
   * inconsistent or short test count         -> passed+failed != total, total==0,
                                                 or total below an expected floor
+  * test-inventory mismatch (R18-1)          -> total != the suite's independently
+                                                declared expected count, or passed
+                                                != expected (a group silently
+                                                shrinking/vanishing can no longer
+                                                ride under the floor)
+  * wrong Blender version for the slot (R18-2) -> sentinel version != --version
   * a Python traceback / ViewLayer SystemError anywhere in the log
   * missing 'N passed, M failed, T total' summary line
   * a nonzero process exit code (when provided)
@@ -19,15 +25,28 @@ alone. ``evaluate_log`` is importable (the in-suite ``gate_selfcheck_tests``
 regression calls it on crafted logs); run as a script it is the CLI the gates
 invoke.
 
+``require_marker`` (R18-3) is the sibling verdict for non-suite certification
+steps (e.g. the Windows REAL multi-process batch proof) that do not emit a
+SUITE_DONE sentinel but DO print an exact end-of-run success marker. It fails
+closed the same way: the required marker must be present, no crash signature or
+forbidden marker may appear, and the exit code (when given) must be 0 — so a
+script that crashes before printing its marker while Blender exits 0 is rejected
+instead of passing on the exit code.
+
 Usage:
     python gate_check.py <logfile> [--exit-code N] [--min-total N] [--version LBL]
+    python gate_check.py <logfile> --marker "EXACT SUCCESS MARKER" \
+        [--forbid "FORBIDDEN MARKER" ...] [--exit-code N]
 """
 import re
 import sys
 
+# ``expected=`` is optional so older logs (and crafted regression strings that
+# predate R18-1) still parse; when present it is enforced as an absolute count.
 SENTINEL_RE = re.compile(
     r"SUITE_DONE version=(?P<version>\S+) passed=(?P<passed>\d+) "
-    r"failed=(?P<failed>\d+) total=(?P<total>\d+) "
+    r"failed=(?P<failed>\d+) total=(?P<total>\d+)"
+    r"(?: expected=(?P<expected>\d+))? "
     r"consistent=(?P<consistent>\w+) ok=(?P<ok>\w+)")
 
 SUMMARY_RE = re.compile(r"\|\s+\d+ passed, \d+ failed, \d+ total")
@@ -71,11 +90,12 @@ def evaluate_log(text, exit_code=None, min_total=1, expected_version=None):
     passed = int(m.group("passed"))
     failed = int(m.group("failed"))
     total = int(m.group("total"))
+    expected = int(m.group("expected")) if m.group("expected") is not None else None
     consistent = m.group("consistent") == "yes"
     ok_flag = m.group("ok") == "yes"
     version = m.group("version")
     info.update(passed=passed, failed=failed, total=total, version=version,
-                consistent=consistent, ok=ok_flag)
+                expected=expected, consistent=consistent, ok=ok_flag)
 
     if failed != 0:
         reasons.append("%d test(s) failed" % failed)
@@ -89,6 +109,18 @@ def evaluate_log(text, exit_code=None, min_total=1, expected_version=None):
     if total < min_total:
         reasons.append("total=%d below expected minimum %d (incomplete suite)"
                        % (total, min_total))
+    # R18-1: the suite declares its expected inventory independently and emits it
+    # as expected=. A run that completes with fewer tests than declared (a group
+    # silently shrinking or vanishing) is rejected even though it is internally
+    # consistent and above the floor.
+    if expected is not None:
+        if total != expected:
+            reasons.append("test-inventory mismatch: total=%d != declared expected=%d"
+                           % (total, expected))
+        if passed != expected:
+            reasons.append("test-inventory mismatch: passed=%d != declared expected=%d"
+                           % (passed, expected))
+    # R18-2: the slot must have run the Blender version it claims to certify.
     if expected_version and version != expected_version:
         reasons.append("version mismatch: log=%s expected=%s"
                        % (version, expected_version))
@@ -100,6 +132,28 @@ def evaluate_log(text, exit_code=None, min_total=1, expected_version=None):
     return Verdict(len(reasons) == 0, reasons, info)
 
 
+def require_marker(text, marker, forbidden=(), exit_code=None):
+    """R18-3: fail-closed verdict for a certification step that prints an exact
+    end-of-run success marker instead of a SUITE_DONE sentinel (e.g. the Windows
+    REAL batch proof). ``ok`` is True only if the required marker is present AND
+    no crash signature or forbidden marker appears AND the exit code (if given)
+    is 0. A script that crashes before printing its marker while Blender exits 0
+    is therefore rejected, not passed on the exit code."""
+    reasons = []
+    info = {"marker": marker}
+    for sig in CRASH_SIGNATURES:
+        if sig in text:
+            reasons.append("crash signature present: %r" % sig)
+    for bad in forbidden:
+        if bad and bad in text:
+            reasons.append("forbidden marker present: %r" % bad)
+    if marker not in text:
+        reasons.append("required completion marker absent: %r" % marker)
+    if exit_code is not None and int(exit_code) != 0:
+        reasons.append("process exit code %s != 0" % exit_code)
+    return Verdict(len(reasons) == 0, reasons, info)
+
+
 def _main(argv):
     import argparse
     ap = argparse.ArgumentParser(description="Certification gate verdict.")
@@ -107,15 +161,32 @@ def _main(argv):
     ap.add_argument("--exit-code", type=int, default=None)
     ap.add_argument("--min-total", type=int, default=1)
     ap.add_argument("--version", default=None)
+    ap.add_argument("--marker", default=None,
+                    help="exact success marker for a non-suite proof step "
+                         "(switches to require_marker mode)")
+    ap.add_argument("--forbid", action="append", default=[],
+                    help="a marker whose presence is a failure (repeatable); "
+                         "marker mode only")
     a = ap.parse_args(argv)
     with open(a.logfile, "r", errors="replace") as fh:
         text = fh.read()
+
+    if a.marker is not None:
+        v = require_marker(text, a.marker, forbidden=a.forbid,
+                           exit_code=a.exit_code)
+        if v.ok:
+            print("GATE PASS (marker): %r present, no crash/forbidden markers"
+                  % a.marker)
+            return 0
+        print("GATE FAIL (marker): " + "; ".join(v.reasons))
+        return 1
+
     v = evaluate_log(text, exit_code=a.exit_code, min_total=a.min_total,
                      expected_version=a.version)
     if v.ok:
-        print("GATE PASS: version=%s passed=%s total=%s"
+        print("GATE PASS: version=%s passed=%s total=%s expected=%s"
               % (v.info.get("version"), v.info.get("passed"),
-                 v.info.get("total")))
+                 v.info.get("total"), v.info.get("expected")))
         return 0
     print("GATE FAIL: " + "; ".join(v.reasons))
     return 1

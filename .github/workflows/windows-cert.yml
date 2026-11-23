@@ -61,7 +61,10 @@ jobs:
           # previously let a crashed, half-run suite pass CI. The verdict comes
           # from gate_check.py: it requires the SUITE_DONE completion sentinel,
           # zero failures, a consistent/above-floor count, and no crash signature.
-          python tests/gate_check.py "run_win_${{ matrix.version }}.log" --exit-code $code --min-total 700
+          # --version enforces that THIS matrix slot actually ran the Blender
+          # build it claims to certify (R18-2); the suite's expected= field
+          # (R18-1) enforces the full test inventory inside the same verdict.
+          python tests/gate_check.py "run_win_${{ matrix.version }}.log" --exit-code $code --min-total 700 --version "${{ matrix.version }}"
           if ($LASTEXITCODE -ne 0) {
             Write-Host "Certification gate REJECTED Blender ${{ matrix.version }} headless suite"
             exit 1
@@ -83,15 +86,14 @@ jobs:
           & "$env:BLENDER" -b -P certification/ci/win_acceptance.py 2>&1 | Tee-Object -FilePath "win_acceptance_5.2.3.log"
           $code = $LASTEXITCODE
           Write-Host "Acceptance exit code: $code"
-          # Blender may exit 0 even if the Python script raised or logged failures,
-          # so gate on the log contents too (belt + braces).
-          if (Select-String -Path "win_acceptance_5.2.3.log" -Pattern "FAIL -" -Quiet) {
-            Write-Host "Acceptance reported FAIL lines"; exit 1
+          # Blender exits 0 even after a Python crash, so do NOT trust the exit
+          # code alone (R18-3). The marker gate requires the acceptance summary
+          # line, forbids any "FAIL -" line, rejects crash signatures, and
+          # requires a zero exit — all in one fail-closed verdict.
+          python tests/gate_check.py "win_acceptance_5.2.3.log" --exit-code $code --marker ", 0 failed," --forbid "FAIL -"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Acceptance gate REJECTED Windows functional acceptance"; exit 1
           }
-          if (-not (Select-String -Path "win_acceptance_5.2.3.log" -Pattern ", 0 failed," -Quiet)) {
-            Write-Host "Acceptance did not reach its summary (0 failed) line"; exit 1
-          }
-          if ($code -ne 0) { exit $code }
 
       - name: REAL multi-process batch proof (Windows, 5.2.3)
         if: matrix.version == '5.2.3'
@@ -100,7 +102,14 @@ jobs:
           & "$env:BLENDER" -b --factory-startup -P certification/render_proof/real_batch_proof.py 2>&1 | Tee-Object -FilePath "real_batch_win_5.2.3.log"
           $code = $LASTEXITCODE
           Write-Host "Real batch exit code: $code"
-          if ($code -ne 0) { exit $code }
+          # R18-3: the real-batch proof can crash (SystemError) before printing
+          # its verdict while Blender still exits 0, so the exit code alone is not
+          # trustworthy. Require the exact end-of-run success marker, forbid the
+          # FAILED marker, reject crash signatures, and require a zero exit.
+          python tests/gate_check.py "real_batch_win_5.2.3.log" --exit-code $code --marker "REAL BATCH PROOF: ALL CHECKS PASSED" --forbid "REAL BATCH PROOF: FAILED"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Real-batch gate REJECTED the Windows multi-process proof"; exit 1
+          }
 
       - name: Upload logs (Blender ${{ matrix.version }})
         if: always()

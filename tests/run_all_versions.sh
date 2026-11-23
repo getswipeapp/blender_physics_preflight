@@ -21,13 +21,17 @@ LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/failsafe_cert_logs.XXXXXX")"
 # FAILSAFE_BLENDER_<ver> environment variable (e.g. FAILSAFE_BLENDER_4_2=/path/Blender).
 #
 # NOTE: indexed array + indirect expansion only — no `declare -A`, so this runs
-# on macOS's default Bash 3.2. Each entry is "version|override-var|default-path".
+# on macOS's default Bash 3.2. Each entry is
+# "version|override-var|default-path|expected-full-version". The last field is
+# the EXACT SUITE_DONE version token the slot must report (R18-2): a slot that
+# launches the wrong Blender build is a gate FAILURE, not a silent pass, even if
+# that build runs the suite cleanly.
 CERT="/Users/ralph/Downloads/blender_runtime_certification/apps"
 ENTRIES=(
-  "4.2|FAILSAFE_BLENDER_4_2|$CERT/4.2/Blender.app/Contents/MacOS/Blender"
-  "4.5|FAILSAFE_BLENDER_4_5|$CERT/4.5/Blender.app/Contents/MacOS/Blender"
-  "5.0|FAILSAFE_BLENDER_5_0|$CERT/5.0/Blender.app/Contents/MacOS/Blender"
-  "5.2|FAILSAFE_BLENDER_5_2|/Applications/Blender.app/Contents/MacOS/Blender"
+  "4.2|FAILSAFE_BLENDER_4_2|$CERT/4.2/Blender.app/Contents/MacOS/Blender|4.2.9"
+  "4.5|FAILSAFE_BLENDER_4_5|$CERT/4.5/Blender.app/Contents/MacOS/Blender|4.5.9"
+  "5.0|FAILSAFE_BLENDER_5_0|$CERT/5.0/Blender.app/Contents/MacOS/Blender|5.0.1"
+  "5.2|FAILSAFE_BLENDER_5_2|/Applications/Blender.app/Contents/MacOS/Blender|5.2.3"
 )
 
 overall=0
@@ -35,7 +39,7 @@ missing=0
 REQUIRED=()
 TOTALS=()        # collected per-version SUITE_DONE total, for cross-version equality
 for entry in "${ENTRIES[@]}"; do
-  IFS='|' read -r ver envvar default <<<"$entry"
+  IFS='|' read -r ver envvar default expected_full <<<"$entry"
   REQUIRED+=("$ver")
   b="${!envvar:-$default}"
   echo "======================================================================"
@@ -50,7 +54,9 @@ for entry in "${ENTRIES[@]}"; do
   # Tee so the output is still visible live AND captured for the gate verdict.
   "$b" -b --factory-startup -P "$HERE/run_tests.py" 2>&1 | tee "$log"
   rc=${PIPESTATUS[0]}
-  if "$PYTHON" "$HERE/gate_check.py" "$log" --exit-code "$rc" --min-total "$MIN_TOTAL"; then
+  # --version enforces that the slot ran the exact Blender build it certifies
+  # (R18-2); the suite's own expected= field (R18-1) enforces the full inventory.
+  if "$PYTHON" "$HERE/gate_check.py" "$log" --exit-code "$rc" --min-total "$MIN_TOTAL" --version "$expected_full"; then
     echo ">> OK on Blender $ver (gate verified completion + all-pass)"
     t=$(sed -n 's/.*SUITE_DONE .*total=\([0-9][0-9]*\).*/\1/p' "$log" | tail -1)
     TOTALS+=("$t")
