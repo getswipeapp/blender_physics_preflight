@@ -903,7 +903,7 @@ def build_fluid_uni_gas_color_resumable(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
-def _make_gas_uni_flame_blend(outdir, frame_end=4):
+def _make_gas_uni_flame_blend(outdir, frame_end=4, flame_color=(0.1, 0.9, 0.2)):
     """A real GAS bake whose colour grids are triggered by FIRE + a non-default domain
     ``flame_smoke_color`` (NOT by a coloured flow): a single BOTH flow with the DEFAULT
     smoke colour, and the domain's flame_smoke_color set non-default. Mantaflow then writes
@@ -933,7 +933,7 @@ def _make_gas_uni_flame_blend(outdir, frame_end=4):
     # The colour trigger here is the flame colour, not a flow colour: leave the flow at the
     # default grey and set the domain flame_smoke_color non-default.
     if hasattr(ds, "flame_smoke_color"):
-        ds.flame_smoke_color = (0.1, 0.9, 0.2)
+        ds.flame_smoke_color = flame_color
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, location=(0, 0, -1.2))
     fl = bpy.context.active_object
     fl.name = "Inflow"
@@ -955,6 +955,16 @@ def build_fluid_uni_gas_fire_flame(outdir):
     flame_smoke_color (NOT a coloured flow): data/ holds the five core gas grids AND
     color_r/g/b (review R14-1)."""
     blend = _make_gas_uni_flame_blend(outdir)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def build_fluid_uni_gas_fire_flame_tiny(outdir):
+    """Like build_fluid_uni_gas_fire_flame but the domain flame_smoke_color deviates from
+    the default grey by a SINGLE float32 step, (0.70001, 0.7, 0.7). Blender's exact
+    comparison still writes color_r/g/b (verified all four versions); the deviation is far
+    below any decimal rounding, so this is the discriminating fixture for the float32 colour
+    comparison (review R16-1)."""
+    blend = _make_gas_uni_flame_blend(outdir, flame_color=(0.70001, 0.7, 0.7))
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 

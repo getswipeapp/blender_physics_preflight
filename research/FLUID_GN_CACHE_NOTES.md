@@ -528,3 +528,37 @@ untouched control PASS; coloured+resumable bake -> wipe ALL color_*_in -> #27 UN
 2, untouched control PASS; matcher-unit colour-restart and flame-path assertions.
 
 All four versions after the fix: 728 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
+## Round 16 — float32 colour comparison (R16-1)
+
+Re-review of e0404df accepted R14-1 and R15-1 and raised a precision gap.
+
+### R16-1 — small colour changes evaded detection — CONFIRMED, FIXED
+`_color_is_noncat` rounded each RGB component to 4 decimals before comparing to the default
+grey, but Blender compares colours in float32 exactly. Verified on REAL bakes, all four
+versions (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3):
+
+| colour source                                   | writes colour? | old detector |
+| ----------------------------------------------- | -------------- | ------------ |
+| flame_smoke_color = (0.70001, 0.7, 0.7) + fire  | **yes**        | saw default (false PASS) |
+| smoke_color       = (0.70001, 0.7, 0.7)         | **yes**        | saw default (false PASS) |
+| flame/smoke = exact default (0.7, 0.7, 0.7)     | no             | default      |
+
+Precision facts (identical on all four versions): the stored default reads back as
+float32(0.7) = 0.699999988079071 (NOT Python's 0.7); 0.70001 stores as 0.7000100016593933,
+a distinct float32. A float64 `!= 0.7` comparison would therefore flag EVERY genuine default
+bake as colour -> false UNKNOWN (the trap the reviewer flagged).
+
+Fix: `_f32(x)` rounds to the 32-bit representation (via struct pack/unpack), and
+`_color_is_noncat` returns True iff any component's float32 differs from
+`_FLUID_SMOKE_COLOR_DEFAULT_F32 = float32(0.7)`. Because RNA already returns the stored
+float32 (promoted to float64), `_f32` round-trips it idempotently, so the detector now makes
+EXACTLY the comparison Blender makes: 0.70001 -> colour required; the genuine default ->
+not. No rounding, no false UNKNOWN.
+
+Tests added (real bakes): a flame bake one float32 step off default (0.70001) -> colour
+written, wipe colour -> #27 UNKNOWN, floor 2, untouched control PASS; a genuine default bake
+-> #27 PASS (float32 default not flagged). Matcher-unit: 0.70001 non-default; exact default
+and stored-float32(0.7) NOT flagged; 0.5 non-default; tiny-deviation scene detector cases.
+
+All four versions after the fix: 741 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).

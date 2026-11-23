@@ -884,12 +884,20 @@ _FLUID_UNI_COLOR_GRIDS = ("color_r", "color_g", "color_b")
 # SET whenever a gas domain is resumable and colour is expected — otherwise deleting the
 # whole _in family before baseline would leave no on-disk evidence and read PASS (R15-1).
 _FLUID_UNI_COLOR_RESTART_GRIDS = ("color_r_in", "color_g_in", "color_b_in")
-# Blender's colour trigger: a SMOKE/BOTH flow writes colour grids IFF its smoke_color
-# differs from this default grey (verified on real bakes of all four versions — ANY
-# deviation, including another grey, turns colour on; exactly the default does not). This
-# is the CONFIG signal that colour data must exist, used to catch an entire colour family
-# deleted before baseline (review R13-1); there is NO domain-level colour flag.
+# Blender's colour trigger: a colour source (a SMOKE/BOTH flow's smoke_color, or a gas
+# domain's flame_smoke_color when fire is active) writes colour grids IFF it differs from
+# this default grey (verified on real bakes of all four versions — ANY deviation, including
+# another grey, turns colour on; exactly the default does not). This is the CONFIG signal
+# that colour data must exist, used to catch an entire colour family deleted before baseline
+# (review R13-1 / R14-1). Blender stores these as 32-bit floats and compares them EXACTLY:
+# the default grey reads back as float32(0.7) = 0.699999988079071, and a value as close as
+# (0.70001, 0.7, 0.7) is a distinct float32 that turns colour on. So the comparison must be
+# done in float32 (review R16-1): rounding to a few decimals missed a tiny real deviation
+# (false PASS), while a float64 `!= 0.7` would flag EVERY genuine default bake (false
+# UNKNOWN), because the stored default is float32(0.7), not Python's 0.7.
 _FLUID_SMOKE_COLOR_DEFAULT = (0.7, 0.7, 0.7)
+_FLUID_SMOKE_COLOR_DEFAULT_F32 = struct.unpack(
+    "<f", struct.pack("<f", 0.7))[0]  # == 0.699999988079071, what Blender stores
 # The restart-state grids a RESUMABLE cache (``cache_resumable``) writes EVERY frame, by
 # domain type. Verified IDENTICAL on real resumable bakes of all four versions
 # (4.2.9/4.5.9/5.0.1/5.2.3), so requiring the WHOLE set when resumable is on never forces
@@ -953,13 +961,21 @@ def _fluid_data_is_resumable(ds):
     return bool(getattr(ds, "cache_resumable", False))
 
 
+def _f32(x):
+    """Round a Python float to its 32-bit representation — what Blender actually stores and
+    compares. Idempotent on a value already read from a float RNA property."""
+    return struct.unpack("<f", struct.pack("<f", float(x)))[0]
+
+
 def _color_is_noncat(col):
     """True if a colour triple is anything other than the default grey (or unreadable —
-    treated as colour-possible, conservative)."""
+    treated as colour-possible, conservative). Compared in float32 to match Blender's exact
+    comparison: a deviation as small as 0.70001 is a distinct float32 that turns colour on,
+    and the genuine default (stored as float32(0.7)) is NOT flagged (review R16-1)."""
     if col is None:
         return False
     try:
-        return tuple(round(float(c), 4) for c in col) != _FLUID_SMOKE_COLOR_DEFAULT
+        return any(_f32(c) != _FLUID_SMOKE_COLOR_DEFAULT_F32 for c in col)
     except Exception:
         return True  # unreadable -> assume colour is possible (safe)
 

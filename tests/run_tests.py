@@ -7,6 +7,7 @@ specific check report a known status, then asserts it.
 """
 import os
 import re
+import struct
 import sys
 import tempfile
 import traceback
@@ -838,10 +839,34 @@ def fluid_matcher_unit_tests():
         ("non-default flame + smoke flow but NO fire is NOT colour",
          _Scene(_Obj(_FlowMod(_FS("SMOKE", GREY))),
                 _Obj(_DomMod(_DS("GAS", FLAME)))), False),
+        # R16-1: a flame deviating by a SINGLE float32 step (0.70001) still activates colour.
+        ("BOTH flow + flame off default by one float32 step IS colour (R16-1)",
+         _Scene(_Obj(_FlowMod(_FS("BOTH", GREY))),
+                _Obj(_DomMod(_DS("GAS", (0.70001, 0.7, 0.7))))), True),
+        # A tiny smoke_color deviation likewise activates colour.
+        ("SMOKE flow off default by one float32 step IS colour (R16-1)",
+         _Scene(_Obj(_FlowMod(_FS("SMOKE", (0.70001, 0.7, 0.7))))), True),
     ]
     for label, scene, expect in cases:
         res.append(("fluid matcher: %s" % label, det(scene) is expect,
                     det(scene), expect))
+
+    # R16-1: _color_is_noncat compares in float32 (Blender's own precision), so a 0.70001
+    # deviation is seen as colour while the genuine default — stored as float32(0.7), which
+    # reads back as 0.699999988079071, NOT Python's 0.7 — is NOT flagged (no false UNKNOWN).
+    f32_default = struct.unpack("<f", struct.pack("<f", 0.7))[0]
+    res.append(("fluid matcher: 0.70001 colour deviation is non-default (R16-1)",
+                ci._color_is_noncat((0.70001, 0.7, 0.7)) is True,
+                "non-default", "non-default"))
+    res.append(("fluid matcher: exact default grey is NOT non-default (R16-1)",
+                ci._color_is_noncat((0.7, 0.7, 0.7)) is False,
+                "default", "default"))
+    res.append(("fluid matcher: stored float32(0.7) default is NOT non-default (R16-1)",
+                ci._color_is_noncat((f32_default, f32_default, f32_default)) is False,
+                "float32 default not flagged", "not flagged"))
+    res.append(("fluid matcher: a clearly different grey (0.5) is non-default (R16-1)",
+                ci._color_is_noncat((0.5, 0.5, 0.5)) is True,
+                "non-default", "non-default"))
     return res
 
 
@@ -3910,6 +3935,68 @@ def hash_fluid_tests():
     out.append(("fluid R15-1: color_*_in family wiped -> requested verify nonzero",
                 cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
                 cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (R16-1, round 16) Blender compares colours in float32 exactly: a flame_smoke_color of
+    # (0.70001, 0.7, 0.7) -- one float32 step off the default grey -- still writes colour
+    # grids on all four versions, far below any decimal rounding. The detector must expect
+    # colour here (float32 comparison), so a wiped colour family reads UNKNOWN; a genuine
+    # default bake must still PASS (no false UNKNOWN from float32(0.7) != Python 0.7).
+    g16 = os.path.join(tmp, "r16tiny")
+    os.makedirs(g16, exist_ok=True)
+    fixtures.build_fluid_uni_gas_fire_flame_tiny(g16)
+    g16data = os.path.join(g16, "fluidcache", "data")
+    out.append(("fluid R16-1: flame off default by one float32 step wrote colour (precondition)",
+                any(f.startswith("color_") for f in os.listdir(g16data)),
+                sorted(f for f in os.listdir(g16data) if f.startswith("color_"))[:3],
+                "colour grids present"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R16-1 control: untouched tiny-deviation bake -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+    tcr = 0
+    for f in sorted(os.listdir(g16data)):
+        if f.startswith("color_"):
+            os.remove(os.path.join(g16data, f))
+            tcr += 1
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d16 = _stage(rep, "data")
+    out.append(("fluid R16-1: tiny-deviation colour wiped -> colour tokens uncovered (float32)",
+                bool(d16) and d16[0].state != ch.S_UNCHANGED
+                and any(t.split("/")[-1] in ("color_r", "color_g", "color_b")
+                        for t in (d16[0].uncovered or [])),
+                [(s.state, (s.uncovered or [])[:3]) for s in d16], "colour tokens uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R16-1: tiny-deviation colour wiped -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R16-1: tiny-deviation colour wiped -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # A GENUINE default bake (no colour) must still PASS -- the float32 comparison must not
+    # flag the stored default grey as colour (the false-UNKNOWN guard for R16-1).
+    g16d = os.path.join(tmp, "r16default")
+    os.makedirs(g16d, exist_ok=True)
+    fixtures.build_fluid_uni_gas_plain(g16d)
+    g16ddata = os.path.join(g16d, "fluidcache", "data")
+    out.append(("fluid R16-1 control: genuine default bake wrote NO colour (precondition)",
+                not any(f.startswith("color_") for f in os.listdir(g16ddata)),
+                sorted(os.listdir(g16ddata))[:3], "no colour grids"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R16-1: genuine default bake -> #27 PASS (no false UNKNOWN)",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
 
     return out
 
