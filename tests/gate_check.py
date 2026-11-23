@@ -6,50 +6,55 @@ FAILURE, even when Blender exits with code 0 (it does exactly that on a Python
 ``SystemError``, which is how a crashed Blender 4.2.9 fluid run used to be read
 as a pass):
 
-  * no SUITE_DONE completion sentinel        -> the suite aborted/crashed
+  * no completion sentinel                   -> the suite aborted/crashed
+  * measurement-mode output (R19-1)          -> a non-certifiable run; rejected
+  * no expected= inventory declaration (R19-1) -> a run that did not commit to a
+                                                fixed test count cannot certify
+                                                (this is how measurement mode and
+                                                any pre-R19 output are refused)
   * any recorded test FAILURE/ERROR          -> failed != 0
-  * inconsistent or short test count         -> passed+failed != total, total==0,
-                                                or total below an expected floor
-  * test-inventory mismatch (R18-1)          -> total != the suite's independently
-                                                declared expected count, or passed
-                                                != expected (a group silently
-                                                shrinking/vanishing can no longer
-                                                ride under the floor)
+  * inconsistent / short / wrong-count run   -> passed+failed != total, total==0,
+                                                total below the floor, or
+                                                total/passed != declared expected
   * wrong Blender version for the slot (R18-2) -> sentinel version != --version
   * a Python traceback / ViewLayer SystemError anywhere in the log
   * missing 'N passed, M failed, T total' summary line
   * a nonzero process exit code (when provided)
 
 The whole point is that a green verdict can never rest on the process exit code
-alone. ``evaluate_log`` is importable (the in-suite ``gate_selfcheck_tests``
-regression calls it on crafted logs); run as a script it is the CLI the gates
-invoke.
+alone, and can never rest on a run that declined to declare how many tests it
+should contain. ``evaluate_log`` is importable (the in-suite
+``gate_selfcheck_tests`` regression calls it on crafted logs); run as a script it
+is the CLI the gates invoke. The same function gates the main suite
+(SUITE_DONE) and the Windows functional-acceptance run (ACCEPT_DONE) via
+``sentinel_keyword`` — so acceptance gets the identical fixed-inventory
+protection (R19-2), defeating a 0-passed/0-failed/0-total short run.
 
 ``require_marker`` (R18-3) is the sibling verdict for non-suite certification
 steps (e.g. the Windows REAL multi-process batch proof) that do not emit a
-SUITE_DONE sentinel but DO print an exact end-of-run success marker. It fails
-closed the same way: the required marker must be present, no crash signature or
-forbidden marker may appear, and the exit code (when given) must be 0 — so a
-script that crashes before printing its marker while Blender exits 0 is rejected
-instead of passing on the exit code.
+sentinel but DO print an exact end-of-run success marker. It fails closed the
+same way: the required marker must be present, no crash signature or forbidden
+marker may appear, and the exit code (when given) must be 0.
 
 Usage:
     python gate_check.py <logfile> [--exit-code N] [--min-total N] [--version LBL]
+                         [--sentinel SUITE_DONE|ACCEPT_DONE]
     python gate_check.py <logfile> --marker "EXACT SUCCESS MARKER" \
         [--forbid "FORBIDDEN MARKER" ...] [--exit-code N]
 """
 import re
 import sys
 
-# ``expected=`` is optional so older logs (and crafted regression strings that
-# predate R18-1) still parse; when present it is enforced as an absolute count.
-SENTINEL_RE = re.compile(
-    r"SUITE_DONE version=(?P<version>\S+) passed=(?P<passed>\d+) "
+# Field layout shared by every certification sentinel. ``expected=`` is captured
+# optionally so a MISSING declaration can be detected and rejected (R19-1) rather
+# than silently tolerated; it is NOT optional for certification.
+_SENTINEL_TMPL = (
+    r"%s version=(?P<version>\S+) passed=(?P<passed>\d+) "
     r"failed=(?P<failed>\d+) total=(?P<total>\d+)"
     r"(?: expected=(?P<expected>\d+))? "
     r"consistent=(?P<consistent>\w+) ok=(?P<ok>\w+)")
 
-SUMMARY_RE = re.compile(r"\|\s+\d+ passed, \d+ failed, \d+ total")
+SUMMARY_RE = re.compile(r"\b\d+ passed, \d+ failed, \d+ total\b")
 
 # Fatal crash signatures. Verified absent from clean passing runs on
 # 4.5.9 / 5.0.1 / 5.2.3, so their presence always means a real crash.
@@ -59,6 +64,17 @@ CRASH_SIGNATURES = (
     "ViewLayer.update()> returned a result with an exception",
 )
 
+# A run emitted in measurement mode (inventory NOT enforced). Its presence is a
+# hard rejection: measurement must stay possible WITHOUT earning certification.
+MEASURE_MARKERS = (
+    "SUITE_MEASURE_ONLY",
+    "ACCEPT_MEASURE_ONLY",
+)
+
+
+def _sentinel_re(keyword):
+    return re.compile(_SENTINEL_TMPL % re.escape(keyword))
+
 
 class Verdict:
     def __init__(self, ok, reasons, info):
@@ -67,24 +83,33 @@ class Verdict:
         self.info = info
 
 
-def evaluate_log(text, exit_code=None, min_total=1, expected_version=None):
-    """Return a Verdict for one version's suite log. ``ok`` is True only if the
-    run is a genuine, complete, all-passing suite."""
+def evaluate_log(text, exit_code=None, min_total=1, expected_version=None,
+                 sentinel_keyword="SUITE_DONE", require_expected=True):
+    """Return a Verdict for one completion log. ``ok`` is True only if the run is
+    a genuine, complete, all-passing run that declared and met a fixed test
+    inventory."""
     reasons = []
     info = {}
 
     for sig in CRASH_SIGNATURES:
         if sig in text:
             reasons.append("crash signature present: %r" % sig)
+    # R19-1: measurement-mode output can never certify, whatever else it says.
+    for mk in MEASURE_MARKERS:
+        if mk in text:
+            reasons.append("measurement-mode marker present (%s): not a "
+                           "certifiable run" % mk)
 
-    matches = list(SENTINEL_RE.finditer(text))
+    matches = list(_sentinel_re(sentinel_keyword).finditer(text))
     if not matches:
-        reasons.append("no SUITE_DONE completion sentinel (suite did not finish)")
+        reasons.append("no %s completion sentinel (suite did not finish or ran "
+                       "in a non-certifiable mode)" % sentinel_keyword)
         if exit_code is not None and int(exit_code) != 0:
             reasons.append("process exit code %s != 0" % exit_code)
         return Verdict(False, reasons, info)
     if len(matches) > 1:
-        reasons.append("multiple SUITE_DONE sentinels (%d)" % len(matches))
+        reasons.append("multiple %s sentinels (%d)"
+                       % (sentinel_keyword, len(matches)))
 
     m = matches[-1]
     passed = int(m.group("passed"))
@@ -109,11 +134,15 @@ def evaluate_log(text, exit_code=None, min_total=1, expected_version=None):
     if total < min_total:
         reasons.append("total=%d below expected minimum %d (incomplete suite)"
                        % (total, min_total))
-    # R18-1: the suite declares its expected inventory independently and emits it
-    # as expected=. A run that completes with fewer tests than declared (a group
-    # silently shrinking or vanishing) is rejected even though it is internally
-    # consistent and above the floor.
-    if expected is not None:
+    # R18-1 / R19-1: the run must declare its expected inventory as expected=,
+    # and the live count must match it exactly. A missing expected= (measurement
+    # mode, or any run that declined to commit to a count) is itself fatal, so a
+    # shortened run can no longer ride under the floor by omitting the field.
+    if expected is None:
+        if require_expected:
+            reasons.append("no expected= inventory declaration "
+                           "(measurement-mode or pre-R19 output cannot certify)")
+    else:
         if total != expected:
             reasons.append("test-inventory mismatch: total=%d != declared expected=%d"
                            % (total, expected))
@@ -134,11 +163,11 @@ def evaluate_log(text, exit_code=None, min_total=1, expected_version=None):
 
 def require_marker(text, marker, forbidden=(), exit_code=None):
     """R18-3: fail-closed verdict for a certification step that prints an exact
-    end-of-run success marker instead of a SUITE_DONE sentinel (e.g. the Windows
-    REAL batch proof). ``ok`` is True only if the required marker is present AND
-    no crash signature or forbidden marker appears AND the exit code (if given)
-    is 0. A script that crashes before printing its marker while Blender exits 0
-    is therefore rejected, not passed on the exit code."""
+    end-of-run success marker instead of a sentinel (e.g. the Windows REAL batch
+    proof). ``ok`` is True only if the required marker is present AND no crash
+    signature or forbidden marker appears AND the exit code (if given) is 0. A
+    script that crashes before printing its marker while Blender exits 0 is
+    therefore rejected, not passed on the exit code."""
     reasons = []
     info = {"marker": marker}
     for sig in CRASH_SIGNATURES:
@@ -161,6 +190,9 @@ def _main(argv):
     ap.add_argument("--exit-code", type=int, default=None)
     ap.add_argument("--min-total", type=int, default=1)
     ap.add_argument("--version", default=None)
+    ap.add_argument("--sentinel", default="SUITE_DONE",
+                    help="completion-sentinel keyword (SUITE_DONE for the suite, "
+                         "ACCEPT_DONE for Windows functional acceptance)")
     ap.add_argument("--marker", default=None,
                     help="exact success marker for a non-suite proof step "
                          "(switches to require_marker mode)")
@@ -182,10 +214,10 @@ def _main(argv):
         return 1
 
     v = evaluate_log(text, exit_code=a.exit_code, min_total=a.min_total,
-                     expected_version=a.version)
+                     expected_version=a.version, sentinel_keyword=a.sentinel)
     if v.ok:
-        print("GATE PASS: version=%s passed=%s total=%s expected=%s"
-              % (v.info.get("version"), v.info.get("passed"),
+        print("GATE PASS: %s version=%s passed=%s total=%s expected=%s"
+              % (a.sentinel, v.info.get("version"), v.info.get("passed"),
                  v.info.get("total"), v.info.get("expected")))
         return 0
     print("GATE FAIL: " + "; ".join(v.reasons))

@@ -700,3 +700,51 @@ enforced; counts equal; GATE PASS per version; release gate PASS. (763 = 754 +
 pending re-run on this commit. Independent review of the corrected commit is
 still required before certification is claimed restored. No merge, publication,
 or spending.
+
+ROUND 19 — CERTIFICATION GATE INTEGRITY, PART 3 (independent review of d5bec36)
+==============================================================================
+The independent re-review of d5bec36 returned PARTIAL PASS: R18-1/2/3 accepted in
+normal mode, but two residual ways to certify a shortened run were found. Both
+are source-confirmed and fixed here.
+
+R19-1 — Measurement mode could disable certification.
+  Before: FAILSAFE_MEASURE=1 printed a SUITE_DONE WITHOUT expected=, and
+  gate_check accepted a sentinel with no expected= (backward-compat). So a short
+  measurement run above the 700 floor could be read as a pass.
+  Fix: (a) measurement mode no longer emits SUITE_DONE at all — it prints
+  SUITE_MEASURE_ONLY with an explicit "NOT certifiable" note; (b) gate_check now
+  REQUIRES expected= on any certifiable sentinel (a missing declaration is fatal)
+  AND rejects outright on any MEASURE_MARKERS ("SUITE_MEASURE_ONLY"/
+  "ACCEPT_MEASURE_ONLY"). Measurement stays possible for re-baselining; it simply
+  cannot certify. Proven on a REAL 5.2.3 measurement run: emits
+  SUITE_MEASURE_ONLY -> GATE FAIL; and on a real 4.2.9 log with expected= stripped
+  -> GATE FAIL ("no expected= inventory declaration").
+
+R19-2 — Windows acceptance could pass with missing tests.
+  Before: the acceptance step gated only on the ", 0 failed," marker, so a
+  "0 passed, 0 failed, 0 total" run (e.g. an early-return) with exit 0 satisfied
+  it. Acceptance had no independent expected count.
+  Fix: certification/ci/win_acceptance.py declares EXPECTED_ACCEPT_CHECKS=25 (its
+  success-path check count) and emits an ACCEPT_DONE sentinel with expected=;
+  _finish() sets ok=no unless failed==0, the count is consistent, and
+  total==25. windows-cert.yml gates the acceptance step with
+  gate_check.py --sentinel ACCEPT_DONE --min-total 25 --version 5.2.3 (same
+  fixed-inventory verdict as the main suite). A 0/0/0 or short acceptance run is
+  rejected.
+
+Regressions: gate_selfcheck_tests grew 18 -> 24, adding live proofs that
+gate_check REJECTS a missing expected=, REJECTS measurement-mode output, lets a
+measurement marker void an otherwise-good sentinel, ACCEPTS a genuine 25/25
+acceptance run (ACCEPT_DONE), and REJECTS a 0/0/0 and a 1-of-25 acceptance run.
+These 24 run on all four versions. Also updated the crafted REJECT strings to
+carry expected= so each is rejected for its specific defect, not merely for the
+new missing-expected rule.
+
+RESULT: Mac matrix 4.2.9/4.5.9/5.0.1/5.2.3 each 769 passed, 0 failed, total=769,
+expected=769, consistent=yes, ok=yes; versions enforced; counts equal; GATE PASS
+per version; release gate PASS. (769 = 763 + 6 new gate_selfcheck assertions.)
+Real-log proofs: control 4.2.9 -> GATE PASS; measurement-mode 5.2.3 ->
+GATE FAIL; expected= stripped -> GATE FAIL; acceptance 0/0/0 -> GATE FAIL.
+Windows CI: pending re-run on this commit (also exercises the live ACCEPT_DONE
+count on Windows). Independent review of the corrected commit still required
+before certification is claimed restored. No merge, publication, or spending.

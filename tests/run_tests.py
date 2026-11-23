@@ -4881,7 +4881,7 @@ def gate_selfcheck_tests():
         "============================================================\n"
         "Blender 4.2.9 LTS  |  745 passed, 0 failed, 745 total\n"
         "SUITE_DONE version=4.2.9 passed=745 failed=0 total=745 "
-        "consistent=yes ok=yes\n"
+        "expected=745 consistent=yes ok=yes\n"
     )
     res.append(("gate_check: a genuine complete all-pass run is ACCEPTED (R17)",
                 gc.evaluate_log(good, exit_code=0, min_total=700).ok is True,
@@ -4913,7 +4913,7 @@ def gate_selfcheck_tests():
     failing = (
         "Blender 5.2.3 LTS  |  740 passed, 5 failed, 745 total\n"
         "SUITE_DONE version=5.2.3 passed=740 failed=5 total=745 "
-        "consistent=yes ok=no\n"
+        "expected=745 consistent=yes ok=no\n"
     )
     res.append(("gate_check: a recorded test failure is REJECTED",
                 gc.evaluate_log(failing, exit_code=1).ok is False,
@@ -4922,7 +4922,7 @@ def gate_selfcheck_tests():
     incons = (
         "Blender 5.0.1  |  700 passed, 0 failed, 745 total\n"
         "SUITE_DONE version=5.0.1 passed=700 failed=0 total=745 "
-        "consistent=no ok=no\n"
+        "expected=745 consistent=no ok=no\n"
     )
     res.append(("gate_check: an inconsistent passed+failed!=total is REJECTED",
                 gc.evaluate_log(incons, exit_code=0).ok is False,
@@ -4931,7 +4931,7 @@ def gate_selfcheck_tests():
     short = (
         "Blender 4.2.9 LTS  |  12 passed, 0 failed, 12 total\n"
         "SUITE_DONE version=4.2.9 passed=12 failed=0 total=12 "
-        "consistent=yes ok=yes\n"
+        "expected=745 consistent=yes ok=no\n"
     )
     res.append(("gate_check: a short suite below the count floor is REJECTED",
                 gc.evaluate_log(short, exit_code=0, min_total=700).ok is False,
@@ -4944,7 +4944,7 @@ def gate_selfcheck_tests():
     res.append(("gate_check: a good run missing the human summary line is REJECTED",
                 gc.evaluate_log(
                     "SUITE_DONE version=4.2.9 passed=745 failed=0 total=745 "
-                    "consistent=yes ok=yes\n",
+                    "expected=745 consistent=yes ok=yes\n",
                     exit_code=0, min_total=700).ok is False,
                 "rejected", "rejected"))
 
@@ -5010,6 +5010,59 @@ def gate_selfcheck_tests():
                 gc.require_marker("nothing ran\n", MARK, forbidden=FORBID,
                                   exit_code=0).ok is False,
                 "rejected", "rejected"))
+
+    # ---- R19-1: measurement mode / missing expected= cannot certify -------
+    no_expected = (
+        "Blender 4.2.9 LTS  |  745 passed, 0 failed, 745 total\n"
+        "SUITE_DONE version=4.2.9 passed=745 failed=0 total=745 "
+        "consistent=yes ok=yes\n"
+    )
+    res.append(("gate_check R19-1: a SUITE_DONE with no expected= is REJECTED",
+                gc.evaluate_log(no_expected, exit_code=0, min_total=700).ok is False,
+                "rejected", "rejected"))
+    measure = (
+        "GROUP_COUNT name=gate_selfcheck_tests n=24\n"
+        "INVENTORY cases=82 cache_regression=8 units=600 total=690\n"
+        "Blender 4.2.9 LTS  |  690 passed, 0 failed, 690 total\n"
+        "SUITE_MEASURE_ONLY version=4.2.9 passed=690 failed=0 total=690 "
+        "(measurement mode: inventory NOT enforced; this run is NOT certifiable)\n"
+    )
+    res.append(("gate_check R19-1: measurement-mode output is REJECTED",
+                gc.evaluate_log(measure, exit_code=0, min_total=700).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R19-1: a measurement marker voids an otherwise-good sentinel",
+                gc.evaluate_log(good_expected + "SUITE_MEASURE_ONLY version=4.2.9\n",
+                                exit_code=0, min_total=700).ok is False,
+                "rejected", "rejected"))
+
+    # ---- R19-2: Windows acceptance has an independent fixed inventory -----
+    accept_good = (
+        "Windows functional acceptance: 25 passed, 0 failed, 25 total\n"
+        "ACCEPT_DONE version=5.2.3 passed=25 failed=0 total=25 "
+        "expected=25 consistent=yes ok=yes\n"
+    )
+    res.append(("gate_check R19-2: a complete acceptance run (25/25) is ACCEPTED",
+                gc.evaluate_log(accept_good, exit_code=0, min_total=25,
+                                sentinel_keyword="ACCEPT_DONE").ok is True,
+                "accepted", "accepted"))
+    accept_zero = (
+        "Windows functional acceptance: 0 passed, 0 failed, 0 total\n"
+        "ACCEPT_DONE version=5.2.3 passed=0 failed=0 total=0 "
+        "expected=25 consistent=no ok=no\n"
+    )
+    res.append(("gate_check R19-2: a 0/0/0 acceptance short run is REJECTED",
+                gc.evaluate_log(accept_zero, exit_code=0, min_total=25,
+                                sentinel_keyword="ACCEPT_DONE").ok is False,
+                "rejected", "rejected"))
+    accept_short = (
+        "Windows functional acceptance: 1 passed, 0 failed, 1 total\n"
+        "ACCEPT_DONE version=5.2.3 passed=1 failed=0 total=1 "
+        "expected=25 consistent=yes ok=no\n"
+    )
+    res.append(("gate_check R19-2: a 1-of-25 acceptance short run is REJECTED",
+                gc.evaluate_log(accept_short, exit_code=0, min_total=25,
+                                sentinel_keyword="ACCEPT_DONE").ok is False,
+                "rejected", "rejected"))
     return res
 
 
@@ -5050,9 +5103,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 18,
+    "gate_selfcheck_tests": 24,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 763
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 769
 
 
 def main():
@@ -5230,22 +5283,35 @@ def main():
         print("\nFAILURES:")
         for m in fails:
             print(m)
+    # Space-free version token so the gate's `version=\S+` field parses cleanly
+    # (bpy.app.version_string is e.g. "4.2.9 LTS").
+    ver_token = "%d.%d.%d" % tuple(bpy.app.version)
+    consistent = (passed + failed == total) and total > 0
+
+    if not enforce_inventory:
+        # R19-1: a measurement run (FAILSAFE_MEASURE=1) or an unconfigured
+        # manifest must NEVER produce a certifiable record. It emits a DISTINCT
+        # marker — not a SUITE_DONE sentinel — so every gate rejects it (both by
+        # the absence of SUITE_DONE and by the explicit measurement marker).
+        # Measurement stays possible for re-baselining; it just cannot certify.
+        print("SUITE_MEASURE_ONLY version=%s passed=%d failed=%d total=%d "
+              "(measurement mode: inventory NOT enforced; this run is NOT "
+              "certifiable)" % (ver_token, passed, failed, total))
+        sys.exit(0)
+
     # Machine-readable completion sentinel. This line is reached ONLY if main()
     # ran to the end without an uncaught abort. The certification gates
     # (tests/run_all_versions.sh and .github/workflows/windows-cert.yml) treat its
     # ABSENCE as a hard failure, so a crashed suite can never be read as a pass
     # even when Blender exits 0. ``consistent`` cross-checks that every assembled
     # test produced exactly one result (guards an incomplete/short count), and
-    # ``expected=`` lets the gate reject a complete-but-short inventory (R18-1)
-    # independently of this process's own self-report.
-    consistent = (passed + failed == total) and total > 0
+    # ``expected=`` (always present on a certifiable run) lets the gate reject a
+    # complete-but-short inventory (R18-1/R19-1) independently of this process's
+    # own self-report.
     ok_overall = (failed == 0) and consistent and inventory_ok
-    # Space-free version token so the gate's `version=\S+` field parses cleanly
-    # (bpy.app.version_string is e.g. "4.2.9 LTS").
-    ver_token = "%d.%d.%d" % tuple(bpy.app.version)
-    exp_field = "" if expected_total is None else " expected=%d" % expected_total
-    print("SUITE_DONE version=%s passed=%d failed=%d total=%d%s consistent=%s ok=%s"
-          % (ver_token, passed, failed, total, exp_field,
+    print("SUITE_DONE version=%s passed=%d failed=%d total=%d expected=%d "
+          "consistent=%s ok=%s"
+          % (ver_token, passed, failed, total, expected_total,
              "yes" if consistent else "no", "yes" if ok_overall else "no"))
     # Exit code for CI (belt-and-braces; the gates also parse SUITE_DONE above).
     sys.exit(0 if ok_overall else 1)

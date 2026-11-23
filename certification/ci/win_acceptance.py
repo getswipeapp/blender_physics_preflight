@@ -24,6 +24,14 @@ import bpy
 MOD = "bl_ext.user_default.failsafe"
 results = []  # (name, ok, detail)
 
+# R19-2: the acceptance run declares its own fixed inventory, independent of what
+# actually ran, exactly like the main suite (R18-1). The success path performs
+# this many checks; a run that reaches the summary with a different count (e.g. a
+# 0/0/0 or a short early-return run) emits ok=no and the gate rejects it, so the
+# ", 0 failed," marker can no longer bless a shortened acceptance. Re-baseline by
+# counting the check() calls on the success path if acceptance checks change.
+EXPECTED_ACCEPT_CHECKS = 25
+
 
 def check(name, ok, detail=""):
     results.append((name, bool(ok), str(detail)[:120]))
@@ -187,16 +195,33 @@ def main():
 
 
 def _finish():
+    npass = sum(1 for _, ok, _ in results if ok)
     nfail = sum(1 for _, ok, _ in results if not ok)
+    total = len(results)
     print("\n" + "=" * 60)
     print("Windows functional acceptance: %d passed, %d failed, %d total"
-          % (sum(1 for _, ok, _ in results if ok), nfail, len(results)))
+          % (npass, nfail, total))
     if nfail:
         print("FAILURES:")
         for n, ok, det in results:
             if not ok:
                 print("  -", n, "::", det)
-    sys.exit(1 if nfail else 0)
+    # R19-2: independent inventory + completion sentinel, gated by
+    # tests/gate_check.py --sentinel ACCEPT_DONE. A short run (early return, or a
+    # 0/0/0 run) has total != EXPECTED_ACCEPT_CHECKS -> ok=no -> gate rejects,
+    # even though "0 failed" would otherwise satisfy a bare marker check.
+    consistent = (npass + nfail == total) and total > 0
+    inventory_ok = (total == EXPECTED_ACCEPT_CHECKS)
+    ok_overall = (nfail == 0) and consistent and inventory_ok
+    if not inventory_ok:
+        print("ACCEPT INVENTORY MISMATCH (R19-2): ran %d != declared %d"
+              % (total, EXPECTED_ACCEPT_CHECKS))
+    ver_token = "%d.%d.%d" % tuple(bpy.app.version)
+    print("ACCEPT_DONE version=%s passed=%d failed=%d total=%d expected=%d "
+          "consistent=%s ok=%s"
+          % (ver_token, npass, nfail, total, EXPECTED_ACCEPT_CHECKS,
+             "yes" if consistent else "no", "yes" if ok_overall else "no"))
+    sys.exit(0 if ok_overall else 1)
 
 
 if __name__ == "__main__":

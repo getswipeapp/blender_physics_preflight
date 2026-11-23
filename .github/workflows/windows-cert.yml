@@ -86,11 +86,12 @@ jobs:
           & "$env:BLENDER" -b -P certification/ci/win_acceptance.py 2>&1 | Tee-Object -FilePath "win_acceptance_5.2.3.log"
           $code = $LASTEXITCODE
           Write-Host "Acceptance exit code: $code"
-          # Blender exits 0 even after a Python crash, so do NOT trust the exit
-          # code alone (R18-3). The marker gate requires the acceptance summary
-          # line, forbids any "FAIL -" line, rejects crash signatures, and
-          # requires a zero exit — all in one fail-closed verdict.
-          python tests/gate_check.py "win_acceptance_5.2.3.log" --exit-code $code --marker ", 0 failed," --forbid "FAIL -"
+          # Blender exits 0 even after a Python crash, and a bare ", 0 failed,"
+          # marker would also bless a 0/0/0 short run (R19-2). The acceptance run
+          # now emits an ACCEPT_DONE sentinel with its own fixed expected= count;
+          # the gate requires that sentinel, zero failures, the declared count,
+          # the right Blender version, no crash signature, and a zero exit.
+          python tests/gate_check.py "win_acceptance_5.2.3.log" --exit-code $code --sentinel ACCEPT_DONE --min-total 25 --version "${{ matrix.version }}"
           if ($LASTEXITCODE -ne 0) {
             Write-Host "Acceptance gate REJECTED Windows functional acceptance"; exit 1
           }
