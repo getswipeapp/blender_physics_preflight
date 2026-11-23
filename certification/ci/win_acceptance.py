@@ -21,6 +21,14 @@ import tempfile
 
 import bpy
 
+# The shared certification verdict helpers live in tests/gate_check.py; reuse
+# valid_cli_report so the Windows CLI acceptance uses the exact same fail-closed
+# report check the suite regression-tests (R20-1).
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if os.path.join(REPO, "tests") not in sys.path:
+    sys.path.insert(0, os.path.join(REPO, "tests"))
+import gate_check
+
 MOD = "bl_ext.user_default.failsafe"
 results = []  # (name, ok, detail)
 
@@ -30,7 +38,7 @@ results = []  # (name, ok, detail)
 # 0/0/0 or a short early-return run) emits ok=no and the gate rejects it, so the
 # ", 0 failed," marker can no longer bless a shortened acceptance. Re-baseline by
 # counting the check() calls on the success path if acceptance checks change.
-EXPECTED_ACCEPT_CHECKS = 25
+EXPECTED_ACCEPT_CHECKS = 26
 
 
 def check(name, ok, detail=""):
@@ -188,8 +196,53 @@ def main():
         return p.returncode
     check("CLI --help -> exit 3 (Windows)", cli_exit(["--help"]) == 3)
     check("CLI bad arg -> exit 3 (Windows)", cli_exit(["--nope"]) == 3)
-    # empty factory scene -> clean -> exit 0
-    check("CLI clean scan -> exit 0 (Windows)", cli_exit(["--text"]) == 0)
+
+    # R20-1: a clean CLI scan must prove it ACTUALLY RAN, not merely that the
+    # child exited 0. On this Blender a --python-expr child that raises still
+    # exits 0, so the exit code cannot stand in for "the scan produced a report".
+    # Run the scanner in a real child, capture its JSON to a file, and require a
+    # complete 27-check report via the shared gate_check.valid_cli_report.
+    def cli_json_child(body_expr):
+        jp = os.path.join(d, "cli_report.json")
+        try:
+            os.remove(jp)
+        except OSError:
+            pass
+        subprocess.run([binp, "-b", "--python-expr", body_expr % jp],
+                       capture_output=True, text=True, timeout=180)
+        raw = ""
+        if os.path.isfile(jp):
+            with open(jp, encoding="utf-8") as fh:
+                raw = fh.read()
+        # The child's own exit code is written alongside the report so the gate
+        # sees exactly what the scan returned.
+        rc = None
+        cp = jp + ".code"
+        if os.path.isfile(cp):
+            try:
+                rc = int(open(cp).read().strip())
+            except ValueError:
+                rc = None
+        return rc, raw
+
+    scan_expr = ("import sys; import bl_ext.user_default.failsafe.cli as c; "
+                 "jp = r'%s'; code, out = c.run(['--json']); "
+                 "open(jp, 'w', encoding='utf-8').write(out); "
+                 "open(jp + '.code', 'w').write(str(code)); "
+                 "sys.exit(code)")
+    rc_ok, raw_ok = cli_json_child(scan_expr)
+    v_ok = gate_check.valid_cli_report(rc_ok, raw_ok)
+    check("CLI clean scan -> exit 0 AND a complete 27-check JSON report (R20-1)",
+          v_ok.ok, "rc=%s; %s" % (rc_ok, "; ".join(v_ok.reasons) or "ok"))
+
+    # Real child-failure repro: a child that exits 0 but produces NO report (the
+    # crash-exit-0 class) must be REJECTED by the very same gate.
+    bad_expr = "import sys; jp = r'%s'; sys.exit(0)  # report intentionally unwritten"
+    rc_bad, raw_bad = cli_json_child(bad_expr)
+    v_bad = gate_check.valid_cli_report(rc_bad, raw_bad)
+    check("CLI child that exits 0 with no report is REJECTED by the gate (R20-1)",
+          not v_bad.ok, "rc=%s raw=%dB -> %s"
+          % (rc_bad, len(raw_bad), "; ".join(v_bad.reasons)))
 
     _finish()
 

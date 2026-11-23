@@ -748,3 +748,47 @@ GATE FAIL; expected= stripped -> GATE FAIL; acceptance 0/0/0 -> GATE FAIL.
 Windows CI: pending re-run on this commit (also exercises the live ACCEPT_DONE
 count on Windows). Independent review of the corrected commit still required
 before certification is claimed restored. No merge, publication, or spending.
+
+ROUND 20 — CERTIFICATION GATE INTEGRITY, PART 4 (independent review of e5c7ca6)
+==============================================================================
+The independent re-review of e5c7ca6 returned PARTIAL PASS: R19-1/R19-2 accepted,
+but one more exit-code-trusting gap remained — inside a Windows acceptance test.
+
+R20-1 — A failed CLI scan child could count as a successful test.
+  Source: certification/ci/win_acceptance.py. The clean-scan acceptance check was
+  `cli_exit(["--text"]) == 0` — it trusted ONLY the child Blender's exit code,
+  never whether the child produced a real report. REPRODUCED on real Blender
+  (5.2.3, macOS): `blender -b --factory-startup --python-expr "raise
+  RuntimeError('boom')"` EXITS 0, and a child that merely `sys.exit(0)` without
+  scanning also exits 0. So a crashed/short CLI child would have scored the check
+  PASS, all 26 acceptance checks could pass, and ACCEPT_DONE ok=yes would be
+  emitted — the same exit-0-after-crash class this whole effort began with.
+  Fix:
+  * tests/gate_check.py gains valid_cli_report(returncode, text,
+    expected_checks=27): PASS only if exit==0 AND the output is a complete, valid
+    Failsafe JSON report — rejects empty output, any crash signature, a "Failsafe
+    internal error" report, malformed JSON, a wrong check count (incomplete), a
+    missing summary, or an error-carrying report.
+  * win_acceptance.py now runs the scanner in a real child with `--json`, captures
+    the report (and the CLI's own exit code) to a file, and gates it with
+    valid_cli_report instead of the bare exit code. It also adds a REAL
+    child-failure repro: a child that exits 0 with no report, asserted REJECTED by
+    the same gate. EXPECTED_ACCEPT_CHECKS 25 -> 26.
+  * 8 validator regressions added to gate_selfcheck_tests (run on all four
+    versions): a genuine 27-check exit-0 report ACCEPTED; exit!=0, empty,
+    traceback, "internal error", malformed JSON, 26-check incomplete, and
+    no-summary each REJECTED.
+
+The CLI's own run() is already defensive (its except returns EXIT_USAGE + an
+error report, not exit 0), so the real exposure was a child crashing OUTSIDE
+run() (Blender-level) while exiting 0; content validation defeats that regardless
+of the exit code.
+
+RESULT: Mac matrix 4.2.9/4.5.9/5.0.1/5.2.3 each 777 passed, 0 failed, total=777,
+expected=777, ok=yes; versions enforced; equal; GATE PASS; release gate PASS.
+(777 = 769 + 8 new gate_selfcheck assertions.) Real repro: a raising / no-report
+--python-expr child exits 0, and valid_cli_report rejects it while accepting a
+genuine 27-check scan. Windows CI: pending re-run on this commit (exercises the
+live 26-check acceptance incl. the real CLI child-failure repro). Independent
+review of the corrected commit still required before certification is claimed
+restored. No merge, publication, or spending.

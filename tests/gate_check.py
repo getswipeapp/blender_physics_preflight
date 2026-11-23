@@ -42,6 +42,7 @@ Usage:
     python gate_check.py <logfile> --marker "EXACT SUCCESS MARKER" \
         [--forbid "FORBIDDEN MARKER" ...] [--exit-code N]
 """
+import json
 import re
 import sys
 
@@ -180,6 +181,47 @@ def require_marker(text, marker, forbidden=(), exit_code=None):
         reasons.append("required completion marker absent: %r" % marker)
     if exit_code is not None and int(exit_code) != 0:
         reasons.append("process exit code %s != 0" % exit_code)
+    return Verdict(len(reasons) == 0, reasons, info)
+
+
+def valid_cli_report(returncode, text, expected_checks=27):
+    """R20-1: a CLI scan child counts as a clean pass ONLY if it exited 0 AND
+    produced a complete, valid Failsafe JSON report. Verified real behaviour: a
+    ``blender -b --python-expr`` child that raises a Python error still EXITS 0,
+    so the exit code alone cannot prove the scan ran. This rejects a child that
+    exits 0 with empty / traceback / malformed / incomplete output (wrong check
+    count, missing summary, or an error report)."""
+    reasons = []
+    info = {}
+    if returncode is None or int(returncode) != 0:
+        reasons.append("exit code %s != 0 (clean)" % returncode)
+    for sig in CRASH_SIGNATURES:
+        if sig in text:
+            reasons.append("crash signature present: %r" % sig)
+    if "Failsafe internal error" in text:
+        reasons.append("CLI reported an internal error")
+    if not text.strip():
+        reasons.append("empty report (the scan produced no output)")
+        return Verdict(False, reasons, info)
+    try:
+        jd = json.loads(text)
+    except Exception as e:
+        reasons.append("report is not valid JSON: %s" % e)
+        return Verdict(False, reasons, info)
+    if not isinstance(jd, dict):
+        reasons.append("report is not a JSON object")
+        return Verdict(False, reasons, info)
+    if jd.get("tool") != "failsafe":
+        reasons.append("missing failsafe tool marker")
+    checks = jd.get("checks")
+    n = len(checks) if isinstance(checks, list) else -1
+    info["checks"] = n
+    if n != expected_checks:
+        reasons.append("report has %s checks, expected %d" % (n, expected_checks))
+    if not isinstance(jd.get("summary"), dict) or not jd.get("summary"):
+        reasons.append("report missing summary")
+    if jd.get("error"):
+        reasons.append("report carries an error: %r" % jd.get("error"))
     return Verdict(len(reasons) == 0, reasons, info)
 
 

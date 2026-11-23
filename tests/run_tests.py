@@ -5063,6 +5063,48 @@ def gate_selfcheck_tests():
                 gc.evaluate_log(accept_short, exit_code=0, min_total=25,
                                 sentinel_keyword="ACCEPT_DONE").ok is False,
                 "rejected", "rejected"))
+
+    # ---- R20-1: a CLI scan child must prove it produced a real report -----
+    # Verified real behaviour: a `blender -b --python-expr` child that raises a
+    # Python error still EXITS 0, so an acceptance test that trusts exit 0 alone
+    # can bless a crashed child. valid_cli_report requires exit 0 AND a complete
+    # 27-check JSON report.
+    import json as _json
+    genuine = _json.dumps({
+        "tool": "failsafe", "schema": 1,
+        "checks": [{"id": i + 1} for i in range(27)],
+        "summary": {"FAIL": 0, "WARNING": 0, "UNKNOWN": 0},
+        "overall": "PASS"})
+    res.append(("gate_check R20-1: a complete exit-0 27-check CLI report is ACCEPTED",
+                gc.valid_cli_report(0, genuine).ok is True, "accepted", "accepted"))
+    res.append(("gate_check R20-1: a valid report with a nonzero exit is REJECTED",
+                gc.valid_cli_report(3, genuine).ok is False, "rejected", "rejected"))
+    res.append(("gate_check R20-1: an exit-0 child with EMPTY output is REJECTED",
+                gc.valid_cli_report(0, "").ok is False, "rejected", "rejected"))
+    res.append(("gate_check R20-1: an exit-0 child printing a TRACEBACK is REJECTED",
+                gc.valid_cli_report(
+                    0, "Traceback (most recent call last):\n  ...\n").ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R20-1: an exit-0 'Failsafe internal error' is REJECTED",
+                gc.valid_cli_report(
+                    0, "Failsafe internal error: boom\n").ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R20-1: MALFORMED JSON output is REJECTED",
+                gc.valid_cli_report(0, "{not valid json").ok is False,
+                "rejected", "rejected"))
+    incomplete = _json.dumps({
+        "tool": "failsafe", "schema": 1,
+        "checks": [{"id": i + 1} for i in range(26)],
+        "summary": {"FAIL": 0, "WARNING": 0, "UNKNOWN": 0}})
+    res.append(("gate_check R20-1: an INCOMPLETE 26-check report is REJECTED",
+                gc.valid_cli_report(0, incomplete).ok is False,
+                "rejected", "rejected"))
+    no_summary = _json.dumps({
+        "tool": "failsafe", "schema": 1,
+        "checks": [{"id": i + 1} for i in range(27)]})
+    res.append(("gate_check R20-1: a report with NO summary is REJECTED",
+                gc.valid_cli_report(0, no_summary).ok is False,
+                "rejected", "rejected"))
     return res
 
 
@@ -5103,9 +5145,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 24,
+    "gate_selfcheck_tests": 32,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 769
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 777
 
 
 def main():
