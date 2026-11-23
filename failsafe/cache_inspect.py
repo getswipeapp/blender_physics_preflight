@@ -878,6 +878,12 @@ _FLUID_UNI_CORE_GRIDS = {
 # name as a unit so one deleted channel can't hide behind its two siblings: present any
 # of these and ALL three are required for every frame (review R12-1).
 _FLUID_UNI_COLOR_GRIDS = ("color_r", "color_g", "color_b")
+# When a cache is BOTH coloured AND resumable, Blender also writes a restart copy of each
+# colour channel: color_r_in/color_g_in/color_b_in (verified on real bakes of all four
+# versions). These are the colour family's restart-state grids, so they are required as a
+# SET whenever a gas domain is resumable and colour is expected — otherwise deleting the
+# whole _in family before baseline would leave no on-disk evidence and read PASS (R15-1).
+_FLUID_UNI_COLOR_RESTART_GRIDS = ("color_r_in", "color_g_in", "color_b_in")
 # Blender's colour trigger: a SMOKE/BOTH flow writes colour grids IFF its smoke_color
 # differs from this default grey (verified on real bakes of all four versions — ANY
 # deviation, including another grey, turns colour on; exactly the default does not). This
@@ -947,36 +953,62 @@ def _fluid_data_is_resumable(ds):
     return bool(getattr(ds, "cache_resumable", False))
 
 
-def _scene_has_colored_smoke_flow(scene):
-    """True iff the scene contains a SMOKE or BOTH fluid FLOW whose ``smoke_color`` is not
-    the default grey — Blender's exact trigger for writing colour grids (review R13-1).
+def _color_is_noncat(col):
+    """True if a colour triple is anything other than the default grey (or unreadable —
+    treated as colour-possible, conservative)."""
+    if col is None:
+        return False
+    try:
+        return tuple(round(float(c), 4) for c in col) != _FLUID_SMOKE_COLOR_DEFAULT
+    except Exception:
+        return True  # unreadable -> assume colour is possible (safe)
 
-    There is NO domain-level colour flag, and a flow is not linked in RNA to a particular
-    domain, so this is deliberately SCENE-WIDE: it can only ever OVER-report colour (a
-    safe false UNKNOWN on a mixed multi-domain scene), never UNDER-report it — under-
-    reporting would reintroduce the very false PASS this closes. Any colour value that
-    can't be read is treated as 'colour possible' (conservative)."""
+
+def _scene_expects_fluid_color(scene):
+    """True iff the scene could make Blender write colour grids (color_r/g/b) for a GAS
+    domain — the CONFIG signal that colour data must exist, used to catch a whole colour
+    family deleted before baseline (review R13-1 / R14-1). Verified on real bakes of all
+    four versions, Blender writes colour grids IFF either:
+
+      * a SMOKE or BOTH flow has a non-default ``smoke_color``, OR
+      * fire is active (a FIRE or BOTH flow) AND a smoke source (SMOKE or BOTH flow) is
+        present AND a GAS domain's ``flame_smoke_color`` is non-default — the burnt smoke
+        then carries a second, different colour (review R14-1). Fire ALONE, with no smoke
+        flow, writes no colour even with a non-default flame colour.
+
+    Deliberately SCENE-WIDE (a flow is not linked in RNA to a particular domain): it can
+    only ever OVER-report colour (a safe false UNKNOWN on a mixed multi-domain scene),
+    never UNDER-report it — under-reporting would reintroduce the very false PASS this
+    closes. Any colour value that can't be read is treated as 'colour possible'."""
+    smoke_colored = False      # a SMOKE/BOTH flow has a non-default smoke_color
+    has_smoke_source = False   # any SMOKE/BOTH flow
+    has_fire = False           # any FIRE/BOTH flow
+    flame_noncat = False       # a GAS domain has a non-default flame_smoke_color
     for obj in getattr(scene, "objects", ()):
         for mod in getattr(obj, "modifiers", ()):
             if getattr(mod, "type", "") != "FLUID":
                 continue
-            if getattr(mod, "fluid_type", "") != "FLOW":
-                continue
-            fs = getattr(mod, "flow_settings", None)
-            if fs is None:
-                continue
-            if (getattr(fs, "flow_type", "") or "").upper() not in ("SMOKE", "BOTH"):
-                continue
-            col = getattr(fs, "smoke_color", None)
-            if col is None:
-                continue
-            try:
-                vals = tuple(round(float(c), 4) for c in col)
-            except Exception:
-                return True  # unreadable colour -> assume colour is possible (safe)
-            if vals != _FLUID_SMOKE_COLOR_DEFAULT:
-                return True
-    return False
+            ftype = getattr(mod, "fluid_type", "")
+            if ftype == "FLOW":
+                fs = getattr(mod, "flow_settings", None)
+                if fs is None:
+                    continue
+                flow_type = (getattr(fs, "flow_type", "") or "").upper()
+                if flow_type in ("SMOKE", "BOTH"):
+                    has_smoke_source = True
+                    if _color_is_noncat(getattr(fs, "smoke_color", None)):
+                        smoke_colored = True
+                if flow_type in ("FIRE", "BOTH"):
+                    has_fire = True
+            elif ftype == "DOMAIN":
+                ds = getattr(mod, "domain_settings", None)
+                if ds is None:
+                    continue
+                if (getattr(ds, "domain_type", "") or "").upper() != "GAS":
+                    continue
+                if _color_is_noncat(getattr(ds, "flame_smoke_color", None)):
+                    flame_noncat = True
+    return smoke_colored or (has_smoke_source and has_fire and flame_noncat)
 
 
 def _uni_core_grids(ds):
@@ -1057,11 +1089,13 @@ def _fluid_stage_required(component, ds, cs, ce, observed_grids=None,
     on-disk evidence, so it is caught instead from config — which cannot be erased by
     deleting cache files:
 
-      * color_r/g/b: required (gas only) when ``expects_color`` — a SMOKE/BOTH flow in the
-        scene has a non-default smoke_color, Blender's own colour trigger (verified on all
-        four versions). Required as a SET, so one deleted channel can't hide behind its
-        siblings, and ALL colour deleted still reads UNKNOWN. A plain bake (no coloured
-        flow) never expects colour, so it is not forced UNKNOWN.
+      * color_r/g/b: required (gas only) when ``expects_color`` — the scene configures
+        colour (a non-default smoke_color flow, OR fire + a smoke flow + a non-default
+        domain flame_smoke_color), Blender's colour triggers verified on all four versions
+        (review R13-1 / R14-1). Required as a SET, so one deleted channel can't hide behind
+        its siblings, and ALL colour deleted still reads UNKNOWN. A plain bake never expects
+        colour, so it is not forced UNKNOWN. When the gas cache is ALSO resumable the colour
+        restart grids color_r_in/g_in/b_in are required as a SET too (review R15-1).
       * resumable restart-state grids: when ``cache_resumable`` is on, a genuine bake
         ALWAYS writes a FIXED set of restart grids (densityIn/flags/velTmp/… — verified
         identical on all four versions). The whole set is required BY NAME, so a wiped
@@ -1101,6 +1135,13 @@ def _fluid_stage_required(component, ds, cs, ce, observed_grids=None,
                 req |= set(restart)
             else:
                 sentinel = "?/resumable-restart-wiped"
+            # A gas cache that is BOTH resumable AND coloured also writes a restart copy of
+            # each colour channel (color_r_in/g_in/b_in). Require the whole _in SET so the
+            # family deleted before baseline reads UNKNOWN rather than hiding (review R15-1).
+            color_restart_set = set(_FLUID_UNI_COLOR_RESTART_GRIDS)
+            if is_gas and (expects_color or (req & color_set)
+                           or (req & color_restart_set)):
+                req |= color_restart_set
         tokens = [_uni_token(g, f) for f in frames for g in sorted(req)]
         if sentinel:
             tokens.append(sentinel)
@@ -1379,7 +1420,7 @@ def iter_fluid_cache_files(scenes):
         # Scene-wide colour config (there is no per-domain colour flag): does any
         # SMOKE/BOTH flow set a non-default smoke_color? Used to require the colour family
         # even when every colour file was deleted before baseline (review R13-1).
-        scene_expects_color = _scene_has_colored_smoke_flow(scene)
+        scene_expects_color = _scene_expects_fluid_color(scene)
         for obj in scene.objects:
             for mod in obj.modifiers:
                 if mod.type != "FLUID":

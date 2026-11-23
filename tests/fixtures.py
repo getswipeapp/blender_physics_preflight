@@ -895,6 +895,69 @@ def build_fluid_uni_gas_resumable(outdir):
     bpy.ops.wm.open_mainfile(filepath=blend)
 
 
+def build_fluid_uni_gas_color_resumable(outdir):
+    """A real colored AND resumable GAS smoke bake, DATA stage UNI: core gas grids,
+    color_r/g/b, the restart-state grids, AND the colour restart grids
+    color_r_in/color_g_in/color_b_in a coloured+resumable cache writes (review R15-1)."""
+    blend = _make_gas_uni_blend(outdir, color=True, resumable=True)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
+def _make_gas_uni_flame_blend(outdir, frame_end=4):
+    """A real GAS bake whose colour grids are triggered by FIRE + a non-default domain
+    ``flame_smoke_color`` (NOT by a coloured flow): a single BOTH flow with the DEFAULT
+    smoke colour, and the domain's flame_smoke_color set non-default. Mantaflow then writes
+    color_r/g/b because the burnt smoke carries a second colour — verified on real bakes of
+    all four versions (review R14-1). A single BOTH flow bakes reliably headless on 4.2.9
+    (two separate smoke+fire flows do not). Returns the .blend path (left open)."""
+    reset()
+    sc = bpy.context.scene
+    sc.frame_start, sc.frame_end = 1, frame_end
+    bpy.ops.mesh.primitive_cube_add(size=4, location=(0, 0, 0))
+    dom = bpy.context.active_object
+    dom.name = "Domain"
+    m = dom.modifiers.new("Fluid", "FLUID")
+    m.fluid_type = "DOMAIN"
+    ds = m.domain_settings
+    ds.domain_type = "GAS"
+    ds.resolution_max = 16
+    ds.use_noise = False
+    try:
+        ds.use_mesh = False
+    except Exception:
+        pass
+    ds.cache_type = "ALL"
+    ds.cache_frame_start, ds.cache_frame_end = 1, frame_end
+    ds.cache_directory = "//fluidcache"
+    ds.cache_data_format = "UNI"
+    # The colour trigger here is the flame colour, not a flow colour: leave the flow at the
+    # default grey and set the domain flame_smoke_color non-default.
+    if hasattr(ds, "flame_smoke_color"):
+        ds.flame_smoke_color = (0.1, 0.9, 0.2)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, location=(0, 0, -1.2))
+    fl = bpy.context.active_object
+    fl.name = "Inflow"
+    f = fl.modifiers.new("Fluid", "FLUID")
+    f.fluid_type = "FLOW"
+    f.flow_settings.flow_type = "BOTH"          # smoke + fire in one modifier
+    f.flow_settings.flow_behavior = "INFLOW"
+    blend = os.path.join(outdir, "gas_uni_flame.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend)
+    with bpy.context.temp_override(scene=sc, active_object=dom, object=dom,
+                                   selected_objects=[dom]):
+        bpy.ops.fluid.bake_all()
+    bpy.ops.wm.save_mainfile()
+    return blend
+
+
+def build_fluid_uni_gas_fire_flame(outdir):
+    """A real GAS bake where colour is activated by fire + a non-default domain
+    flame_smoke_color (NOT a coloured flow): data/ holds the five core gas grids AND
+    color_r/g/b (review R14-1)."""
+    blend = _make_gas_uni_flame_blend(outdir)
+    bpy.ops.wm.open_mainfile(filepath=blend)
+
+
 def _make_gn_disk_blend(outdir, frame_end=6, packed=False, scene_sim_range=None,
                         custom_bake_dir=None, float_item=False, empty_geometry=False):
     """Create a Geometry Nodes simulation-zone bake with a REAL moving simulation,

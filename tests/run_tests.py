@@ -731,43 +731,117 @@ def fluid_matcher_unit_tests():
                 and "?/resumable-restart-wiped" not in req_nonresume,
                 sorted(req_nonresume), "core only, no restart"))
 
-    # R14-1: the colour trigger is a SMOKE/BOTH flow's non-default smoke_color — and ONLY
-    # that. On all four versions a FIRE flow (even with a smoke_color set) and a changed
-    # domain flame_smoke_color write NO colour grids, so the scene detector must key on
-    # SMOKE/BOTH smoke_color alone: requiring colour for fire/flame would be a false UNKNOWN,
-    # ignoring a real SMOKE/BOTH colour would be the false PASS this guards.
+    # R15-1: a gas cache that is BOTH resumable AND coloured also writes colour-restart
+    # grids color_r_in/g_in/b_in; required as a SET so the whole _in family deleted before
+    # baseline reads UNKNOWN (verified on real bakes, all four versions).
+    req_cr = ci._fluid_stage_required(
+        "data", gas_resume_ds, 1, 1,
+        observed_grids={"density", "flame", "heat", "shadow", "vel"},
+        expects_color=True)
+    res.append(("fluid matcher: gas resumable + expects_color requires color_*_in set (R15-1)",
+                all(t in req_cr for t in
+                    ("0001/color_r_in", "0001/color_g_in", "0001/color_b_in")),
+                sorted(req_cr), "color_*_in required"))
+    # Observed-closure: one color_*_in present requires all three.
+    req_cr2 = ci._fluid_stage_required(
+        "data", gas_resume_ds, 1, 1,
+        observed_grids={"density", "flame", "heat", "shadow", "vel", "color_r_in"})
+    res.append(("fluid matcher: one color_*_in observed requires all three (R15-1)",
+                all(t in req_cr2 for t in
+                    ("0001/color_r_in", "0001/color_g_in", "0001/color_b_in")),
+                sorted(req_cr2), "all three color_*_in required"))
+    # A plain resumable bake (no colour) does NOT require color_*_in (no false UNKNOWN).
+    req_cr3 = ci._fluid_stage_required(
+        "data", gas_resume_ds, 1, 1,
+        observed_grids={"density", "flame", "heat", "shadow", "vel"},
+        expects_color=False)
+    res.append(("fluid matcher: plain resumable bake needs no color_*_in (R15-1)",
+                not any(t.split("/")[-1] in ci._FLUID_UNI_COLOR_RESTART_GRIDS
+                        for t in req_cr3),
+                sorted(req_cr3), "no color_*_in"))
+    # Colour but NOT resumable: color_*_in are not written, so not required.
+    req_cr4 = ci._fluid_stage_required(
+        "data", gas_ds, 1, 1,
+        observed_grids={"density", "flame", "heat", "shadow", "vel"},
+        expects_color=True)
+    res.append(("fluid matcher: colour but non-resumable needs no color_*_in (R15-1)",
+                not any(t.split("/")[-1] in ci._FLUID_UNI_COLOR_RESTART_GRIDS
+                        for t in req_cr4),
+                sorted(req_cr4), "no color_*_in on non-resumable"))
+
+    # R14-1: colour is written for a GAS domain when a SMOKE/BOTH flow is non-default, OR
+    # when fire + a smoke source + a non-default domain flame_smoke_color combine (the burnt
+    # smoke carries a second colour). Fire ALONE writes none. Verified on real bakes, all
+    # four versions: missing the flame path is a false PASS; requiring colour for
+    # fire-only / flame-default would be a false UNKNOWN.
     class _FS:
         def __init__(self, flow_type, smoke_color=(0.7, 0.7, 0.7)):
             self.flow_type = flow_type
             self.smoke_color = smoke_color
 
-    class _Mod:
+    class _DS:
+        def __init__(self, domain_type="GAS", flame_smoke_color=(0.7, 0.7, 0.7)):
+            self.domain_type = domain_type
+            self.flame_smoke_color = flame_smoke_color
+
+    class _FlowMod:
         def __init__(self, fs):
             self.type = "FLUID"
             self.fluid_type = "FLOW"
             self.flow_settings = fs
 
+    class _DomMod:
+        def __init__(self, ds):
+            self.type = "FLUID"
+            self.fluid_type = "DOMAIN"
+            self.domain_settings = ds
+
     class _Obj:
-        def __init__(self, *fss):
-            self.modifiers = [_Mod(fs) for fs in fss]
+        def __init__(self, *mods):
+            self.modifiers = list(mods)
 
     class _Scene:
         def __init__(self, *objs):
             self.objects = list(objs)
 
-    det = ci._scene_has_colored_smoke_flow
-    res.append(("fluid matcher: FIRE flow with non-default smoke_color is NOT colour (R14-1)",
-                det(_Scene(_Obj(_FS("FIRE", (0.1, 0.2, 0.9))))) is False,
-                "fire not colour", "fire not colour"))
-    res.append(("fluid matcher: default-grey SMOKE flow is NOT colour (R14-1)",
-                det(_Scene(_Obj(_FS("SMOKE", (0.7, 0.7, 0.7))))) is False,
-                "default grey not colour", "default grey not colour"))
-    res.append(("fluid matcher: non-default SMOKE flow IS colour (R14-1)",
-                det(_Scene(_Obj(_FS("SMOKE", (0.9, 0.1, 0.1))))) is True,
-                "smoke colour", "smoke colour"))
-    res.append(("fluid matcher: non-default BOTH flow IS colour (R14-1)",
-                det(_Scene(_Obj(_FS("BOTH", (0.2, 0.8, 0.3))))) is True,
-                "both colour", "both colour"))
+    det = ci._scene_expects_fluid_color
+    GREY = (0.7, 0.7, 0.7)
+    FLAME = (0.1, 0.9, 0.2)
+    cases = [
+        ("FIRE flow alone with non-default smoke_color is NOT colour",
+         _Scene(_Obj(_FlowMod(_FS("FIRE", (0.1, 0.2, 0.9))))), False),
+        ("default-grey SMOKE flow is NOT colour",
+         _Scene(_Obj(_FlowMod(_FS("SMOKE", GREY)))), False),
+        ("non-default SMOKE flow IS colour",
+         _Scene(_Obj(_FlowMod(_FS("SMOKE", (0.9, 0.1, 0.1))))), True),
+        ("non-default BOTH flow IS colour",
+         _Scene(_Obj(_FlowMod(_FS("BOTH", (0.2, 0.8, 0.3))))), True),
+        # Flame path: default SMOKE flow + FIRE flow + non-default domain flame_smoke_color.
+        ("default SMOKE + FIRE + non-default flame_smoke_color IS colour (R14-1)",
+         _Scene(_Obj(_FlowMod(_FS("SMOKE", GREY))),
+                _Obj(_FlowMod(_FS("FIRE"))),
+                _Obj(_DomMod(_DS("GAS", FLAME)))), True),
+        # Same but flame default -> no colour.
+        ("default SMOKE + FIRE + default flame_smoke_color is NOT colour",
+         _Scene(_Obj(_FlowMod(_FS("SMOKE", GREY))),
+                _Obj(_FlowMod(_FS("FIRE"))),
+                _Obj(_DomMod(_DS("GAS", GREY)))), False),
+        # A single BOTH flow (smoke+fire) + non-default flame -> colour.
+        ("BOTH flow + non-default flame_smoke_color IS colour (R14-1)",
+         _Scene(_Obj(_FlowMod(_FS("BOTH", GREY))),
+                _Obj(_DomMod(_DS("GAS", FLAME)))), True),
+        # Fire ALONE (no smoke flow) + non-default flame -> NO colour (fire-only writes none).
+        ("FIRE flow + non-default flame but NO smoke flow is NOT colour (R14-1)",
+         _Scene(_Obj(_FlowMod(_FS("FIRE"))),
+                _Obj(_DomMod(_DS("GAS", FLAME)))), False),
+        # Non-default flame with a smoke flow but NO fire -> NO colour.
+        ("non-default flame + smoke flow but NO fire is NOT colour",
+         _Scene(_Obj(_FlowMod(_FS("SMOKE", GREY))),
+                _Obj(_DomMod(_DS("GAS", FLAME)))), False),
+    ]
+    for label, scene, expect in cases:
+        res.append(("fluid matcher: %s" % label, det(scene) is expect,
+                    det(scene), expect))
     return res
 
 
@@ -3744,6 +3818,98 @@ def hash_fluid_tests():
     out.append(("fluid R14-2: restart family wiped to one grid -> #27 UNKNOWN (never PASS)",
                 worst_for_check(results, 27) == Status.UNKNOWN,
                 worst_for_check(results, 27), Status.UNKNOWN))
+
+    # (R14-1, round 15) Colour is also written when FIRE + a non-default domain
+    # flame_smoke_color combine with a smoke source (verified on real bakes, all four
+    # versions) -- NOT only by a coloured flow. The config detector must expect colour here,
+    # so a wiped colour family still reads UNKNOWN.
+    g14f = os.path.join(tmp, "r14flame")
+    os.makedirs(g14f, exist_ok=True)
+    fixtures.build_fluid_uni_gas_fire_flame(g14f)
+    g14fdata = os.path.join(g14f, "fluidcache", "data")
+    out.append(("fluid R14-1: fire + flame_smoke_color bake wrote colour grids (precondition)",
+                any(f.startswith("color_") for f in os.listdir(g14fdata)),
+                sorted(f for f in os.listdir(g14fdata) if f.startswith("color_"))[:3],
+                "colour grids present"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R14-1 control: untouched fire+flame bake -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+    fcr = 0
+    for f in sorted(os.listdir(g14fdata)):
+        if f.startswith("color_"):
+            os.remove(os.path.join(g14fdata, f))
+            fcr += 1
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    df = _stage(rep, "data")
+    out.append(("fluid R14-1: flame-triggered colour wiped -> colour tokens uncovered",
+                bool(df) and df[0].state != ch.S_UNCHANGED
+                and any(t.split("/")[-1] in ("color_r", "color_g", "color_b")
+                        for t in (df[0].uncovered or [])),
+                [(s.state, (s.uncovered or [])[:3]) for s in df], "colour tokens uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R14-1: flame-triggered colour wiped -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R14-1: flame-triggered colour wiped -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
+
+    # (R15-1, round 15) A gas cache that is BOTH coloured AND resumable writes colour-restart
+    # grids color_r_in/g_in/b_in. Deleting the WHOLE _in family before baseline (keeping
+    # color_r/g/b and the base restart grids) must read UNKNOWN -- they are required as a set.
+    g15 = os.path.join(tmp, "r15colorin")
+    os.makedirs(g15, exist_ok=True)
+    fixtures.build_fluid_uni_gas_color_resumable(g15)
+    g15data = os.path.join(g15, "fluidcache", "data")
+    _IN_RE = re.compile(r"^color_[rgb]_in_\d{4}\.uni$")
+    _COL_RE = re.compile(r"^color_[rgb]_\d{4}\.uni$")
+    had_in = [f for f in os.listdir(g15data) if _IN_RE.match(f)]
+    out.append(("fluid R15-1: colored+resumable bake wrote color_*_in grids (precondition)",
+                len(had_in) > 0, len(had_in), ">0 color_*_in files"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R15-1 control: untouched colored+resumable bake -> #27 PASS",
+                worst_for_check(results, 27) == Status.PASS,
+                worst_for_check(results, 27), Status.PASS))
+    cin = 0
+    for f in sorted(os.listdir(g15data)):
+        if _IN_RE.match(f):
+            os.remove(os.path.join(g15data, f))
+            cin += 1
+    still_color = any(_COL_RE.match(f) for f in os.listdir(g15data))
+    out.append(("fluid R15-1: color_*_in removed, color_r/g/b kept (precondition)",
+                cin > 0 and still_color
+                and not any(_IN_RE.match(f) for f in os.listdir(g15data)),
+                (cin, still_color), ">0 _in removed, colour kept"))
+    man = ch.capture(list(bpy.data.scenes), ci.blend_dir())
+    bl.save_baseline(bpy.context.scene, bl.default_baseline_path(),
+                     overwrite=True, cache_hashes=man)
+    rep = ch.build_report(list(bpy.data.scenes))
+    d15 = _stage(rep, "data")
+    out.append(("fluid R15-1: whole color_*_in family wiped -> _in tokens uncovered (config)",
+                bool(d15) and d15[0].state != ch.S_UNCHANGED
+                and any(t.split("/")[-1] in ("color_r_in", "color_g_in", "color_b_in")
+                        for t in (d15[0].uncovered or [])),
+                [(s.state, (s.uncovered or [])[:3]) for s in d15],
+                "color_*_in tokens uncovered"))
+    results = engine.run_all(bpy.context, hash_verify=rep)
+    out.append(("fluid R15-1: color_*_in family wiped -> #27 UNKNOWN (never PASS)",
+                worst_for_check(results, 27) == Status.UNKNOWN,
+                worst_for_check(results, 27), Status.UNKNOWN))
+    out.append(("fluid R15-1: color_*_in family wiped -> requested verify nonzero",
+                cli.verify_floor(rep, True) == cli.EXIT_UNVERIFIED,
+                cli.verify_floor(rep, True), cli.EXIT_UNVERIFIED))
 
     return out
 

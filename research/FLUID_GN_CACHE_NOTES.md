@@ -482,3 +482,49 @@ grids except velTmp) -> the rest uncovered, #27 UNKNOWN; the round-13 whole-fami
 now asserts named restart tokens (not the retired sentinel); untouched resumable still PASS.
 
 All four versions after the fix: 708 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
+
+## Round 15 — flame-triggered colour (R14-1, now real) + colour-restart grids (R15-1)
+
+Re-review of b804b28 pressed on two points. Both taken back to REAL bakes on all four
+versions (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3) before coding.
+
+### R14-1 — fire + non-default domain flame_smoke_color DOES write colour — CONFIRMED, FIXED
+Round 14 dismissed R14-1 after probing fire-ONLY configs (no smoke flow), which write no
+colour. The reviewer asked for the precise combination the earlier probes missed: a smoke
+flow PRESENT + fire + a non-default domain `flame_smoke_color`. That combination DOES write
+color_r/g/b on all four versions:
+
+| config                                                              | color grids? |
+| ------------------------------------------------------------------- | ------------ |
+| default-grey SMOKE flow + FIRE flow, domain flame default           | no           |
+| default-grey SMOKE flow + FIRE flow, domain flame NON-default       | **yes**      |
+| single BOTH flow (default smoke_color), domain flame NON-default     | **yes** (all 4, incl. 4.2.9) |
+| FIRE flow ALONE (no smoke flow), domain flame NON-default           | no           |
+
+Mechanism: the burnt smoke carries the flame colour; when a smoke source is also present and
+the flame colour differs, the domain holds two distinct smoke colours and Mantaflow writes
+the colour grids. Fire alone (one uniform colour) writes none.
+
+Fix: `_scene_has_colored_smoke_flow` -> `_scene_expects_fluid_color`. Colour is expected when
+EITHER a SMOKE/BOTH flow has a non-default smoke_color, OR (a smoke source exists AND fire
+exists AND a GAS domain's flame_smoke_color is non-default). Still scene-wide and
+over-report-only (never under-report). Verified by a real BOTH-flow + flame bake (bakes
+reliably headless on 4.2.9, unlike two separate smoke+fire flows) and by matcher-unit tests
+covering every row above plus the no-fire and flame-default negatives.
+
+### R15-1 — colour-restart grids color_*_in — CONFIRMED, FIXED
+A cache that is BOTH coloured AND resumable writes color_r_in/color_g_in/color_b_in
+(verified all four versions). Round 14 left them out of the mandatory sets, so deleting the
+whole _in family before baseline (keeping color_r/g/b and the base restart grids) read PASS.
+
+Fix: `_FLUID_UNI_COLOR_RESTART_GRIDS = (color_r_in, color_g_in, color_b_in)`. In
+`_fluid_stage_required`, when a gas domain is resumable AND colour is expected (or any colour
+/ colour-restart grid is observed), require the whole _in SET. A wiped _in family -> uncovered
+-> UNKNOWN; a genuine coloured+resumable bake has them -> PASS; a plain resumable or a
+non-resumable coloured bake never requires them (no false UNKNOWN).
+
+Tests added (real bakes): fire+flame colour bake -> wipe colour -> #27 UNKNOWN, floor 2,
+untouched control PASS; coloured+resumable bake -> wipe ALL color_*_in -> #27 UNKNOWN, floor
+2, untouched control PASS; matcher-unit colour-restart and flame-path assertions.
+
+All four versions after the fix: 728 passed, 0 failed (4.2.9 / 4.5.9 / 5.0.1 / 5.2.3).
