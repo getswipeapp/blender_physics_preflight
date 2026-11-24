@@ -1197,6 +1197,63 @@ RESULT
   5.2.3 INSTALLED extension: 38/38, ACCEPT_DONE expected=38 ok=yes, gate PASS,
   0 raw crash signatures; certified child invoked=27 missing_ev=[] mismatch=[],
   and the overall / per-check-status / summary verdict lies each REJECTED.
+  Windows CI run 45476157670 (headSha 1ddb1cf = 5a4165c + toggle; branch tip
+  8a6ece0 identical) genuinely PASS, verified in logs: 4x SUITE_DONE expected=805
+  ok=yes + GATE PASS version-enforced; ACCEPT_DONE 38/38 expected=38 ok=yes +
+  GATE PASS; certified child invoked=27 missing_ev=[] mismatch=[] (PASS), the
+  overall / per-check-status / summary verdict lies each REJECTED; real-batch
+  marker GATE PASS; 0 raw crash signatures.
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.
+
+======================================================================
+ROUND 27 — THE CUSTOMER-FACING DISPLAY MUST MATCH THE REGISTRY (commit pending)
+======================================================================
+The 10th independent review of 5a4165c returned PARTIAL PASS: R26-1 CLOSED. One
+remaining blocker:
+
+R27-1  valid_cli_scan verified the machine status/summary/overall but never the
+  customer-facing `display` field. A check with a genuine UNKNOWN/WARNING/FAIL
+  result could show "Everything verified -- ready to render." while findings,
+  status, summary and overall stayed consistent, so the gate accepted it.
+
+REPRODUCED ON REAL BLENDER 5.2.3 (findings/status/summary/overall + evidence
+intact; only `display` rewritten), before coding: check #26 (UNKNOWN) display
+rewritten to "Everything verified -- ready to render." vs the registry canonical
+display_name(meta, UNKNOWN) = "Couldn't compare against a settings baseline";
+the committed valid_cli_scan ACCEPTED it.
+
+FIX (tie the display + metadata to the registry's canonical wording)
+  certification/ci/win_acceptance.py
+    * The instrumented child now also records, per check, the registry's CANONICAL
+      metadata: display_name(meta, derived_status) plus the check's name and
+      group, straight from the engine, into the .inv sidecar ({..., meta:{id:
+      {display,name,group}}, schema:1}). _evidence returns it; every valid_cli_scan
+      call passes report_meta.
+    * New display-lie regression (rewrite a non-PASS check's `display` to a
+      reassuring message, findings/verdicts intact) -> REJECTED.
+      EXPECTED_ACCEPT_CHECKS 38 -> 39.
+  tests/gate_check.py
+    * valid_cli_scan gains report_meta: when given, each check's report `display`
+      must equal the registry's display_name(meta, status) and its name/group must
+      match; also check ids must be unique and exactly the registry set, `schema`
+      must be the known value (1), and `summary` must carry no unexpected buckets.
+      A relabelled check, a reassuring display on a non-PASS check, a duplicate id,
+      a wrong schema or a stray summary key is rejected.
+  tests/run_tests.py
+    * 6 new gate_selfcheck regressions (registry-matching report accepted; a
+      reassuring display, a relabelled name, a duplicate id, a wrong schema, and a
+      stray summary bucket each rejected). gate_selfcheck 60 -> 66; grand total
+      805 -> 811.
+  (failsafe/engine.py and report.py unchanged this round.)
+
+RESULT
+  Plain-Python valid_cli_scan cases: all pass. Mac matrix 4.2.9/4.5.9/5.0.1/
+  5.2.3 each 811 passed / 0 failed, SUITE_DONE expected=811 ok=yes, GATE PASS
+  version-enforced, equal totals, release gate PASS. win_acceptance on the real
+  5.2.3 INSTALLED extension: 39/39, ACCEPT_DONE expected=39 ok=yes, gate PASS,
+  0 raw crash signatures; certified child invoked=27 missing_ev=[] mismatch=[],
+  and the display-lie child REJECTED (meta_mismatch=[(7,'display')]).
   Windows CI: pending re-run on this commit. Independent review of the corrected
   commit still required before certification is claimed restored. No merge,
   publication, or spending.

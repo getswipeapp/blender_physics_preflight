@@ -5368,6 +5368,63 @@ def gate_selfcheck_tests():
                 gc.valid_cli_scan(2, _json.dumps(rep_summary_lie), full27, ev_match,
                                   full27, allowed_codes=(0, 1, 2)).ok is False,
                 "rejected", "rejected"))
+
+    # ---- R27-1: customer-facing display + report metadata must match registry --
+    # The machine verdicts can be honest while the DISPLAY wording lies, a check
+    # is relabelled, an id is duplicated, the schema is wrong, or a stray summary
+    # bucket is smuggled in. With the registry's canonical {display,name,group}
+    # (report_meta), the gate rejects all of these. (Live display lie runs in
+    # win_acceptance on real Blender.)
+    def _rep_full(find_ids, displays=None):
+        fset = set(find_ids)
+        checks = []
+        meta = {}
+        for i in range(1, 28):
+            if i in fset:
+                status, findings = "WARNING", [{"status": "WARNING", "object": None,
+                                                "message": "x", "hint": None}]
+                canon = "Warn#%d" % i
+            else:
+                status, findings, canon = "NOT APPLICABLE", [], "NA#%d" % i
+            checks.append({"id": i, "status": status,
+                           "display": (displays or {}).get(i, canon),
+                           "name": "name%d" % i, "group": "grp%d" % i,
+                           "findings": findings})
+            meta[i] = {"display": canon, "name": "name%d" % i, "group": "grp%d" % i}
+        n = len(fset)
+        rep = {"tool": "failsafe", "schema": 1, "checks": checks,
+               "summary": {"FAIL": 0, "WARNING": n, "UNKNOWN": 0, "PASS": 0,
+                           "NOT APPLICABLE": 27 - n}, "overall": "WARNING"}
+        ev = {i: ([["WARNING", None, "x", None]] if i in fset else []) for i in range(1, 28)}
+        return rep, ev, meta
+
+    def _scan(rep, ev, meta):
+        return gc.valid_cli_scan(2, _json.dumps(rep), full27, ev, full27,
+                                 allowed_codes=(0, 1, 2), report_meta=meta).ok
+
+    r_ok, ev_ok, m_ok = _rep_full({1, 7, 8})
+    res.append(("gate_check R27-1: a report whose display/name/group match the registry is ACCEPTED",
+                _scan(r_ok, ev_ok, m_ok) is True, "accepted", "accepted"))
+    r_disp, ev_disp, m_disp = _rep_full({1, 7, 8},
+                                        displays={1: "Everything verified -- ready to render."})
+    res.append(("gate_check R27-1: a reassuring display on a WARNING check is REJECTED",
+                _scan(r_disp, ev_disp, m_disp) is False, "rejected", "rejected"))
+    r_name, ev_name, m_name = _rep_full({1, 7, 8})
+    r_name["checks"][0]["name"] = "evil relabel"
+    res.append(("gate_check R27-1: a relabelled check name is REJECTED",
+                _scan(r_name, ev_name, m_name) is False, "rejected", "rejected"))
+    r_dup, ev_dup, m_dup = _rep_full({1, 7, 8})
+    r_dup["checks"][1]["id"] = 1  # duplicate id 1, drops id 2
+    res.append(("gate_check R27-1: a duplicate/!=registry check id is REJECTED",
+                _scan(r_dup, ev_dup, m_dup) is False, "rejected", "rejected"))
+    r_sch, ev_sch, m_sch = _rep_full({1, 7, 8})
+    r_sch["schema"] = 2
+    res.append(("gate_check R27-1: an unexpected schema is REJECTED",
+                _scan(r_sch, ev_sch, m_sch) is False, "rejected", "rejected"))
+    r_key, ev_key, m_key = _rep_full({1, 7, 8})
+    r_key["summary"]["SNEAKY"] = 0  # stray bucket, non-N/A total unchanged
+    res.append(("gate_check R27-1: an unexpected summary bucket is REJECTED",
+                _scan(r_key, ev_key, m_key) is False, "rejected", "rejected"))
     return res
 
 
@@ -5408,9 +5465,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 60,
+    "gate_selfcheck_tests": 66,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 805
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 811
 
 
 def main():

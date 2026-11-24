@@ -418,7 +418,7 @@ def _derived_overall(statuses):
 
 def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_ids,
                    allowed_codes=(0,), child_stderr="", declared_code=_UNSET,
-                   required_ids=None):
+                   required_ids=None, report_meta=None):
     """R24-1 / R25-1: certify a CLI scan from the SAME child's report AND that
     child's OWN recorded execution evidence — never from a second, independent
     scan.
@@ -446,6 +446,13 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
         verdict that occurred. All are derived from the recorded findings with the
         engine's severity rules, so a report that keeps real UNKNOWN/WARNING/FAIL
         findings yet declares a rosier status, summary or overall is rejected.
+      * report integrity (R27-1) — when ``report_meta`` (the registry's canonical
+        {id: {display, name, group}}, recorded by the child) is given, each
+        check's customer-facing ``display`` must match ``display_name(meta,
+        status)`` and its name/group must match the registry, so an UNKNOWN check
+        cannot show reassuring PASS-style wording and no check can be relabelled.
+        Also: check ids are unique and exactly the registry set, ``schema`` is the
+        known value, and ``summary`` carries no unexpected buckets.
 
     The invocation ids and returned findings MUST come from inside the same child
     process that wrote ``text`` (a recorder wrapped around each registered check
@@ -537,6 +544,50 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
                 reasons.append("report overall=%r disagrees with the findings-"
                                "derived verdict %r (R26-1)"
                                % (jd.get("overall"), exp_overall))
+            # R27-1: the customer-facing display and per-check metadata must match
+            # the registry, and the report's shape must be well-formed. So a check
+            # with a real UNKNOWN/FAIL cannot show reassuring PASS-style wording,
+            # no check can be relabelled, and no duplicate/extra id or summary key
+            # can smuggle a different story past the machine-verdict checks.
+            ids_seen = [c.get("id") for c in checks if isinstance(c, dict)]
+            dups = sorted(i for i in set(ids_seen) if ids_seen.count(i) > 1)
+            if dups:
+                reasons.append("report has duplicate check ids %s (R27-1)" % dups)
+            if set(ids_seen) != set(expected):
+                reasons.append("report check ids %s != registry %s (R27-1)"
+                               % (sorted(set(ids_seen)), expected))
+            if jd.get("schema") != 1:
+                reasons.append("report schema=%r != expected 1 (R27-1)"
+                               % jd.get("schema"))
+            extra_keys = sorted(k for k in rep_summary if k not in exp_summary)
+            if extra_keys:
+                reasons.append("report summary has unexpected keys %s (R27-1)"
+                               % extra_keys)
+            if report_meta:
+                rm = {}
+                for k, val in report_meta.items():
+                    try:
+                        rm[int(k)] = val
+                    except (TypeError, ValueError):
+                        pass
+                rep_by_id = {c.get("id"): c for c in checks if isinstance(c, dict)}
+                meta_bad = []
+                for cid in expected:
+                    want = rm.get(cid)
+                    c = rep_by_id.get(cid, {})
+                    if not isinstance(want, dict):
+                        meta_bad.append((cid, "no canonical meta recorded"))
+                        continue
+                    if c.get("display") != want.get("display"):
+                        meta_bad.append((cid, "display"))
+                    if "name" in c and c.get("name") != want.get("name"):
+                        meta_bad.append((cid, "name"))
+                    if "group" in c and c.get("group") != want.get("group"):
+                        meta_bad.append((cid, "group"))
+                info["meta_mismatch"] = meta_bad[:12]
+                if meta_bad:
+                    reasons.append("report display/name/group disagrees with the "
+                                   "registry %s (R27-1)" % meta_bad[:8])
     elif returned_findings:
         reasons.append("report has no checks array to cross-check returned findings "
                        "(R25-1)")

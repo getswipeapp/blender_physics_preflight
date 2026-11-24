@@ -47,7 +47,8 @@ results = []  # (name, ok, detail)
 # (status-substitution; incomplete per-id evidence) -> 35.
 # R26 added three verdict-consistency repros (overall / per-check status /
 # summary distribution lies) -> 38.
-EXPECTED_ACCEPT_CHECKS = 38
+# R27 added a customer-facing display-lie repro -> 39.
+EXPECTED_ACCEPT_CHECKS = 39
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -312,10 +313,23 @@ def main():
             "import bl_ext.user_default.failsafe.cli as c\n"
             "jp = r'%s'\n"
             "code, out = c.run(['--json'])\n"
+            # R27-1: record the registry's CANONICAL per-check metadata — the
+            # customer-facing display for each check's derived status, plus its
+            # name/group — straight from the engine, so the gate can reject a
+            # report whose display/name/group was rewritten to mislead.
+            "_SEV = e.SEVERITY\n"
+            "_meta = {}\n"
+            "for _m in e.CHECKS:\n"
+            "    _rows = _ret.get(_m.id, [])\n"
+            "    _st = max((_r[0] for _r in _rows), key=lambda s: _SEV.get(s, -1)) "
+            "if _rows else e.Status.NA\n"
+            "    _meta[_m.id] = {'display': e.display_name(_m, _st), "
+            "'name': _m.name, 'group': _m.group}\n"
             + post +
             "open(jp, 'w', encoding='utf-8').write(out)\n"
             "open(jp + '.inv', 'w', encoding='utf-8').write("
-            "json.dumps({'invoked': _inv, 'findings': _ret}))\n"
+            "json.dumps({'invoked': _inv, 'findings': _ret, 'meta': _meta, "
+            "'schema': 1}))\n"
             "open(jp + '.code', 'w').write(str(code))\n"
             "sys.exit(code)\n")
 
@@ -366,7 +380,8 @@ def main():
     def _evidence(inv):
         ids = list((inv or {}).get("invoked", []))
         finds = {int(k): v for k, v in (inv or {}).get("findings", {}).items()}
-        return ids, finds
+        meta = {int(k): v for k, v in (inv or {}).get("meta", {}).items()}
+        return ids, finds, meta
 
     # Scan the REAL saved fixture in an instrumented child; certify the report AND
     # the child's own invocation + exact returned-findings evidence together
@@ -374,11 +389,12 @@ def main():
     # 0/1/2) is accepted; the exit code is only a cross-check.
     rc_ok, decl_ok, raw_ok, out_ok, inv_ok = cli_json_child(instrumented_expr(),
                                                             open_blend=blend)
-    ids_ok, finds_ok = _evidence(inv_ok)
+    ids_ok, finds_ok, meta_ok = _evidence(inv_ok)
     v_ok = gate_check.valid_cli_scan(rc_ok, raw_ok, ids_ok, finds_ok, registry_ids,
                                      child_stderr=out_ok, declared_code=decl_ok,
                                      allowed_codes=(0, 1, 2),
-                                     required_ids=CLOTH_REQUIRED_IDS)
+                                     required_ids=CLOTH_REQUIRED_IDS,
+                                     report_meta=meta_ok)
     check("CLI child proved it INVOKED all 27 + report matches its exact findings "
           "(R22-1/R24-1/R25-1)",
           v_ok.ok, "rc=%s invoked=%s executed=%s missing_ev=%s mismatch=%s; %s"
@@ -390,11 +406,12 @@ def main():
     # own recorded invocation evidence, even though its 27-entry report looks fine.
     rc_rd, decl_rd, raw_rd, out_rd, inv_rd = cli_json_child(
         instrumented_expr(REDUCED_ATTACK), open_blend=blend)
-    ids_rd, finds_rd = _evidence(inv_rd)
+    ids_rd, finds_rd, meta_rd = _evidence(inv_rd)
     v_rd = gate_check.valid_cli_scan(rc_rd, raw_rd, ids_rd, finds_rd, registry_ids,
                                      child_stderr=out_rd, declared_code=decl_rd,
                                      allowed_codes=(0, 1, 2),
-                                     required_ids=CLOTH_REQUIRED_IDS)
+                                     required_ids=CLOTH_REQUIRED_IDS,
+                                     report_meta=meta_rd)
     check("CLI child that INVOKED only {1,7,8,26} is REJECTED on its own evidence (R24-1)",
           not v_rd.ok, "invoked=%s -> %s"
           % (sorted(set(ids_rd)), "; ".join(v_rd.reasons)))
@@ -404,10 +421,10 @@ def main():
     # disagree with the report — a count check could not catch this.
     rc_su, decl_su, raw_su, out_su, inv_su = cli_json_child(
         instrumented_expr(SUBSTITUTE_ATTACK), open_blend=blend)
-    ids_su, finds_su = _evidence(inv_su)
+    ids_su, finds_su, meta_su = _evidence(inv_su)
     v_su = gate_check.valid_cli_scan(rc_su, raw_su, ids_su, finds_su, registry_ids,
                                      child_stderr=out_su, declared_code=decl_su,
-                                     allowed_codes=(0, 1, 2))
+                                     allowed_codes=(0, 1, 2), report_meta=meta_su)
     check("CLI child that SWAPPED a WARNING finding to PASS (same count) is REJECTED (R25-1)",
           not v_su.ok, "mismatch=%s -> %s"
           % (v_su.info.get("findings_mismatch"), "; ".join(v_su.reasons)))
@@ -417,10 +434,10 @@ def main():
     # is a hard failure, not silently skipped.
     rc_mi, decl_mi, raw_mi, out_mi, inv_mi = cli_json_child(
         instrumented_expr(post=MISSING_POST), open_blend=blend)
-    ids_mi, finds_mi = _evidence(inv_mi)
+    ids_mi, finds_mi, meta_mi = _evidence(inv_mi)
     v_mi = gate_check.valid_cli_scan(rc_mi, raw_mi, ids_mi, finds_mi, registry_ids,
                                      child_stderr=out_mi, declared_code=decl_mi,
-                                     allowed_codes=(0, 1, 2))
+                                     allowed_codes=(0, 1, 2), report_meta=meta_mi)
     check("CLI child with incomplete per-check findings evidence is REJECTED (R25-1)",
           not v_mi.ok, "missing_ev=%s -> %s"
           % (v_mi.info.get("evidence_missing"), "; ".join(v_mi.reasons)))
@@ -431,10 +448,10 @@ def main():
     def _verdict_lie(post, info_key, label):
         rc_, decl_, raw_, out_, inv_ = cli_json_child(
             instrumented_expr(post=post), open_blend=blend)
-        ids_, finds_ = _evidence(inv_)
+        ids_, finds_, meta_ = _evidence(inv_)
         v_ = gate_check.valid_cli_scan(rc_, raw_, ids_, finds_, registry_ids,
                                        child_stderr=out_, declared_code=decl_,
-                                       allowed_codes=(0, 1, 2))
+                                       allowed_codes=(0, 1, 2), report_meta=meta_)
         check(label, not v_.ok, "%s=%s -> %s"
               % (info_key, v_.info.get(info_key), "; ".join(v_.reasons)))
 
@@ -444,6 +461,20 @@ def main():
                  "CLI child whose report flips a check status to PASS is REJECTED (R26-1)")
     _verdict_lie(SUMMARY_LIE, "overall_expected",
                  "CLI child whose report fakes the summary distribution is REJECTED (R26-1)")
+
+    # R27-1 repro: the machine status/summary/overall stay honest, but a non-PASS
+    # check's CUSTOMER-FACING display is rewritten to a reassuring message. The
+    # gate derives each check's canonical display from the registry and rejects
+    # the mismatch, so the wording shown to a customer can't contradict the result.
+    DISPLAY_LIE = ("import json as _j\n_d = _j.loads(out)\n"
+                   "for _c in _d['checks']:\n"
+                   "    if _c.get('status') in ('UNKNOWN', 'WARNING', 'FAIL'):\n"
+                   "        _c['display'] = 'Everything verified -- ready to render.'\n"
+                   "        break\n"
+                   "out = _j.dumps(_d)\n")
+    _verdict_lie(DISPLAY_LIE, "meta_mismatch",
+                 "CLI child whose report shows a reassuring display for a non-PASS "
+                 "check is REJECTED (R27-1)")
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
     # report (the crash-exit-0 class) must be REJECTED by the very same gate.
