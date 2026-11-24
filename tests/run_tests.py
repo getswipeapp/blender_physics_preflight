@@ -5160,6 +5160,84 @@ def gate_selfcheck_tests():
                 gc.valid_cli_report(2, genuine, declared_code=2,
                                     allowed_codes=(0, 1, 2)).ok is True,
                 "accepted", "accepted"))
+
+    # ---- R22-1: 27 LISTED checks must not pass for a PARTIAL scan ----------
+    # min_executed=1 only proves SOME check ran, so a scan that executed one of 27
+    # (engine.run_all returning a single Result) still passed. The fixture a caller
+    # scans is known to exercise a SET of checks; requiring that whole set rejects
+    # a scan that ran fewer, because the missing ids are still N/A. Verified on
+    # real Blender: the cloth fixture executes {1,7,8,9,17,26}.
+    def _report_ids(exec_ids, status="PASS"):
+        """27-check report where ``exec_ids`` reached ``status`` and the rest are
+        N/A, with a summary that agrees (R21-2 integrity)."""
+        exec_ids = set(exec_ids)
+        checks = [{"id": i, "status": status if i in exec_ids else "NOT APPLICABLE"}
+                  for i in range(1, 28)]
+        n = len(exec_ids)
+        key = {"PASS": "PASS", "WARNING": "WARNING", "UNKNOWN": "UNKNOWN"}[status]
+        summary = {"FAIL": 0, "WARNING": 0, "UNKNOWN": 0, "PASS": 0,
+                   "NOT APPLICABLE": 27 - n}
+        summary[key] = n
+        return _json.dumps({"tool": "failsafe", "schema": 1, "checks": checks,
+                            "summary": summary, "overall": "PASS"})
+
+    REQ = frozenset({1, 7, 8, 26})  # the cloth fixture's structural check set
+    full = _report_ids({1, 7, 8, 9, 17, 26})  # every required id executed
+    res.append(("gate_check R22-1: a scan that executed all required fixture checks is ACCEPTED",
+                gc.valid_cli_report(0, full, required_ids=REQ).ok is True,
+                "accepted", "accepted"))
+    one_missing = _report_ids({1, 7, 9, 17})  # required #8 and #26 still N/A
+    res.append(("gate_check R22-1: a scan missing a required fixture check (still N/A) is REJECTED",
+                gc.valid_cli_report(0, one_missing, required_ids=REQ).ok is False,
+                "rejected", "rejected"))
+    partial_one = _report_ids({1})  # a 1-of-27 partial scan
+    res.append(("gate_check R22-1: a 1-of-27 partial scan is REJECTED against the required set",
+                gc.valid_cli_report(0, partial_one, required_ids=REQ).ok is False,
+                "rejected", "rejected"))
+    # Without required_ids the same 1-of-27 report still satisfies min_executed=1 —
+    # documenting exactly why the required SET (not a count) is the real defense.
+    res.append(("gate_check R22-1: min_executed alone still accepts 1-of-27 (why the SET is needed)",
+                gc.valid_cli_report(0, partial_one).ok is True,
+                "accepted", "accepted"))
+
+    # ---- R22: an internal check EXECUTION error is not a certifiable scan --
+    # A registered check that RAISES becomes an UNKNOWN finding carrying engine's
+    # stable internal-error message; the report still has 27 checks and execution
+    # evidence, so the earlier checks pass it. The gate rejects it on that marker,
+    # while a legitimate "Couldn't verify" UNKNOWN (different message) is kept.
+    ie_report = _json.dumps({
+        "tool": "failsafe", "schema": 1,
+        "checks": [{"id": 1, "status": "PASS", "findings": []},
+                   {"id": 2, "status": "UNKNOWN",
+                    "findings": [{"status": "UNKNOWN",
+                                  "message": engine.CHECK_INTERNAL_ERROR_MSG,
+                                  "hint": "...last 400 chars of a traceback..."}]}]
+                  + [{"id": i, "status": "NOT APPLICABLE"} for i in range(3, 28)],
+        "summary": {"FAIL": 0, "WARNING": 0, "UNKNOWN": 1, "PASS": 1,
+                    "NOT APPLICABLE": 25},
+        "overall": "UNKNOWN"})
+    res.append(("gate_check R22: a report where a check hit an internal error is REJECTED",
+                gc.valid_cli_report(2, ie_report, allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
+    legit_unknown = _json.dumps({
+        "tool": "failsafe", "schema": 1,
+        "checks": [{"id": 1, "status": "PASS", "findings": []},
+                   {"id": 2, "status": "UNKNOWN",
+                    "findings": [{"status": "UNKNOWN",
+                                  "message": "Couldn't verify: no baseline saved yet.",
+                                  "hint": "Save a baseline first."}]}]
+                  + [{"id": i, "status": "NOT APPLICABLE"} for i in range(3, 28)],
+        "summary": {"FAIL": 0, "WARNING": 0, "UNKNOWN": 1, "PASS": 1,
+                    "NOT APPLICABLE": 25},
+        "overall": "UNKNOWN"})
+    res.append(("gate_check R22: a legitimate 'Couldn't verify' UNKNOWN is PRESERVED (accepted)",
+                gc.valid_cli_report(2, legit_unknown, allowed_codes=(0, 1, 2)).ok is True,
+                "accepted", "accepted"))
+    # Lockstep: the gate's marker must stay a substring of engine's actual message,
+    # so a future reword of one without the other can never silently stop matching.
+    res.append(("gate_check R22: the gate internal-error marker matches engine's message",
+                gc.CHECK_INTERNAL_ERROR in engine.CHECK_INTERNAL_ERROR_MSG,
+                "matches", "matches"))
     return res
 
 
@@ -5200,9 +5278,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 38,
+    "gate_selfcheck_tests": 45,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 783
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 790
 
 
 def main():

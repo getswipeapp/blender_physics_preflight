@@ -861,3 +861,81 @@ adversarial children (no-report, crash-after-write, run_all->[]) REJECTED.
 Windows CI: pending re-run on this commit. Independent review of the corrected
 commit still required before certification is claimed restored. No merge,
 publication, or spending.
+
+======================================================================
+ROUND 22 — PARTIAL-SCAN + INTERNAL-CHECK-ERROR HARDENING (commit pending)
+======================================================================
+The 5th independent review of 1f746a8/5d54b73 returned PARTIAL PASS: R21-1
+(real subprocess result/stderr) and R21-2 (zero-result all-N/A) ACCEPTED; two
+new source-traced blockers:
+
+R22-1  A PARTIALLY executed scan still certifies.
+  valid_cli_report required only min_executed=1. A scan that ran ONE of 27
+  checks (engine.run_all returning a single Result) yields a 27-entry report
+  with 1 non-N/A + 26 N/A, a matching summary and a defined exit code — and was
+  ACCEPTED. "27 listed" never proved "27 ran".
+
+R22 (internal error)  A registered check that RAISES still certifies.
+  engine.run_all converts a check exception into one UNKNOWN finding
+  "This check could not run (internal error). Please report it." with
+  hint=traceback.format_exc()[-400:]. Overall is non-clean (exit 2, allowed),
+  the report still has 27 checks with execution evidence, and the gate's
+  internal-error string was "Failsafe internal error" (the WHOLE-CLI wrapper
+  message, cli.py), NOT this per-check message — so it was not rejected. The
+  400-char tail also drops the "Traceback (most recent call last)" header on a
+  long traceback, so a traceback-only detector could miss it too.
+
+REPRODUCED ON REAL BLENDER 5.2.3 (installed extension), before coding:
+  * run_all()[:1] -> report non-N/A ids [1]; CURRENT valid_cli_report(
+    min_executed=1) ACCEPTS it (ok=True). 
+  * one check raising -> report carries "This check could not run (internal
+    error)" = True, "Traceback (most recent call last)" = False (header
+    truncated), overall non-clean, exit 2; CURRENT gate ACCEPTS at exit 2.
+  * Authoritative CLI-child scan of the saved cloth fixture executes check ids
+    {1, 7, 8, 9, 17, 26} (rc=2, executed=6, findings=7) — matches R21.
+
+CHECK NAMES (relevant): 1 Scale/rotation applied; 7 Cloth/soft body has a
+collider; 8 No negative/inherited scale; 9 Object sizes realistic; 17
+Simulation is baked; 26 Tracked settings vs baseline.
+
+FIX
+  tests/gate_check.py
+    * New constant CHECK_INTERNAL_ERROR = "This check could not run (internal
+      error)". valid_cli_report now REJECTS any report/stderr carrying it — a
+      real per-check execution failure, distinct from a legitimate "Couldn't
+      verify" UNKNOWN (which is preserved). Anchored on the stable MESSAGE, not
+      the truncatable traceback, so a long traceback can't hide it.
+    * valid_cli_report(..., required_ids=None): when given, EVERY one of those
+      registered check ids must have EXECUTED (non-N/A). A count floor only
+      proves SOME check ran; requiring the fixture's structural SET rejects a
+      scan that ran fewer (the missing ids are still N/A).
+  failsafe/engine.py
+    * Promoted the per-check message to module constant CHECK_INTERNAL_ERROR_MSG
+      so the gate marker stays a substring of it (an in-suite regression asserts
+      the lockstep). Behaviour unchanged.
+  certification/ci/win_acceptance.py
+    * CLOTH_REQUIRED_IDS = {1, 7, 8, 26} — the structurally-forced subset of the
+      cloth fixture's executed set (grounded in the real 5.2.3 child scan;
+      #1/#8 run for every object, #7 because of the CLOTH modifier, #26 always).
+    * The real-fixture clean scan now passes required_ids=CLOTH_REQUIRED_IDS.
+    * Two new adversarial child regressions: a PARTIAL scan (run_all[:1]) is
+      REJECTED (missing required ids); a scan where a check RAISES (internal
+      error) is REJECTED (marker). EXPECTED_ACCEPT_CHECKS 28 -> 30.
+  tests/run_tests.py
+    * 7 new gate_selfcheck regressions (R22-1 required-set accept/reject, the
+      1-of-27 partial reject, the min_executed-alone-accepts documentation case,
+      the internal-error reject, the legitimate-UNKNOWN-preserved accept, and
+      the engine/gate marker lockstep). gate_selfcheck 38 -> 45; grand total
+      783 -> 790.
+
+RESULT
+  Plain-Python valid_cli_report cases: all pass. Mac matrix 4.2.9/4.5.9/5.0.1/
+  5.2.3 each 790 passed / 0 failed, SUITE_DONE expected=790 ok=yes, GATE PASS
+  version-enforced, equal totals, release gate PASS. win_acceptance on the real
+  5.2.3 INSTALLED extension: 30/30, ACCEPT_DONE expected=30 ok=yes, gate PASS,
+  0 raw crash signatures; the real-fixture scan ACCEPTED (executed=6, missing=[],
+  rc=2) and all four adversarial children (no-report, crash-after-write,
+  run_all->[], run_all[:1] partial) + the internal-error child REJECTED.
+  Windows CI: pending re-run on this commit. Independent review of the corrected
+  commit still required before certification is claimed restored. No merge,
+  publication, or spending.

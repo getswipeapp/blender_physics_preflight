@@ -79,6 +79,16 @@ MEASURE_MARKERS = (
 # entries" alone never proves 27 checks executed.
 _NA_DISPLAY = "NOT APPLICABLE"
 
+# Stable marker a report carries when a registered check RAISED inside
+# engine.run_all: that check's one finding has this message (engine
+# CHECK_INTERNAL_ERROR_MSG begins with it). It is a REAL execution failure, NOT a
+# legitimate "Couldn't verify" UNKNOWN, so a report carrying it is not a
+# certifiable scan (R22). Detection anchors on this stable MESSAGE, never on the
+# traceback text — engine truncates the traceback to its tail and a long one
+# loses its "Traceback (most recent call last)" header, so a traceback-only check
+# could miss it; the message is always present whatever the traceback length.
+CHECK_INTERNAL_ERROR = "This check could not run (internal error)"
+
 # Distinguishes "caller passed declared_code=None" from "caller passed nothing".
 _UNSET = object()
 
@@ -195,7 +205,8 @@ def require_marker(text, marker, forbidden=(), exit_code=None):
 
 
 def valid_cli_report(returncode, text, expected_checks=27, min_executed=1,
-                     allowed_codes=(0,), child_stderr="", declared_code=_UNSET):
+                     allowed_codes=(0,), child_stderr="", declared_code=_UNSET,
+                     required_ids=None):
     """A CLI scan child counts as a genuine, complete scan ONLY if ALL hold:
 
       * R20-1: it produced a complete, valid Failsafe JSON report (parses, is a
@@ -216,6 +227,18 @@ def valid_cli_report(returncode, text, expected_checks=27, min_executed=1,
         would otherwise be accepted. The summary's non-N/A tally must also match
         the checks array, so a forged summary cannot fake execution. Legitimate
         individual N/A results are preserved; only the all-N/A case is rejected.
+      * R22-1: when ``required_ids`` is given, EVERY one of those registered check
+        ids must have EXECUTED (non-N/A) in this report. ``min_executed`` alone
+        only proves *some* check ran, so a partial scan that ran just one of 27
+        (e.g. engine.run_all returning a single Result) still passed. A fixture
+        the caller controls is known to exercise a specific SET of checks;
+        requiring that whole set rejects a scan that ran fewer, because the
+        missing checks are still N/A and "27 listed" never proves they ran.
+      * R22: a report carrying the per-check internal-error marker
+        (``CHECK_INTERNAL_ERROR`` — a registered check RAISED) is rejected. This
+        is distinct from a legitimate "Couldn't verify" UNKNOWN, which is
+        preserved; only a genuine internal execution failure is rejected, and the
+        detection does not depend on the (truncatable) traceback text.
 
     ``allowed_codes`` defaults to ``(0,)`` (a clean verdict); a real scan of a
     fixture that legitimately WARNs/UNKNOWNs reaches a defined verdict (1/2) and
@@ -247,6 +270,13 @@ def valid_cli_report(returncode, text, expected_checks=27, min_executed=1,
             reasons.append("crash signature present: %r" % sig)
     if "Failsafe internal error" in blob:
         reasons.append("CLI reported an internal error")
+    # R22: a registered check that RAISED is reported as an UNKNOWN finding with
+    # this stable message. That is a real execution failure, not a legitimate
+    # "Couldn't verify" UNKNOWN, so the scan cannot certify. Anchored on the
+    # message (not the traceback, which engine truncates and can lose its header).
+    if CHECK_INTERNAL_ERROR in blob:
+        reasons.append("a registered check hit an internal error (not a "
+                       "legitimate UNKNOWN): %r (R22)" % CHECK_INTERNAL_ERROR)
     if not text.strip():
         reasons.append("empty report (the scan produced no output)")
         return Verdict(False, reasons, info)
@@ -296,6 +326,23 @@ def valid_cli_report(returncode, text, expected_checks=27, min_executed=1,
                                    "executed checks (R21-2)" % (non_na, executed))
             except (TypeError, ValueError):
                 reasons.append("summary counts are not integers")
+        # R22-1: a count floor (min_executed) only proves SOME check ran, so a
+        # 1-of-27 partial scan still passed. The fixture the caller scans is known
+        # to exercise a specific SET of checks; require every one of them to have
+        # executed (non-N/A), so a scan that ran fewer is rejected — the missing
+        # ids are still N/A and "27 listed" never proves they ran.
+        if required_ids:
+            executed_ids = {c.get("id") for c in checks if isinstance(c, dict)
+                            and c.get("status") != _NA_DISPLAY}
+            missing = sorted(i for i in required_ids if i not in executed_ids)
+            info["required_missing"] = missing
+            if missing:
+                reasons.append("required checks did not execute (still N/A): %s — "
+                               "a 27-entry report does not prove these ran (R22-1)"
+                               % missing)
+    elif required_ids:
+        reasons.append("report has no checks array; required checks %s could not "
+                       "be confirmed to execute (R22-1)" % sorted(required_ids))
     return Verdict(len(reasons) == 0, reasons, info)
 
 

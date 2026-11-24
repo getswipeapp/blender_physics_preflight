@@ -185,6 +185,16 @@ class ScanContext:
         return self._dg
 
 
+# Stable message emitted for a check that RAISES (see run_all). The certification
+# gate (tests/gate_check.CHECK_INTERNAL_ERROR) matches a substring of this to
+# reject a scan where a check failed internally, distinct from a legitimate
+# "Couldn't verify" UNKNOWN (R22). Detection anchors on THIS message, not the
+# traceback below (truncated to its tail, so a long traceback loses its header):
+# an in-suite regression asserts the gate marker stays a substring of it.
+CHECK_INTERNAL_ERROR_MSG = ("This check could not run (internal error). "
+                            "Please report it.")
+
+
 def run_all(context, hash_verify=None):
     """Run every registered check. Returns a flat list[Result].
 
@@ -203,10 +213,7 @@ def run_all(context, hash_verify=None):
             out = meta.func(ctx, mk)
         except Exception:
             tb = traceback.format_exc()[-400:]
-            out = [mk(Status.UNKNOWN,
-                      "This check could not run (internal error). "
-                      "Please report it.",
-                      hint=tb)]
+            out = [mk(Status.UNKNOWN, CHECK_INTERNAL_ERROR_MSG, hint=tb)]
         if out:
             results.extend(out)
     return results

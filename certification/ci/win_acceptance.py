@@ -40,7 +40,20 @@ results = []  # (name, ok, detail)
 # counting the check() calls on the success path if acceptance checks change.
 # R21 added two CLI regressions (crash-after-write; zero-result scan) and reworked
 # the clean-scan check, taking the success-path count from 26 to 28.
-EXPECTED_ACCEPT_CHECKS = 28
+# R22 added two more (partial scan; internal check error) -> 30.
+EXPECTED_ACCEPT_CHECKS = 30
+
+# R22-1: the saved cloth fixture structurally guarantees these registered checks
+# EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
+# returning a single Result) is rejected — a 27-entry report never proves these
+# ran. Grounded in the real CLI-child scan on 5.2.3, which executes
+# {1, 7, 8, 9, 17, 26}; this is the stable, structurally-forced subset:
+#   #1  Scale and rotation are applied   -> runs for every object
+#   #7  Cloth/soft body has a collider   -> runs because the fixture has a CLOTH
+#                                           modifier (proves the physics path ran)
+#   #8  No negative or inherited scale   -> runs for every object
+#   #26 Tracked settings vs baseline     -> always runs (UNKNOWN without a baseline)
+CLOTH_REQUIRED_IDS = frozenset({1, 7, 8, 26})
 
 
 def _safe(detail):
@@ -265,10 +278,13 @@ def main():
     rc_ok, decl_ok, raw_ok, out_ok = cli_json_child(scan_expr, open_blend=blend)
     v_ok = gate_check.valid_cli_report(rc_ok, raw_ok, child_stderr=out_ok,
                                        declared_code=decl_ok,
-                                       allowed_codes=(0, 1, 2))
-    check("CLI scan of the real fixture -> a complete, EXECUTED 27-check report (R21-2)",
-          v_ok.ok, "rc=%s executed=%s findings=%s; %s"
+                                       allowed_codes=(0, 1, 2),
+                                       required_ids=CLOTH_REQUIRED_IDS)
+    check("CLI scan of the real fixture -> a complete report with the REQUIRED "
+          "fixture checks EXECUTED (R21-2/R22-1)",
+          v_ok.ok, "rc=%s executed=%s findings=%s missing=%s; %s"
           % (rc_ok, v_ok.info.get("executed"), v_ok.info.get("findings"),
+             v_ok.info.get("required_missing"),
              "; ".join(v_ok.reasons) or "ok"))
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
@@ -318,6 +334,54 @@ def main():
     check("CLI zero-result scan (run_all->[]) is an all-N/A report, REJECTED (R21-2)",
           not v_em.ok, "rc=%s executed=%s -> %s"
           % (rc_em, v_em.info.get("executed"), "; ".join(v_em.reasons)))
+
+    # R22-1 repro: a PARTIALLY executed scan. Force engine.run_all to return only
+    # its FIRST Result, so the CLI emits a 27-entry report with exactly ONE
+    # non-N/A check and 26 N/A. min_executed=1 alone would ACCEPT it; requiring the
+    # fixture's structural check SET (CLOTH_REQUIRED_IDS) REJECTS it, because the
+    # other required checks are still N/A. "27 listed" never proves 27 ran.
+    partial_expr = ("import sys; "
+                    "import bl_ext.user_default.failsafe.engine as e; "
+                    "_orig = e.run_all; "
+                    "e.run_all = (lambda *a, **k: _orig(*a, **k)[:1]); "
+                    "import bl_ext.user_default.failsafe.cli as c; "
+                    "jp = r'%s'; code, out = c.run(['--json']); "
+                    "open(jp, 'w', encoding='utf-8').write(out); "
+                    "open(jp + '.code', 'w').write(str(code)); "
+                    "sys.exit(code)")
+    rc_pt, decl_pt, raw_pt, out_pt = cli_json_child(partial_expr, open_blend=blend)
+    v_pt = gate_check.valid_cli_report(rc_pt, raw_pt, child_stderr=out_pt,
+                                       declared_code=decl_pt,
+                                       allowed_codes=(0, 1, 2),
+                                       required_ids=CLOTH_REQUIRED_IDS)
+    check("CLI partial scan (run_all[:1], 1-of-27 executed) is REJECTED (R22-1)",
+          not v_pt.ok, "rc=%s executed=%s missing=%s -> %s"
+          % (rc_pt, v_pt.info.get("executed"), v_pt.info.get("required_missing"),
+             "; ".join(v_pt.reasons)))
+
+    # R22 repro: a registered check RAISES. engine.run_all turns it into an
+    # UNKNOWN "internal error" finding; overall is non-clean (exit 2, within
+    # allowed_codes) and the report still has 27 checks with execution evidence —
+    # so the earlier checks would pass it. The gate must REJECT it on the stable
+    # internal-error marker, while leaving legitimate "Couldn't verify" UNKNOWNs
+    # (which this fixture also has) accepted.
+    ie_expr = ("import sys; "
+               "import bl_ext.user_default.failsafe.engine as e; "
+               "e.CHECKS[0].func = (lambda ctx, mk: (_ for _ in ()).throw("
+               "RuntimeError('boom ' * 200))); "
+               "import bl_ext.user_default.failsafe.cli as c; "
+               "jp = r'%s'; code, out = c.run(['--json']); "
+               "open(jp, 'w', encoding='utf-8').write(out); "
+               "open(jp + '.code', 'w').write(str(code)); "
+               "sys.exit(code)")
+    rc_ie, decl_ie, raw_ie, out_ie = cli_json_child(ie_expr, open_blend=blend)
+    v_ie = gate_check.valid_cli_report(rc_ie, raw_ie, child_stderr=out_ie,
+                                       declared_code=decl_ie,
+                                       allowed_codes=(0, 1, 2))
+    has_marker = gate_check.CHECK_INTERNAL_ERROR in raw_ie
+    check("CLI scan where a check RAISED (internal error) is REJECTED (R22)",
+          (not v_ie.ok) and has_marker, "rc=%s marker=%s -> %s"
+          % (rc_ie, has_marker, "; ".join(v_ie.reasons)))
 
     _finish()
 
