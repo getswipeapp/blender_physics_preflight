@@ -1010,6 +1010,73 @@ RESULT
   5.2.3 INSTALLED extension: 32/32, ACCEPT_DONE expected=32 ok=yes, gate PASS,
   0 raw crash signatures; the invocation proof logged invoked=27 unique=27
   na_but_invoked=20, and the skip repro was REJECTED (missing 5..27).
+  Windows CI run 45420448793 (headSha 7ec0bc1 = aa224d3 + toggle; branch tip
+  18cf03d identical) genuinely PASS, verified in logs: 4x SUITE_DONE expected=795
+  ok=yes + GATE PASS version-enforced; ACCEPT_DONE 32/32 expected=32 ok=yes +
+  GATE PASS; invocation proof invoked=27 unique=27 na_but_invoked=20 (PASS) and
+  the skip repro REJECTED; real-batch marker GATE PASS; 0 raw crash signatures.
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.
+
+======================================================================
+ROUND 24 — TIE THE INVOCATION PROOF TO THE CERTIFIED CHILD (commit pending)
+======================================================================
+The 7th independent review of aa224d3 returned PARTIAL PASS: R23's invocation
+recorder works, but it ran in the PARENT acceptance process while the certified
+JSON report comes from a separate CLI CHILD.
+
+R24-1  The proof watched a different scan. win_acceptance certified the CLI
+  child via valid_cli_report(required_ids=...) but separately ran eng.run_all()
+  with all 27 wrapped INSIDE THE PARENT. Proving the parent ran all 27 does not
+  prove the child did.
+
+REPRODUCED ON REAL BLENDER 5.2.3 (the child self-records, before coding):
+  * normal   child -> invoked=27, report findings match returns, ACCEPTED.
+  * reduced  child (its run_all invokes only {1,7,8,26}) -> the child's OWN
+    record shows invoked=4 -> REJECTED (R24-1). Its 27-entry report + required
+    ids would otherwise look fine.
+  * suppress child (invokes all 27 via the real run_all, then drops 23 results)
+    -> invoked=27 but the per-check returned-findings cross-check flags ids
+    [9,17,18] whose findings the report dropped -> REJECTED (also closes the
+    result-SUPPRESSION boundary left open in R23).
+
+FIX (instrument the ACTUAL child; validate its own evidence with its report)
+  certification/ci/win_acceptance.py
+    * instrumented_expr(attack=""): the CLI child, before running the scan, wraps
+      every registered check function with a recorder that notes (a) the check
+      was invoked and (b) how many findings it returned; after the scan it writes
+      {invoked:[...], returns:{id:n}} to a <report>.inv sidecar. cli_json_child
+      now clears+reads that sidecar and returns it (5-tuple).
+    * The clean scan is certified by gate_check.valid_cli_scan on the SAME
+      child's report + its .inv evidence (+ real exit, declared code, required
+      ids). Two attack regressions: a child whose run_all invokes only {1,7,8,26}
+      (REJECTED on invocation) and one that invokes all 27 then drops 23 results
+      (REJECTED on the suppression cross-check). EXPECTED_ACCEPT_CHECKS 32 -> 34.
+    * The R23 parent-process invocation proof + omitted-invocation repro are kept
+      as additional in-process regressions, but they are no longer the
+      certification evidence for the child.
+  tests/gate_check.py
+    * New valid_cli_scan(returncode, text, invoked_ids, returned_counts,
+      expected_ids, ...): combines valid_cli_report (report validity/execution/
+      exit) + valid_invocations (THAT child invoked every registered check once)
+      + a result-faithfulness cross-check (report findings count per id == what
+      the check returned inside the child). The invocation ids and returned
+      counts MUST come from inside the same child that wrote the report.
+  tests/run_tests.py
+    * 4 new gate_selfcheck regressions for valid_cli_scan (full invocation +
+      matching report accepted; invoked-only-subset rejected; a dropped result /
+      suppression rejected; complete evidence but a bad exit rejected).
+      gate_selfcheck 50 -> 54; grand total 795 -> 799.
+  (failsafe/engine.py unchanged this round.)
+
+RESULT
+  Plain-Python valid_cli_scan cases: all pass. Mac matrix 4.2.9/4.5.9/5.0.1/
+  5.2.3 each 799 passed / 0 failed, SUITE_DONE expected=799 ok=yes, GATE PASS
+  version-enforced, equal totals, release gate PASS. win_acceptance on the real
+  5.2.3 INSTALLED extension: 34/34, ACCEPT_DONE expected=34 ok=yes, gate PASS,
+  0 raw crash signatures; the certified child logged invoked=27 executed=6
+  findings=7 missing=[] suppressed=[], the reduced child REJECTED (invoked=4) and
+  the suppress child REJECTED (suppressed=[9,17,18]).
   Windows CI: pending re-run on this commit. Independent review of the corrected
   commit still required before certification is claimed restored. No merge,
   publication, or spending.

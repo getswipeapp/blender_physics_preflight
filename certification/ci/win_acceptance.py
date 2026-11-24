@@ -42,7 +42,8 @@ results = []  # (name, ok, detail)
 # the clean-scan check, taking the success-path count from 26 to 28.
 # R22 added two more (partial scan; internal check error) -> 30.
 # R23 added two more (invocation proof; omitted-invocation repro) -> 32.
-EXPECTED_ACCEPT_CHECKS = 32
+# R24 added two more (child-invoked-only-subset; child-suppressed-results) -> 34.
+EXPECTED_ACCEPT_CHECKS = 34
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -237,10 +238,12 @@ def main():
     def cli_json_child(body_expr, open_blend=None):
         jp = os.path.join(d, "cli_report.json")
         cp = jp + ".code"
-        # Clear BOTH the report and the exit-code sidecar first, so a stale file
-        # from a previous child can never stand in for this one's result (a child
-        # that writes neither must read back as rc=None / empty, not a cached 0).
-        for f in (jp, cp):
+        ip = jp + ".inv"
+        # Clear the report, exit-code AND invocation sidecars first, so a stale
+        # file from a previous child can never stand in for this one's result (a
+        # child that writes none must read back as rc=None / empty / no evidence,
+        # not a cached value).
+        for f in (jp, cp, ip):
             try:
                 os.remove(f)
             except OSError:
@@ -264,34 +267,126 @@ def main():
                 declared = int(open(cp).read().strip())
             except ValueError:
                 declared = None
+        # R24-1: the child's OWN execution evidence (ids it invoked + findings it
+        # returned per check), recorded inside the SAME process that wrote the
+        # report. None when the child did not write it.
+        inv = None
+        if os.path.isfile(ip):
+            try:
+                inv = json.load(open(ip, encoding="utf-8"))
+            except Exception:
+                inv = None
         child_out = (p.stdout or "") + "\n" + (p.stderr or "")
-        return p.returncode, declared, raw, child_out
+        return p.returncode, declared, raw, child_out, inv
 
-    scan_expr = ("import sys; import bl_ext.user_default.failsafe.cli as c; "
-                 "jp = r'%s'; code, out = c.run(['--json']); "
-                 "open(jp, 'w', encoding='utf-8').write(out); "
-                 "open(jp + '.code', 'w').write(str(code)); "
-                 "sys.exit(code)")
-    # Scan the REAL saved fixture (a cloth object), so checks genuinely execute
-    # and the report carries non-N/A results. A defined scan verdict (clean /
-    # blocking / unverified = 0/1/2) is accepted; the exit code is only a sanity
-    # cross-check, the complete executed report is the proof (R21-2).
-    rc_ok, decl_ok, raw_ok, out_ok = cli_json_child(scan_expr, open_blend=blend)
-    v_ok = gate_check.valid_cli_report(rc_ok, raw_ok, child_stderr=out_ok,
-                                       declared_code=decl_ok,
-                                       allowed_codes=(0, 1, 2),
-                                       required_ids=CLOTH_REQUIRED_IDS)
-    check("CLI scan of the real fixture -> a complete report with the REQUIRED "
-          "fixture checks EXECUTED (R21-2/R22-1)",
-          v_ok.ok, "rc=%s executed=%s findings=%s missing=%s; %s"
-          % (rc_ok, v_ok.info.get("executed"), v_ok.info.get("findings"),
-             v_ok.info.get("required_missing"),
-             "; ".join(v_ok.reasons) or "ok"))
+    # R24-1: instrument the ACTUAL CLI child being certified. Before it runs the
+    # scan, wrap every registered check function with a recorder that notes (a)
+    # the check was invoked and (b) how many findings it returned; after the scan
+    # write that evidence to a <report>.inv sidecar. valid_cli_scan then certifies
+    # the report AND this same-process evidence together — a second independent
+    # scan can never stand in for the one being certified. ``attack`` lets a
+    # regression cripple the child's run_all to prove the evidence catches it.
+    def instrumented_expr(attack=""):
+        return (
+            "import sys, json\n"
+            "import bl_ext.user_default.failsafe.engine as e\n"
+            "_inv = []\n_ret = {}\n"
+            "def _wrap(mid, fn):\n"
+            "    def rec(ctx, mk):\n"
+            "        _inv.append(mid)\n"
+            "        out = fn(ctx, mk)\n"
+            "        _ret[mid] = len(out or [])\n"
+            "        return out\n"
+            "    return rec\n"
+            "for _m in e.CHECKS:\n    _m.func = _wrap(_m.id, _m.func)\n"
+            + attack +
+            "import bl_ext.user_default.failsafe.cli as c\n"
+            "jp = r'%s'\n"
+            "code, out = c.run(['--json'])\n"
+            "open(jp, 'w', encoding='utf-8').write(out)\n"
+            "open(jp + '.inv', 'w', encoding='utf-8').write("
+            "json.dumps({'invoked': _inv, 'returns': _ret}))\n"
+            "open(jp + '.code', 'w').write(str(code))\n"
+            "sys.exit(code)\n")
+
+    # A child run_all that INVOKES only {1,7,8,26} (and restores nothing it needs
+    # to): the report still lists 27 entries, but the child recorded only 4
+    # invocations.
+    REDUCED_ATTACK = (
+        "def _atk(context, hash_verify=None):\n"
+        "    ctx = e.ScanContext(context, hash_verify=hash_verify)\n"
+        "    out = []\n"
+        "    for meta in e.CHECKS:\n"
+        "        if meta.id in (1, 7, 8, 26):\n"
+        "            r = meta.func(ctx, e._mk(meta))\n"
+        "            if r: out.extend(r)\n"
+        "    return out\n"
+        "e.run_all = _atk\n")
+    # A child run_all that invokes ALL 27 (so invocation looks complete) but then
+    # DROPS every result outside {1,7,8,26}: result suppression.
+    SUPPRESS_ATTACK = (
+        "_orig = e.run_all\n"
+        "e.run_all = (lambda ctx, hash_verify=None: "
+        "[r for r in _orig(ctx, hash_verify=hash_verify) "
+        "if r.check_id in (1, 7, 8, 26)])\n")
+
+    registry_ids = [m.id for m in eng.CHECKS]
+
+    def _evidence(inv):
+        ids = list((inv or {}).get("invoked", []))
+        rets = {int(k): v for k, v in (inv or {}).get("returns", {}).items()}
+        return ids, rets
+
+    # Scan the REAL saved fixture in an instrumented child; certify the report AND
+    # the child's own invocation + returned-result evidence together (R24-1). A
+    # defined scan verdict (clean / blocking / unverified = 0/1/2) is accepted; the
+    # exit code is only a cross-check, the complete EXECUTED+INVOKED report is the
+    # proof.
+    rc_ok, decl_ok, raw_ok, out_ok, inv_ok = cli_json_child(instrumented_expr(),
+                                                            open_blend=blend)
+    ids_ok, rets_ok = _evidence(inv_ok)
+    v_ok = gate_check.valid_cli_scan(rc_ok, raw_ok, ids_ok, rets_ok, registry_ids,
+                                     child_stderr=out_ok, declared_code=decl_ok,
+                                     allowed_codes=(0, 1, 2),
+                                     required_ids=CLOTH_REQUIRED_IDS)
+    check("CLI child proved it INVOKED all 27 checks + report matches its results "
+          "(R21-2/R22-1/R24-1)",
+          v_ok.ok, "rc=%s invoked=%s executed=%s findings=%s missing=%s suppressed=%s; %s"
+          % (rc_ok, v_ok.info.get("invoked"), v_ok.info.get("executed"),
+             v_ok.info.get("findings"), v_ok.info.get("required_missing"),
+             v_ok.info.get("suppressed"), "; ".join(v_ok.reasons) or "ok"))
+
+    # R24-1 repro A: a child whose run_all INVOKED only {1,7,8,26} is REJECTED on
+    # its own recorded invocation evidence, even though its 27-entry report and the
+    # required fixture ids look fine.
+    rc_rd, decl_rd, raw_rd, out_rd, inv_rd = cli_json_child(
+        instrumented_expr(REDUCED_ATTACK), open_blend=blend)
+    ids_rd, rets_rd = _evidence(inv_rd)
+    v_rd = gate_check.valid_cli_scan(rc_rd, raw_rd, ids_rd, rets_rd, registry_ids,
+                                     child_stderr=out_rd, declared_code=decl_rd,
+                                     allowed_codes=(0, 1, 2),
+                                     required_ids=CLOTH_REQUIRED_IDS)
+    check("CLI child that INVOKED only {1,7,8,26} is REJECTED on its own evidence (R24-1)",
+          not v_rd.ok, "invoked=%s -> %s"
+          % (sorted(set(ids_rd)), "; ".join(v_rd.reasons)))
+
+    # R24-1 repro B: a child that invoked all 27 but DROPPED 23 checks' results is
+    # REJECTED on the result-suppression cross-check (its recorded returns disagree
+    # with the report).
+    rc_sp, decl_sp, raw_sp, out_sp, inv_sp = cli_json_child(
+        instrumented_expr(SUPPRESS_ATTACK), open_blend=blend)
+    ids_sp, rets_sp = _evidence(inv_sp)
+    v_sp = gate_check.valid_cli_scan(rc_sp, raw_sp, ids_sp, rets_sp, registry_ids,
+                                     child_stderr=out_sp, declared_code=decl_sp,
+                                     allowed_codes=(0, 1, 2))
+    check("CLI child that invoked all 27 but SUPPRESSED 23 results is REJECTED (R24-1)",
+          not v_sp.ok, "invoked=%s suppressed=%s -> %s"
+          % (len(set(ids_sp)), v_sp.info.get("suppressed"), "; ".join(v_sp.reasons)))
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
     # report (the crash-exit-0 class) must be REJECTED by the very same gate.
     bad_expr = "import sys; jp = r'%s'; sys.exit(0)  # report intentionally unwritten"
-    rc_bad, decl_bad, raw_bad, out_bad = cli_json_child(bad_expr)
+    rc_bad, decl_bad, raw_bad, out_bad, _ = cli_json_child(bad_expr)
     v_bad = gate_check.valid_cli_report(rc_bad, raw_bad, child_stderr=out_bad,
                                         declared_code=decl_bad,
                                         allowed_codes=(0, 1, 2))
@@ -308,7 +403,7 @@ def main():
                   "open(jp, 'w', encoding='utf-8').write(out); "
                   "open(jp + '.code', 'w').write('0'); "
                   "raise RuntimeError('boom AFTER writing a valid report + code=0')")
-    rc_cr, decl_cr, raw_cr, out_cr = cli_json_child(crash_expr, open_blend=blend)
+    rc_cr, decl_cr, raw_cr, out_cr, _ = cli_json_child(crash_expr, open_blend=blend)
     v_cr = gate_check.valid_cli_report(rc_cr, raw_cr, child_stderr=out_cr,
                                        declared_code=decl_cr,
                                        allowed_codes=(0, 1, 2))
@@ -328,7 +423,7 @@ def main():
                   "open(jp, 'w', encoding='utf-8').write(out); "
                   "open(jp + '.code', 'w').write(str(code)); "
                   "sys.exit(code)")
-    rc_em, decl_em, raw_em, out_em = cli_json_child(empty_expr, open_blend=blend)
+    rc_em, decl_em, raw_em, out_em, _ = cli_json_child(empty_expr, open_blend=blend)
     v_em = gate_check.valid_cli_report(rc_em, raw_em, child_stderr=out_em,
                                        declared_code=decl_em,
                                        allowed_codes=(0, 1, 2))
@@ -350,7 +445,7 @@ def main():
                     "open(jp, 'w', encoding='utf-8').write(out); "
                     "open(jp + '.code', 'w').write(str(code)); "
                     "sys.exit(code)")
-    rc_pt, decl_pt, raw_pt, out_pt = cli_json_child(partial_expr, open_blend=blend)
+    rc_pt, decl_pt, raw_pt, out_pt, _ = cli_json_child(partial_expr, open_blend=blend)
     v_pt = gate_check.valid_cli_report(rc_pt, raw_pt, child_stderr=out_pt,
                                        declared_code=decl_pt,
                                        allowed_codes=(0, 1, 2),
@@ -375,7 +470,7 @@ def main():
                "open(jp, 'w', encoding='utf-8').write(out); "
                "open(jp + '.code', 'w').write(str(code)); "
                "sys.exit(code)")
-    rc_ie, decl_ie, raw_ie, out_ie = cli_json_child(ie_expr, open_blend=blend)
+    rc_ie, decl_ie, raw_ie, out_ie, _ = cli_json_child(ie_expr, open_blend=blend)
     v_ie = gate_check.valid_cli_report(rc_ie, raw_ie, child_stderr=out_ie,
                                        declared_code=decl_ie,
                                        allowed_codes=(0, 1, 2))

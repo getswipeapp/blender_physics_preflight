@@ -5264,6 +5264,50 @@ def gate_selfcheck_tests():
     res.append(("gate_check R23-1: an unexpected check id invoked is REJECTED",
                 gc.valid_invocations(full27 + [99], full27).ok is False,
                 "rejected", "rejected"))
+
+    # ---- R24-1: certify the SAME child's report + its own execution evidence --
+    # valid_cli_scan ties the proof to the child being certified: the report must
+    # be valid/executed AND that child must have invoked all 27 checks AND the
+    # report's per-check findings must match what each check returned inside the
+    # child (no suppression). A second, independent scan is never proof of the
+    # first. (The live child-instrumented proof + both attacks run in
+    # win_acceptance on real Blender.)
+    def _rep_find(find_ids):
+        """27-check report where ``find_ids`` are WARNING with one finding each and
+        the rest N/A; summary agrees."""
+        fset = set(find_ids)
+        checks = []
+        for i in range(1, 28):
+            if i in fset:
+                checks.append({"id": i, "status": "WARNING",
+                               "findings": [{"status": "WARNING", "message": "x"}]})
+            else:
+                checks.append({"id": i, "status": "NOT APPLICABLE", "findings": []})
+        n = len(fset)
+        return _json.dumps({"tool": "failsafe", "schema": 1, "checks": checks,
+                            "summary": {"FAIL": 0, "WARNING": n, "UNKNOWN": 0,
+                                        "PASS": 0, "NOT APPLICABLE": 27 - n},
+                            "overall": "WARNING"})
+
+    rep_f = _rep_find({1, 7, 8})
+    returns_match = {i: (1 if i in {1, 7, 8} else 0) for i in full27}
+    res.append(("gate_check R24-1: full invocation + report matching its results is ACCEPTED",
+                gc.valid_cli_scan(2, rep_f, full27, returns_match, full27,
+                                  allowed_codes=(0, 1, 2)).ok is True,
+                "accepted", "accepted"))
+    res.append(("gate_check R24-1: a child that invoked only {1,7,8,26} is REJECTED",
+                gc.valid_cli_scan(2, rep_f, [1, 7, 8, 26], returns_match, full27,
+                                  allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
+    returns_suppressed = {**returns_match, 9: 2}  # check 9 returned 2, report 0
+    res.append(("gate_check R24-1: all invoked but a dropped result (suppression) is REJECTED",
+                gc.valid_cli_scan(2, rep_f, full27, returns_suppressed, full27,
+                                  allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R24-1: complete evidence but a bad exit code is REJECTED",
+                gc.valid_cli_scan(5, rep_f, full27, returns_match, full27,
+                                  allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
     return res
 
 
@@ -5304,9 +5348,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 50,
+    "gate_selfcheck_tests": 54,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 795
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 799
 
 
 def main():
