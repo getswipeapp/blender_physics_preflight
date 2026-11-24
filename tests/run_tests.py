@@ -5238,6 +5238,32 @@ def gate_selfcheck_tests():
     res.append(("gate_check R22: the gate internal-error marker matches engine's message",
                 gc.CHECK_INTERNAL_ERROR in engine.CHECK_INTERNAL_ERROR_MSG,
                 "matches", "matches"))
+
+    # ---- R23-1: prove the scan INVOKED the whole check registry -----------
+    # A report's N/A is ambiguous ("ran and nothing applicable" vs "never ran"),
+    # so counting non-N/A results — even a required SET (required_ids) — cannot
+    # prove all 27 check functions executed: a scan returning results for only
+    # {1,7,8,26} and none for the other 23 still satisfies it. The acceptance
+    # independently records each function's actual invocation (a function that
+    # returns N/A still counts as invoked); valid_invocations requires EXACTLY the
+    # registered ids, once each. (The live all-27-invoked proof, incl. 19 N/A
+    # checks, runs in win_acceptance on real Blender.)
+    full27 = list(range(1, 28))
+    res.append(("gate_check R23-1: all 27 checks invoked once (incl. N/A ones) is ACCEPTED",
+                gc.valid_invocations(full27, full27).ok is True,
+                "accepted", "accepted"))
+    res.append(("gate_check R23-1: a skipped check (missing invocation) is REJECTED",
+                gc.valid_invocations([i for i in full27 if i != 13], full27).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R23-1: only the required subset {1,7,8,26} invoked is REJECTED",
+                gc.valid_invocations([1, 7, 8, 26], full27).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R23-1: a check invoked twice (duplicate call) is REJECTED",
+                gc.valid_invocations(full27 + [7], full27).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R23-1: an unexpected check id invoked is REJECTED",
+                gc.valid_invocations(full27 + [99], full27).ok is False,
+                "rejected", "rejected"))
     return res
 
 
@@ -5278,9 +5304,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 45,
+    "gate_selfcheck_tests": 50,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 790
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 795
 
 
 def main():

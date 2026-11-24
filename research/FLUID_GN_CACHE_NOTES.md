@@ -936,6 +936,80 @@ RESULT
   0 raw crash signatures; the real-fixture scan ACCEPTED (executed=6, missing=[],
   rc=2) and all four adversarial children (no-report, crash-after-write,
   run_all->[], run_all[:1] partial) + the internal-error child REJECTED.
+  Windows CI run 45412455563 (headSha f95be99 = c5144de + push-trigger toggle;
+  branch tip 0312605 identical) genuinely PASS, verified in logs: 4x SUITE_DONE
+  expected=790 ok=yes + GATE PASS version-enforced; ACCEPT_DONE 30/30 expected=30
+  ok=yes + GATE PASS; the live fixture scan ACCEPTED (rc=2 executed=6 missing=[])
+  and all five adversarial children (no-report, crash-after-write, run_all->[],
+  run_all[:1] partial missing [7,8,26], internal-error marker=True) REJECTED;
+  real-batch marker GATE PASS; 0 raw crash signatures (1 redacted token).
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.
+
+======================================================================
+ROUND 23 — PROVE THE WHOLE CHECK REGISTRY WAS INVOKED (commit pending)
+======================================================================
+The 6th independent review of c5144de returned PARTIAL PASS: R22-1 (partial
+scan) and R22 (internal-error) CLOSED, no regression. One remaining gap:
+
+R23-1  The required_ids SET proves only that {1,7,8,26} returned non-N/A — NOT
+  that all 27 registered check FUNCTIONS ran. A report's N/A is ambiguous: it
+  means "the check ran and nothing was applicable" OR "the check never ran".
+  So a scan returning results for only {1,7,8,26} and NONE for the other 23
+  still satisfies required_ids + the summary integrity + the 27 listed entries.
+
+REPRODUCED ON REAL BLENDER 5.2.3 (installed extension), before coding:
+  * A report built from run_all() results filtered to {1,7,8,26} (23 results
+    dropped -> they appear as N/A) is ACCEPTED by valid_cli_report(required_ids=
+    {1,7,8,26}) (ok=True) — confirms the gap.
+  * Independent instrumentation: wrap every registered check fn with a recorder,
+    run a real scan -> invoked = all 27, unique 27, once each; 19-20 of those
+    invoked checks returned N/A (no results) — PROVING a function that returns
+    N/A still counts as invoked, so invocation distinguishes "ran and N/A" from
+    "skipped".
+  * A crippled run_all that iterates only CHECKS[:4] invokes [1,2,3,4] -> the
+    invocation proof rejects it (missing 5..27).
+
+FIX (close the CLASS, not another subset — the reviewer's recommendation)
+  tests/gate_check.py
+    * New valid_invocations(invoked_ids, expected_ids): requires EXACTLY the
+      expected ids, once each — missing (skipped), duplicate, or unexpected ids
+      are hard failures. Independent of the report; counts invocation not
+      results, so N/A-returning checks count. Once every function is proven to
+      have run, a report N/A is unambiguously "ran and nothing applicable".
+  certification/ci/win_acceptance.py
+    * Independent invocation proof: wrap every registered check function with a
+      recorder, run a real in-process scan, require valid_invocations to confirm
+      all 27 invoked once each AND that >0 of them returned N/A (so the proof
+      demonstrably counts N/A-returning checks as invoked). Originals restored in
+      a finally.
+    * Omitted-invocation repro: temporarily shrink the registry so run_all
+      iterates only the first 4 checks; assert valid_invocations REJECTS the
+      result (the skipped functions never fired their recorder). Registry
+      restored after. EXPECTED_ACCEPT_CHECKS 30 -> 32.
+  tests/run_tests.py
+    * 5 new gate_selfcheck regressions for valid_invocations (all-27 incl. N/A
+      accepted; a skipped check rejected; the required subset {1,7,8,26} alone
+      rejected; a duplicate call rejected; an unexpected id rejected).
+      gate_selfcheck 45 -> 50; grand total 790 -> 795.
+  (failsafe/engine.py unchanged this round.)
+
+BOUNDARY (stated honestly): the invocation proof closes the missing-EXECUTION
+class — a check that is skipped / never invoked. The reviewer's exact "wrap
+run_all and drop 23 results" scenario genuinely CALLS the real run_all, so all
+27 functions ARE invoked (the proof confirms 27) and that specific report is
+still accepted — it is result-SUPPRESSION by an already-compromised run_all, a
+different class that no report inspection can defeat (in production run_all is
+not monkeypatched). The invocation proof catches the real risk: a run_all BUG
+or reimplementation that skips checks.
+
+RESULT
+  Plain-Python valid_invocations cases: all pass. Mac matrix 4.2.9/4.5.9/5.0.1/
+  5.2.3 each 795 passed / 0 failed, SUITE_DONE expected=795 ok=yes, GATE PASS
+  version-enforced, equal totals, release gate PASS. win_acceptance on the real
+  5.2.3 INSTALLED extension: 32/32, ACCEPT_DONE expected=32 ok=yes, gate PASS,
+  0 raw crash signatures; the invocation proof logged invoked=27 unique=27
+  na_but_invoked=20, and the skip repro was REJECTED (missing 5..27).
   Windows CI: pending re-run on this commit. Independent review of the corrected
   commit still required before certification is claimed restored. No merge,
   publication, or spending.

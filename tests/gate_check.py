@@ -346,6 +346,39 @@ def valid_cli_report(returncode, text, expected_checks=27, min_executed=1,
     return Verdict(len(reasons) == 0, reasons, info)
 
 
+def valid_invocations(invoked_ids, expected_ids):
+    """R23-1: prove the scan INVOKED every registered check function.
+
+    A report's N/A is ambiguous — it means "the check ran and nothing was
+    applicable" OR "the check never ran" — so counting non-N/A results, or even
+    requiring a fixture's structural subset (``required_ids``), cannot prove the
+    whole registry executed. The acceptance independently records each check
+    function's actual invocation (wrapping every registered func, so a function
+    that legitimately returns N/A / no findings still counts as invoked); this
+    verdict then requires EXACTLY the expected ids, once each. A check that was
+    skipped (missing id) or called twice (duplicate) is a hard failure. Once every
+    function is proven to have run, an N/A in the report is unambiguously "ran and
+    nothing applicable", which closes the whole missing-execution class."""
+    reasons = []
+    invoked = list(invoked_ids)
+    expected = sorted(expected_ids)
+    counts = {}
+    for i in invoked:
+        counts[i] = counts.get(i, 0) + 1
+    missing = [i for i in expected if counts.get(i, 0) == 0]
+    extra = sorted(i for i in counts if i not in set(expected))
+    dups = sorted(i for i, n in counts.items() if n > 1)
+    info = {"invoked": len(invoked), "unique": len(counts),
+            "expected": len(expected)}
+    if missing:
+        reasons.append("checks never invoked (missing from the scan): %s" % missing)
+    if extra:
+        reasons.append("unexpected check ids invoked: %s" % extra)
+    if dups:
+        reasons.append("checks invoked more than once: %s" % dups)
+    return Verdict(len(reasons) == 0, reasons, info)
+
+
 def _main(argv):
     import argparse
     ap = argparse.ArgumentParser(description="Certification gate verdict.")

@@ -41,7 +41,8 @@ results = []  # (name, ok, detail)
 # R21 added two CLI regressions (crash-after-write; zero-result scan) and reworked
 # the clean-scan check, taking the success-path count from 26 to 28.
 # R22 added two more (partial scan; internal check error) -> 30.
-EXPECTED_ACCEPT_CHECKS = 30
+# R23 added two more (invocation proof; omitted-invocation repro) -> 32.
+EXPECTED_ACCEPT_CHECKS = 32
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -382,6 +383,71 @@ def main():
     check("CLI scan where a check RAISED (internal error) is REJECTED (R22)",
           (not v_ie.ok) and has_marker, "rc=%s marker=%s -> %s"
           % (rc_ie, has_marker, "; ".join(v_ie.reasons)))
+
+    # R23-1: prove the scan INVOKES every one of the registered check functions.
+    # A report's N/A is ambiguous ("ran and nothing applicable" vs "never ran"),
+    # so required_ids (non-N/A) and the 27 listed entries cannot prove the whole
+    # registry executed — a scan returning results for only {1,7,8,26} and no
+    # results for the other 23 still satisfies those checks. Independently wrap
+    # every registered check function with a recorder, run a real scan, and
+    # require EXACTLY the registered ids to have been invoked once each. A function
+    # that legitimately returns N/A / no findings STILL fires its recorder, so
+    # this counts invocation, not results, and distinguishes "ran and N/A" from
+    # "skipped". Restore the originals in a finally so nothing leaks.
+    expected_ids = [m.id for m in eng.CHECKS]
+    invoked = []
+    saved_funcs = [(m, m.func) for m in eng.CHECKS]
+
+    def _recorder(target, mid, fn):
+        def rec(ctx, mk):
+            target.append(mid)
+            return fn(ctx, mk)
+        return rec
+    scan_ok = True
+    for m in eng.CHECKS:
+        m.func = _recorder(invoked, m.id, m.func)
+    try:
+        res_inv = eng.run_all(bpy.context)
+    except Exception as exc:
+        scan_ok = False
+        res_inv = []
+        print("invocation-proof scan raised:", repr(exc))
+    finally:
+        for m, fn in saved_funcs:
+            m.func = fn
+    produced = {getattr(r, "check_id", None) for r in res_inv}
+    na_but_invoked = sorted(set(i for i in invoked if i not in produced))
+    v_inv = gate_check.valid_invocations(invoked, expected_ids)
+    check("scan INVOKED every registered check exactly once, incl. N/A ones (R23-1)",
+          scan_ok and v_inv.ok and len(expected_ids) == 27 and len(na_but_invoked) > 0,
+          "invoked=%s unique=%s expected=%s na_but_invoked=%d; %s"
+          % (v_inv.info.get("invoked"), v_inv.info.get("unique"),
+             v_inv.info.get("expected"), len(na_but_invoked),
+             "; ".join(v_inv.reasons) or "ok"))
+
+    # R23-1 repro: a scan that SKIPS checks is caught by that proof. Temporarily
+    # shrink the registry so run_all iterates only a subset, record invocations,
+    # and assert valid_invocations REJECTS it for the missing ids (the skipped
+    # functions never fired their recorder). Restore the full registry after.
+    invoked_skip = []
+    saved_funcs2 = [(m, m.func) for m in eng.CHECKS]
+    for m in eng.CHECKS:
+        m.func = _recorder(invoked_skip, m.id, m.func)
+    saved_checks = list(eng.CHECKS)
+    try:
+        del eng.CHECKS[4:]  # a crippled scan that invokes only the first 4 checks
+        try:
+            eng.run_all(bpy.context)
+        except Exception as exc:
+            print("omitted-invocation repro scan raised:", repr(exc))
+    finally:
+        eng.CHECKS[:] = saved_checks
+        for m, fn in saved_funcs2:
+            m.func = fn
+    v_skip = gate_check.valid_invocations(invoked_skip, expected_ids)
+    check("a scan that SKIPS checks is caught by the invocation proof (R23-1)",
+          not v_skip.ok, "invoked=%s -> %s"
+          % (sorted(set(invoked_skip)), "; ".join(v_skip.reasons)))
 
     _finish()
 
