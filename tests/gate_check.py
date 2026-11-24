@@ -72,6 +72,16 @@ MEASURE_MARKERS = (
     "ACCEPT_MEASURE_ONLY",
 )
 
+# The display token build_json_report emits for a check that produced NO result.
+# An all-NA report means engine.run_all returned nothing for every check: the 27
+# JSON entries are just the static registry, with zero evidence any check ran
+# (R21-2). build_json_report always lists all 27 REGISTERED checks, so "27
+# entries" alone never proves 27 checks executed.
+_NA_DISPLAY = "NOT APPLICABLE"
+
+# Distinguishes "caller passed declared_code=None" from "caller passed nothing".
+_UNSET = object()
+
 
 def _sentinel_re(keyword):
     return re.compile(_SENTINEL_TMPL % re.escape(keyword))
@@ -184,21 +194,58 @@ def require_marker(text, marker, forbidden=(), exit_code=None):
     return Verdict(len(reasons) == 0, reasons, info)
 
 
-def valid_cli_report(returncode, text, expected_checks=27):
-    """R20-1: a CLI scan child counts as a clean pass ONLY if it exited 0 AND
-    produced a complete, valid Failsafe JSON report. Verified real behaviour: a
-    ``blender -b --python-expr`` child that raises a Python error still EXITS 0,
-    so the exit code alone cannot prove the scan ran. This rejects a child that
-    exits 0 with empty / traceback / malformed / incomplete output (wrong check
-    count, missing summary, or an error report)."""
+def valid_cli_report(returncode, text, expected_checks=27, min_executed=1,
+                     allowed_codes=(0,), child_stderr="", declared_code=_UNSET):
+    """A CLI scan child counts as a genuine, complete scan ONLY if ALL hold:
+
+      * R20-1: it produced a complete, valid Failsafe JSON report (parses, is a
+        dict, tool=="failsafe", exactly ``expected_checks`` checks, a non-empty
+        summary, no ``error`` key, no "Failsafe internal error"). Verified real
+        behaviour: a ``blender -b --python-expr`` child that raises a Python
+        error still EXITS 0, so the exit code alone can never prove the scan ran.
+      * R21-1: the REAL process exit code (``returncode``) — NOT a child-written
+        sidecar — is an accepted verdict (``allowed_codes``), and when a
+        ``declared_code`` sidecar is supplied it must AGREE with the real exit. A
+        crash can write a sidecar of 0 then exit; a traceback it leaves on stderr
+        used to be discarded, so ``child_stderr`` is scanned for crash signatures
+        too, not just the report body.
+      * R21-2: at least ``min_executed`` checks actually EXECUTED (status other
+        than "NOT APPLICABLE"). build_json_report always lists all 27 REGISTERED
+        checks, so a zero-result scan (engine.run_all()==[], or a no-op scan of an
+        empty scene) still yields 27 entries, an all-N/A summary and exit 0 — and
+        would otherwise be accepted. The summary's non-N/A tally must also match
+        the checks array, so a forged summary cannot fake execution. Legitimate
+        individual N/A results are preserved; only the all-N/A case is rejected.
+
+    ``allowed_codes`` defaults to ``(0,)`` (a clean verdict); a real scan of a
+    fixture that legitimately WARNs/UNKNOWNs reaches a defined verdict (1/2) and
+    callers may widen the set — the exit code is a sanity cross-check, never the
+    proof of success."""
     reasons = []
     info = {}
-    if returncode is None or int(returncode) != 0:
-        reasons.append("exit code %s != 0 (clean)" % returncode)
+    # R21-1: the real process exit code is authoritative, not a child-written
+    # sidecar. Require a defined, accepted verdict and (if a sidecar was written)
+    # that it agrees with what the process actually returned.
+    if returncode is None or int(returncode) not in allowed_codes:
+        reasons.append("exit code %s is not an accepted clean verdict %s"
+                       % (returncode, tuple(allowed_codes)))
+    if declared_code is not _UNSET and declared_code is not None \
+            and returncode is not None:
+        try:
+            if int(declared_code) != int(returncode):
+                reasons.append("child-written exit code %s disagrees with the "
+                               "real process exit %s (R21-1)"
+                               % (declared_code, returncode))
+        except (TypeError, ValueError):
+            reasons.append("child-written exit code %r is not an integer"
+                           % (declared_code,))
+    # R21-1: a crash can leave a valid-looking report but a traceback on stderr,
+    # which the parent used to throw away. Inspect report body AND child output.
+    blob = text + "\n" + (child_stderr or "")
     for sig in CRASH_SIGNATURES:
-        if sig in text:
+        if sig in blob:
             reasons.append("crash signature present: %r" % sig)
-    if "Failsafe internal error" in text:
+    if "Failsafe internal error" in blob:
         reasons.append("CLI reported an internal error")
     if not text.strip():
         reasons.append("empty report (the scan produced no output)")
@@ -218,10 +265,37 @@ def valid_cli_report(returncode, text, expected_checks=27):
     info["checks"] = n
     if n != expected_checks:
         reasons.append("report has %s checks, expected %d" % (n, expected_checks))
-    if not isinstance(jd.get("summary"), dict) or not jd.get("summary"):
+    summary = jd.get("summary")
+    if not isinstance(summary, dict) or not summary:
         reasons.append("report missing summary")
     if jd.get("error"):
         reasons.append("report carries an error: %r" % jd.get("error"))
+    # R21-2: prove checks actually executed, not merely that 27 registry entries
+    # were listed. Count the checks that reached a real verdict (non-N/A); an
+    # all-N/A report is exactly what engine.run_all()==[] produces and is no
+    # evidence the scan ran.
+    if isinstance(checks, list):
+        executed = sum(1 for c in checks if isinstance(c, dict)
+                       and c.get("status") != _NA_DISPLAY)
+        findings = sum(len(c.get("findings") or []) for c in checks
+                       if isinstance(c, dict))
+        info["executed"] = executed
+        info["findings"] = findings
+        if executed < min_executed:
+            reasons.append("report shows %d executed (non-N/A) checks (< %d): an "
+                           "all-N/A report is not evidence the scan ran (R21-2)"
+                           % (executed, min_executed))
+        # Integrity: a report cannot claim execution in the summary that the
+        # checks array denies (or vice versa).
+        if isinstance(summary, dict):
+            try:
+                non_na = sum(int(v) for k, v in summary.items()
+                             if k != _NA_DISPLAY)
+                if non_na != executed:
+                    reasons.append("summary non-N/A total %d disagrees with %d "
+                                   "executed checks (R21-2)" % (non_na, executed))
+            except (TypeError, ValueError):
+                reasons.append("summary counts are not integers")
     return Verdict(len(reasons) == 0, reasons, info)
 
 

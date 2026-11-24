@@ -5070,11 +5070,24 @@ def gate_selfcheck_tests():
     # can bless a crashed child. valid_cli_report requires exit 0 AND a complete
     # 27-check JSON report.
     import json as _json
-    genuine = _json.dumps({
-        "tool": "failsafe", "schema": 1,
-        "checks": [{"id": i + 1} for i in range(27)],
-        "summary": {"FAIL": 0, "WARNING": 0, "UNKNOWN": 0},
-        "overall": "PASS"})
+
+    def _report(n_pass=3, n_na=24, **extra):
+        """A valid Failsafe JSON report with EXECUTION EVIDENCE: n_pass checks
+        reached a PASS verdict, the rest are N/A, and the summary agrees with the
+        checks array (R21-2 integrity). ``overall`` defaults to PASS."""
+        total = n_pass + n_na
+        checks = ([{"id": i + 1, "status": "PASS"} for i in range(n_pass)] +
+                  [{"id": n_pass + i + 1, "status": "NOT APPLICABLE"}
+                   for i in range(n_na)])
+        base = {"tool": "failsafe", "schema": 1, "checks": checks,
+                "summary": {"FAIL": 0, "WARNING": 0, "UNKNOWN": 0,
+                            "PASS": n_pass, "NOT APPLICABLE": n_na},
+                "overall": "PASS"}
+        base.update(extra)
+        assert total == 27 or extra.get("_skip_total")
+        return _json.dumps(base)
+
+    genuine = _report(3, 24)  # 27 checks, 3 executed -> real execution evidence
     res.append(("gate_check R20-1: a complete exit-0 27-check CLI report is ACCEPTED",
                 gc.valid_cli_report(0, genuine).ok is True, "accepted", "accepted"))
     res.append(("gate_check R20-1: a valid report with a nonzero exit is REJECTED",
@@ -5105,6 +5118,48 @@ def gate_selfcheck_tests():
     res.append(("gate_check R20-1: a report with NO summary is REJECTED",
                 gc.valid_cli_report(0, no_summary).ok is False,
                 "rejected", "rejected"))
+
+    # ---- R21-2: 27 LISTED checks must not pass for 27 EXECUTED checks -------
+    # build_json_report always lists all 27 REGISTERED checks, so engine.run_all()
+    # returning [] still yields a 27-entry, all-"NOT APPLICABLE", exit-0 report
+    # (verified on real Blender). That is a zero-result scan, not evidence the
+    # scan ran: it must be REJECTED, while legitimate individual N/A is preserved.
+    all_na = _report(0, 27)  # every check NOT APPLICABLE, summary agrees
+    res.append(("gate_check R21-2: an all-N/A (zero-executed) 27-check report is REJECTED",
+                gc.valid_cli_report(0, all_na).ok is False, "rejected", "rejected"))
+    res.append(("gate_check R21-2: a report with one executed check is ACCEPTED",
+                gc.valid_cli_report(0, _report(1, 26)).ok is True,
+                "accepted", "accepted"))
+    # A forged summary that claims execution the (all-N/A) checks array denies is
+    # rejected on the integrity cross-check.
+    forged = _json.dumps({
+        "tool": "failsafe", "schema": 1,
+        "checks": [{"id": i + 1, "status": "NOT APPLICABLE"} for i in range(27)],
+        "summary": {"FAIL": 0, "WARNING": 0, "UNKNOWN": 0, "PASS": 5,
+                    "NOT APPLICABLE": 27},
+        "overall": "PASS"})
+    res.append(("gate_check R21-2: a summary disagreeing with the checks array is REJECTED",
+                gc.valid_cli_report(0, forged).ok is False, "rejected", "rejected"))
+
+    # ---- R21-1: trust the child's REAL process result, not a sidecar -------
+    # A crash can write exit code 0 to its sidecar and then raise; Blender still
+    # exits 0, leaving a traceback only on the (previously discarded) stderr.
+    res.append(("gate_check R21-1: a child-declared code disagreeing with the real exit is REJECTED",
+                gc.valid_cli_report(1, genuine, declared_code=0,
+                                    allowed_codes=(0, 1)).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R21-1: a traceback on the child's stderr (clean report) is REJECTED",
+                gc.valid_cli_report(
+                    0, genuine,
+                    child_stderr="Traceback (most recent call last):\n ...\n"
+                ).ok is False, "rejected", "rejected"))
+    # A real non-clean VERDICT (exit 2, WARNING) with execution evidence and a
+    # matching declared code is ACCEPTED when the caller widens allowed_codes:
+    # the exit code is a cross-check, the executed report is the proof.
+    res.append(("gate_check R21-1: an executed scan with a matching nonzero verdict is ACCEPTED",
+                gc.valid_cli_report(2, genuine, declared_code=2,
+                                    allowed_codes=(0, 1, 2)).ok is True,
+                "accepted", "accepted"))
     return res
 
 
@@ -5145,9 +5200,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 32,
+    "gate_selfcheck_tests": 38,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 777
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 783
 
 
 def main():

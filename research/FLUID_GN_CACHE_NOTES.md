@@ -792,3 +792,72 @@ genuine 27-check scan. Windows CI: pending re-run on this commit (exercises the
 live 26-check acceptance incl. the real CLI child-failure repro). Independent
 review of the corrected commit still required before certification is claimed
 restored. No merge, publication, or spending.
+
+================================================================================
+ROUND 21 — independent review of commit 1f746a8 (branch failsafe-expanded-hardening)
+================================================================================
+Verdict returned: PARTIAL PASS. R20-1 (empty/missing report) accepted; the
+777-test and 26-check inventories intact; Windows CI 45292144064 SUCCESS. Two new
+source-traced blockers, both confirmed against the real source and reproduced on
+real Blender before fixing.
+
+R21-1 — cli_json_child() discarded the child's REAL process result.
+  In win_acceptance.py the clean-scan helper read back only the child-WRITTEN
+  report + ".code" sidecar and ignored subprocess.run()'s returncode, stdout and
+  stderr. A child that writes a valid report + code=0 and then raises leaves a
+  traceback ONLY on stderr; Blender still exits 0. REPRODUCED on real Blender
+  5.2.3: such a child has real returncode 0 AND stderr contains
+  "Traceback (most recent call last)". The sidecar-only check accepted it.
+  Fix:
+  * cli_json_child now captures subprocess.run()'s real returncode and combined
+    stdout+stderr and returns them; the clean-scan gate is fed the REAL exit code
+    (not the sidecar), the sidecar is cross-checked for AGREEMENT with it, and
+    gate_check scans the child's stderr for crash signatures too.
+  * gate_check.valid_cli_report gains child_stderr= and declared_code=: a crash
+    signature in stderr, or a child-declared code that disagrees with the real
+    process exit, is a hard rejection.
+  * New acceptance repro: a child that writes a valid report + code=0 then raises
+    is asserted REJECTED (caught on the stderr traceback), proving the sidecar can
+    no longer stand in for the real outcome.
+
+R21-2 — "27 listed checks" never proved "27 checks executed".
+  report.build_json_report() iterates the 27 REGISTERED check metas and emits one
+  entry each regardless of results; a check with no result is "NOT APPLICABLE".
+  So engine.run_all() returning [] yields a 27-entry, all-"NOT APPLICABLE",
+  exit-0 report. REPRODUCED on real Blender: monkeypatching run_all->[] produces
+  exactly that (overall PASS, exit 0). Critically, the OLD acceptance "clean scan"
+  scanned the empty default startup scene, which is ALSO all-N/A — so it carried
+  ZERO execution evidence and was indistinguishable from the attack.
+  Fix:
+  * valid_cli_report now requires >= min_executed (default 1) checks with a real
+    (non-"NOT APPLICABLE") verdict, and cross-checks that the summary's non-N/A
+    tally matches the checks array (a forged summary cannot fake execution).
+    Legitimate individual N/A results are preserved; only the all-N/A case fails.
+  * The acceptance clean-scan now OPENS the real saved cloth fixture before
+    scanning, so checks genuinely execute (observed: 6 executed / 7 findings,
+    verdict WARNING=exit 2). A defined scan verdict (0/1/2) with execution
+    evidence + a complete report + no crash signature is the proof; the exit code
+    is only a cross-check. EXPECTED_ACCEPT_CHECKS 26 -> 28.
+  * New acceptance repro: a child with run_all->[] (all-N/A, exit 0) is asserted
+    REJECTED for lack of execution evidence.
+
+A _safe() scrubber in win_acceptance redacts crash-signature substrings from the
+printed diagnostics, so a PASSING crash-regression (which must report that it
+found a traceback) can no longer plant that substring in the acceptance log where
+the gate's own log-level crash scan would then falsely reject the run.
+
+In-suite: 6 new gate_selfcheck_tests regressions (run on all four versions) cover
+all-N/A rejection, single-executed acceptance, the forged-summary integrity
+cross-check, declared-vs-real exit disagreement, a stderr-only traceback, and an
+executed nonzero verdict accepted. gate_selfcheck_tests 32 -> 38; suite total
+777 -> 783 (= 769 + 14 CLI-report regressions across R20+R21).
+
+RESULT (R21): Mac matrix 4.2.9/4.5.9/5.0.1/5.2.3 each 783 passed, 0 failed,
+total=783, expected=783, ok=yes; versions enforced; equal; GATE PASS; release
+gate PASS. win_acceptance.py run end-to-end on real Blender 5.2.3 (installed
+extension): 28/28, ACCEPT_DONE expected=28 ok=yes, gate PASS, with the real
+fixture scan ACCEPTED (executed=6, findings=7, verdict exit 2) and all three
+adversarial children (no-report, crash-after-write, run_all->[]) REJECTED.
+Windows CI: pending re-run on this commit. Independent review of the corrected
+commit still required before certification is claimed restored. No merge,
+publication, or spending.

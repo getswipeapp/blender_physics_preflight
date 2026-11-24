@@ -38,12 +38,28 @@ results = []  # (name, ok, detail)
 # 0/0/0 or a short early-return run) emits ok=no and the gate rejects it, so the
 # ", 0 failed," marker can no longer bless a shortened acceptance. Re-baseline by
 # counting the check() calls on the success path if acceptance checks change.
-EXPECTED_ACCEPT_CHECKS = 26
+# R21 added two CLI regressions (crash-after-write; zero-result scan) and reworked
+# the clean-scan check, taking the success-path count from 26 to 28.
+EXPECTED_ACCEPT_CHECKS = 28
+
+
+def _safe(detail):
+    """Redact crash-signature substrings from a diagnostic string before it is
+    printed. A PASSING crash/exit-0 regression legitimately REPORTS that it found
+    a traceback; echoing the raw signature verbatim would otherwise plant it in
+    the acceptance log, where the gate's own log-level crash-signature scan would
+    then (falsely) reject the whole run. Keeps the gate's safety net intact while
+    letting the regression say what it caught."""
+    s = str(detail)
+    for sig in gate_check.CRASH_SIGNATURES:
+        s = s.replace(sig, sig.split()[0] + "<redacted>")
+    return s
 
 
 def check(name, ok, detail=""):
-    results.append((name, bool(ok), str(detail)[:120]))
-    print(("PASS" if ok else "FAIL"), "-", name, "::", str(detail)[:120])
+    detail = _safe(detail)
+    results.append((name, bool(ok), detail[:120]))
+    print(("PASS" if ok else "FAIL"), "-", name, "::", detail[:120])
 
 
 def sha(p):
@@ -197,12 +213,14 @@ def main():
     check("CLI --help -> exit 3 (Windows)", cli_exit(["--help"]) == 3)
     check("CLI bad arg -> exit 3 (Windows)", cli_exit(["--nope"]) == 3)
 
-    # R20-1: a clean CLI scan must prove it ACTUALLY RAN, not merely that the
-    # child exited 0. On this Blender a --python-expr child that raises still
+    # R20-1 / R21: a clean CLI scan must prove it ACTUALLY RAN, not merely that
+    # the child exited 0. On this Blender a --python-expr child that raises still
     # exits 0, so the exit code cannot stand in for "the scan produced a report".
-    # Run the scanner in a real child, capture its JSON to a file, and require a
-    # complete 27-check report via the shared gate_check.valid_cli_report.
-    def cli_json_child(body_expr):
+    # Run the scanner in a real child, open the real cloth fixture so checks
+    # actually execute, capture its JSON report AND the child's real process
+    # result, and require a complete, EXECUTED 27-check report via the shared
+    # gate_check.valid_cli_report.
+    def cli_json_child(body_expr, open_blend=None):
         jp = os.path.join(d, "cli_report.json")
         cp = jp + ".code"
         # Clear BOTH the report and the exit-code sidecar first, so a stale file
@@ -213,40 +231,93 @@ def main():
                 os.remove(f)
             except OSError:
                 pass
-        subprocess.run([binp, "-b", "--python-expr", body_expr % jp],
-                       capture_output=True, text=True, timeout=180)
+        cmd = [binp, "-b"]
+        if open_blend:
+            cmd.append(open_blend)  # Blender opens it before --python-expr runs
+        cmd += ["--python-expr", body_expr % jp]
+        # R21-1: capture subprocess.run's REAL result. The parent used to discard
+        # it and trust only the child-written sidecar, so a child that wrote code=0
+        # and then crashed (leaving a traceback on stderr, Blender still exiting 0)
+        # was accepted. Return the real returncode and combined stdout+stderr too.
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         raw = ""
         if os.path.isfile(jp):
             with open(jp, encoding="utf-8") as fh:
                 raw = fh.read()
-        # The child's own exit code is written alongside the report so the gate
-        # sees exactly what the scan returned.
-        rc = None
+        declared = None
         if os.path.isfile(cp):
             try:
-                rc = int(open(cp).read().strip())
+                declared = int(open(cp).read().strip())
             except ValueError:
-                rc = None
-        return rc, raw
+                declared = None
+        child_out = (p.stdout or "") + "\n" + (p.stderr or "")
+        return p.returncode, declared, raw, child_out
 
     scan_expr = ("import sys; import bl_ext.user_default.failsafe.cli as c; "
                  "jp = r'%s'; code, out = c.run(['--json']); "
                  "open(jp, 'w', encoding='utf-8').write(out); "
                  "open(jp + '.code', 'w').write(str(code)); "
                  "sys.exit(code)")
-    rc_ok, raw_ok = cli_json_child(scan_expr)
-    v_ok = gate_check.valid_cli_report(rc_ok, raw_ok)
-    check("CLI clean scan -> exit 0 AND a complete 27-check JSON report (R20-1)",
-          v_ok.ok, "rc=%s; %s" % (rc_ok, "; ".join(v_ok.reasons) or "ok"))
+    # Scan the REAL saved fixture (a cloth object), so checks genuinely execute
+    # and the report carries non-N/A results. A defined scan verdict (clean /
+    # blocking / unverified = 0/1/2) is accepted; the exit code is only a sanity
+    # cross-check, the complete executed report is the proof (R21-2).
+    rc_ok, decl_ok, raw_ok, out_ok = cli_json_child(scan_expr, open_blend=blend)
+    v_ok = gate_check.valid_cli_report(rc_ok, raw_ok, child_stderr=out_ok,
+                                       declared_code=decl_ok,
+                                       allowed_codes=(0, 1, 2))
+    check("CLI scan of the real fixture -> a complete, EXECUTED 27-check report (R21-2)",
+          v_ok.ok, "rc=%s executed=%s findings=%s; %s"
+          % (rc_ok, v_ok.info.get("executed"), v_ok.info.get("findings"),
+             "; ".join(v_ok.reasons) or "ok"))
 
-    # Real child-failure repro: a child that exits 0 but produces NO report (the
-    # crash-exit-0 class) must be REJECTED by the very same gate.
+    # Real child-failure repro (R20-1): a child that exits 0 but produces NO
+    # report (the crash-exit-0 class) must be REJECTED by the very same gate.
     bad_expr = "import sys; jp = r'%s'; sys.exit(0)  # report intentionally unwritten"
-    rc_bad, raw_bad = cli_json_child(bad_expr)
-    v_bad = gate_check.valid_cli_report(rc_bad, raw_bad)
+    rc_bad, decl_bad, raw_bad, out_bad = cli_json_child(bad_expr)
+    v_bad = gate_check.valid_cli_report(rc_bad, raw_bad, child_stderr=out_bad,
+                                        declared_code=decl_bad,
+                                        allowed_codes=(0, 1, 2))
     check("CLI child that exits 0 with no report is REJECTED by the gate (R20-1)",
           not v_bad.ok, "rc=%s raw=%dB -> %s"
           % (rc_bad, len(raw_bad), "; ".join(v_bad.reasons)))
+
+    # R21-1 repro: a child that writes a VALID executed report AND code=0, then
+    # raises. Blender still exits 0 and the sidecar says 0, so the old
+    # sidecar-only check would PASS it; the gate must REJECT it on the traceback
+    # left in the child's (previously discarded) stderr and/or the real exit.
+    crash_expr = ("import sys; import bl_ext.user_default.failsafe.cli as c; "
+                  "jp = r'%s'; code, out = c.run(['--json']); "
+                  "open(jp, 'w', encoding='utf-8').write(out); "
+                  "open(jp + '.code', 'w').write('0'); "
+                  "raise RuntimeError('boom AFTER writing a valid report + code=0')")
+    rc_cr, decl_cr, raw_cr, out_cr = cli_json_child(crash_expr, open_blend=blend)
+    v_cr = gate_check.valid_cli_report(rc_cr, raw_cr, child_stderr=out_cr,
+                                       declared_code=decl_cr,
+                                       allowed_codes=(0, 1, 2))
+    check("CLI child that writes a valid report+code=0 then CRASHES is REJECTED (R21-1)",
+          not v_cr.ok, "rc=%s declared=%s -> %s"
+          % (rc_cr, decl_cr, "; ".join(v_cr.reasons)))
+
+    # R21-2 repro: force engine.run_all() to return [] in the child. The CLI then
+    # emits a 27-entry report that is ALL "NOT APPLICABLE" (the static registry)
+    # and exits 0 — a zero-result scan. The gate must REJECT it for lack of
+    # execution evidence, even though it has 27 checks and a non-empty summary.
+    empty_expr = ("import sys; "
+                  "import bl_ext.user_default.failsafe.engine as e; "
+                  "e.run_all = (lambda *a, **k: []); "
+                  "import bl_ext.user_default.failsafe.cli as c; "
+                  "jp = r'%s'; code, out = c.run(['--json']); "
+                  "open(jp, 'w', encoding='utf-8').write(out); "
+                  "open(jp + '.code', 'w').write(str(code)); "
+                  "sys.exit(code)")
+    rc_em, decl_em, raw_em, out_em = cli_json_child(empty_expr, open_blend=blend)
+    v_em = gate_check.valid_cli_report(rc_em, raw_em, child_stderr=out_em,
+                                       declared_code=decl_em,
+                                       allowed_codes=(0, 1, 2))
+    check("CLI zero-result scan (run_all->[]) is an all-N/A report, REJECTED (R21-2)",
+          not v_em.ok, "rc=%s executed=%s -> %s"
+          % (rc_em, v_em.info.get("executed"), "; ".join(v_em.reasons)))
 
     _finish()
 
