@@ -379,29 +379,41 @@ def valid_invocations(invoked_ids, expected_ids):
     return Verdict(len(reasons) == 0, reasons, info)
 
 
-def valid_cli_scan(returncode, text, invoked_ids, returned_counts, expected_ids,
+def _norm_findings(rows):
+    """Order-independent canonical form of a list of [status, object, message,
+    hint] rows, for comparing a check's returned findings to the report's."""
+    return sorted([["" if x is None else str(x) for x in (row or [])]
+                   for row in (rows or [])])
+
+
+def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_ids,
                    allowed_codes=(0,), child_stderr="", declared_code=_UNSET,
                    required_ids=None):
-    """R24-1: certify a CLI scan from the SAME child's report AND that child's OWN
-    recorded execution evidence — never from a second, independent scan.
+    """R24-1 / R25-1: certify a CLI scan from the SAME child's report AND that
+    child's OWN recorded execution evidence — never from a second, independent
+    scan.
 
-    Combines three proofs about the one child being certified:
+    Combines, about the one child being certified:
       * ``valid_cli_report`` — the report is a complete, valid, EXECUTED, crash-free
         Failsafe report and the real exit code is an accepted verdict (R20/R21/R22).
       * ``valid_invocations`` — THAT child invoked every registered check function
-        exactly once (``invoked_ids`` are the ids the child recorded as it ran, so
-        a child whose scan skipped checks is rejected even though its report still
-        lists all 27 registry entries).
-      * result-faithfulness — for every check, the report's findings count equals
-        the number of findings that check actually RETURNED inside the child
-        (``returned_counts`` {id: n}). A scan that invoked every check but then
-        dropped some results (result suppression) is rejected, because the report
-        would show fewer findings than the check produced.
+        exactly once (``invoked_ids`` are the ids the child recorded as it ran), so
+        a scan that skipped checks is rejected even though the report still lists
+        all 27 registry entries (R24-1).
+      * result-faithfulness (R25-1) — ``returned_findings`` maps EVERY expected
+        check id to the exact findings that check RETURNED inside the child, each a
+        ``[status, object, message, hint]`` row. The report is only certified if
+        (a) there is a recorded entry for every expected id — missing evidence is a
+        hard failure, not silently skipped — AND (b) for every id the report's
+        findings match those recorded rows EXACTLY (status + content, order-
+        independent). So a report that dropped findings, or swapped a genuine
+        UNKNOWN/FAIL for a PASS while keeping the count, is rejected — counts alone
+        never proved the report tells the truth about the findings.
 
-    The invocation ids and returned counts MUST come from inside the same child
-    process that wrote ``text`` (e.g. a recorder wrapped around each registered
-    check function before the child ran the CLI), so this proves what happened in
-    the certified scan, not in a parallel one."""
+    The invocation ids and returned findings MUST come from inside the same child
+    process that wrote ``text`` (a recorder wrapped around each registered check
+    function before the child ran the CLI), so this proves what happened in the
+    certified scan, not a parallel one."""
     v = valid_cli_report(returncode, text, allowed_codes=allowed_codes,
                          child_stderr=child_stderr, declared_code=declared_code,
                          required_ids=required_ids)
@@ -411,35 +423,46 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_counts, expected_ids,
     info["invoked"] = vinv.info.get("invoked")
     info["invoked_unique"] = vinv.info.get("unique")
     reasons.extend(vinv.reasons)
-    # Result-suppression cross-check: the report's per-check findings count must
-    # equal what each check returned inside the child.
+    expected = sorted(expected_ids)
+    # Normalise the recorded evidence (JSON object keys arrive as strings).
+    ev = {}
+    for k, rows in (returned_findings or {}).items():
+        try:
+            ev[int(k)] = rows
+        except (TypeError, ValueError):
+            reasons.append("non-integer check id in returned findings: %r" % (k,))
     try:
         jd = json.loads(text)
         checks = jd.get("checks") if isinstance(jd, dict) else None
     except Exception:
         checks = None
     if isinstance(checks, list):
-        repcount = {}
+        rep_find = {}
         for c in checks:
             if isinstance(c, dict):
-                repcount[c.get("id")] = len(c.get("findings") or [])
-        suppressed = []
-        for cid, n in (returned_counts or {}).items():
-            try:
-                k = int(cid)
-            except (TypeError, ValueError):
-                reasons.append("non-integer check id in returned counts: %r" % (cid,))
-                continue
-            if repcount.get(k, 0) != n:
-                suppressed.append((k, n, repcount.get(k, 0)))
-        info["suppressed"] = [m[0] for m in suppressed]
-        if suppressed:
-            reasons.append("results suppressed: for %s the check returned N findings "
-                           "inside the scan but the report shows M (id,N,M)=%s "
-                           "(R24-1)" % ([m[0] for m in suppressed], suppressed))
-    elif returned_counts:
-        reasons.append("report has no checks array to cross-check returned results "
-                       "(R24-1)")
+                rep_find[c.get("id")] = [[f.get("status"), f.get("object"),
+                                          f.get("message"), f.get("hint")]
+                                         for f in (c.get("findings") or [])]
+        # R25-1 (A): complete per-id evidence — a recorded return for EVERY check.
+        missing_ev = [i for i in expected if i not in ev]
+        info["evidence_missing"] = missing_ev
+        if missing_ev:
+            reasons.append("incomplete result evidence: no recorded findings for "
+                           "checks %s, so the report cannot be proven to reflect "
+                           "them (R25-1)" % missing_ev)
+        # R25-1 (B): exact findings match (status + content), not merely counts.
+        mismatched = []
+        for cid in expected:
+            if cid in ev and _norm_findings(ev[cid]) != _norm_findings(rep_find.get(cid, [])):
+                mismatched.append(cid)
+        info["findings_mismatch"] = mismatched
+        if mismatched:
+            reasons.append("report findings disagree with what the checks returned "
+                           "inside the scan for %s (results altered or suppressed) "
+                           "(R25-1)" % mismatched)
+    elif returned_findings:
+        reasons.append("report has no checks array to cross-check returned findings "
+                       "(R25-1)")
     return Verdict(len(reasons) == 0, reasons, info)
 
 

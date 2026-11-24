@@ -1077,6 +1077,67 @@ RESULT
   0 raw crash signatures; the certified child logged invoked=27 executed=6
   findings=7 missing=[] suppressed=[], the reduced child REJECTED (invoked=4) and
   the suppress child REJECTED (suppressed=[9,17,18]).
+  Windows CI run 45443330080 (headSha 07ea159 = 09212b8 + toggle; branch tip
+  55aaf87 identical) genuinely PASS, verified in logs: 4x SUITE_DONE expected=799
+  ok=yes + GATE PASS version-enforced; ACCEPT_DONE 34/34 expected=34 ok=yes +
+  GATE PASS; certified child invoked=27 suppressed=[] (PASS), reduced child
+  REJECTED (invoked=4), suppress child REJECTED (suppressed=[9,17,18]);
+  real-batch marker GATE PASS; 0 raw crash signatures.
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.
+
+======================================================================
+ROUND 25 — EXACT FINDING FAITHFULNESS, NOT JUST COUNTS (commit pending)
+======================================================================
+The 8th independent review of 09212b8 returned PARTIAL PASS: R24-1 CLOSED. One
+remaining blocker:
+
+R25-1  valid_cli_scan compared the NUMBER of findings per check, not their
+  statuses/contents. Two holes: (A) it iterated the recorded counts, so a
+  MISSING per-id entry was never required — incomplete evidence slipped by; and
+  (B) a genuine UNKNOWN/FAIL finding could be swapped to PASS with the same count
+  and the same check_id, and the count still matched.
+
+REPRODUCED ON REAL BLENDER 5.2.3 (child records exact findings), before coding:
+  * normal  -> per-id findings match the report exactly -> ACCEPT.
+  * subst   -> run_all flips every WARNING result to PASS AFTER the function
+    returned; the recorder captured the real WARNINGs so the report disagrees on
+    ids [7,17] -> REJECT (B).
+  * missing -> child drops its recorded evidence for 23 ids (still invoked all
+    27) -> incomplete per-id evidence [2,3,..] -> REJECT (A).
+
+FIX (prove the report tells the truth about findings, not just how many)
+  certification/ci/win_acceptance.py
+    * instrumented_expr now records, per check, the EXACT findings it returned
+      ([status, object, message, hint] rows), not a count, into the <report>.inv
+      sidecar ({invoked, findings:{id: rows}}). Added a ``post`` hook so a
+      regression can tamper with the recorded evidence after the scan.
+    * Replaced the count-based suppress regression with two exact-findings ones:
+      a child that SWAPS a WARNING finding to PASS (same count) is REJECTED on the
+      content mismatch; a child that records findings for only {1,7,8,26} is
+      REJECTED for incomplete per-id evidence. EXPECTED_ACCEPT_CHECKS 34 -> 35.
+  tests/gate_check.py
+    * valid_cli_scan now takes ``returned_findings`` {id: [[status,object,message,
+      hint],...]} and (a) requires a recorded entry for EVERY expected id (missing
+      evidence is a hard failure, not silently skipped) and (b) compares the
+      report's per-id findings to the recorded rows EXACTLY, order-independent
+      (_norm_findings). A dropped or status-swapped finding is caught even when the
+      count is unchanged. Legitimate N/A (empty rows) and UNKNOWN are preserved.
+  tests/run_tests.py
+    * Reworked the gate_selfcheck valid_cli_scan regressions to exact rows and
+      added R25 cases (incomplete evidence rejected; swapped finding rejected;
+      same-count different-status rejected). gate_selfcheck 54 -> 56; grand total
+      799 -> 801.
+  (failsafe/engine.py unchanged this round.)
+
+RESULT
+  Plain-Python valid_cli_scan cases: all pass. Mac matrix 4.2.9/4.5.9/5.0.1/
+  5.2.3 each 801 passed / 0 failed, SUITE_DONE expected=801 ok=yes, GATE PASS
+  version-enforced, equal totals, release gate PASS. win_acceptance on the real
+  5.2.3 INSTALLED extension: 35/35, ACCEPT_DONE expected=35 ok=yes, gate PASS,
+  0 raw crash signatures; certified child invoked=27 missing_ev=[] mismatch=[],
+  the reduced child REJECTED (invoked=4), the status-swap child REJECTED
+  (mismatch=[7,17]), the incomplete-evidence child REJECTED (missing 23 ids).
   Windows CI: pending re-run on this commit. Independent review of the corrected
   commit still required before certification is claimed restored. No merge,
   publication, or spending.

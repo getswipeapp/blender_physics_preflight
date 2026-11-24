@@ -5289,23 +5289,50 @@ def gate_selfcheck_tests():
                                         "PASS": 0, "NOT APPLICABLE": 27 - n},
                             "overall": "WARNING"})
 
-    rep_f = _rep_find({1, 7, 8})
-    returns_match = {i: (1 if i in {1, 7, 8} else 0) for i in full27}
-    res.append(("gate_check R24-1: full invocation + report matching its results is ACCEPTED",
-                gc.valid_cli_scan(2, rep_f, full27, returns_match, full27,
+    # ---- R24-1 / R25-1: certify the SAME child's report + its OWN findings -----
+    # valid_cli_scan ties the proof to the child being certified: the report must
+    # be valid/executed AND that child must have invoked all 27 checks AND the
+    # report's per-check findings must EXACTLY match (status + content) the
+    # findings that check RETURNED inside the child — with complete per-id evidence
+    # required. A second independent scan is never proof of the first, and a
+    # dropped or status-swapped finding is caught even when the count is unchanged.
+    # (The live child-instrumented proof + all attacks run in win_acceptance on
+    # real Blender.)
+    rep_f = _rep_find({1, 7, 8})  # ids 1/7/8 WARNING with one {status,message} each
+    warn_row = [["WARNING", None, "x", None]]  # the report's row for a find id
+    ev_match = {i: (warn_row if i in {1, 7, 8} else []) for i in full27}
+    res.append(("gate_check R24-1: full invocation + report matching its findings is ACCEPTED",
+                gc.valid_cli_scan(2, rep_f, full27, ev_match, full27,
                                   allowed_codes=(0, 1, 2)).ok is True,
                 "accepted", "accepted"))
     res.append(("gate_check R24-1: a child that invoked only {1,7,8,26} is REJECTED",
-                gc.valid_cli_scan(2, rep_f, [1, 7, 8, 26], returns_match, full27,
+                gc.valid_cli_scan(2, rep_f, [1, 7, 8, 26], ev_match, full27,
                                   allowed_codes=(0, 1, 2)).ok is False,
                 "rejected", "rejected"))
-    returns_suppressed = {**returns_match, 9: 2}  # check 9 returned 2, report 0
-    res.append(("gate_check R24-1: all invoked but a dropped result (suppression) is REJECTED",
-                gc.valid_cli_scan(2, rep_f, full27, returns_suppressed, full27,
+    ev_incomplete = {i: ev_match[i] for i in (1, 7, 8, 26)}  # evidence for 4 of 27
+    res.append(("gate_check R25-1: incomplete per-id findings evidence is REJECTED",
+                gc.valid_cli_scan(2, rep_f, full27, ev_incomplete, full27,
                                   allowed_codes=(0, 1, 2)).ok is False,
                 "rejected", "rejected"))
-    res.append(("gate_check R24-1: complete evidence but a bad exit code is REJECTED",
-                gc.valid_cli_scan(5, rep_f, full27, returns_match, full27,
+    # Status substitution: the report shows PASS (no finding) for id 1 while the
+    # child recorded a real WARNING finding there — same check id, caught on
+    # content even though the report's own count is self-consistent.
+    rep_swapped = _rep_find({7, 8})  # id 1 now N/A / no finding in the report
+    res.append(("gate_check R25-1: a swapped finding (child WARNING, report none) is REJECTED",
+                gc.valid_cli_scan(2, rep_swapped, full27, ev_match, full27,
+                                  allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
+    # A genuine status difference with the SAME count: child returned FAIL, report
+    # shows WARNING for the same id.
+    ev_statusdiff = {i: ([["FAIL", None, "x", None]] if i == 1
+                         else (warn_row if i in {7, 8} else []))
+                     for i in full27}
+    res.append(("gate_check R25-1: same-count different-status finding is REJECTED",
+                gc.valid_cli_scan(2, rep_f, full27, ev_statusdiff, full27,
+                                  allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
+    res.append(("gate_check R24-1: complete matching evidence but a bad exit is REJECTED",
+                gc.valid_cli_scan(5, rep_f, full27, ev_match, full27,
                                   allowed_codes=(0, 1, 2)).ok is False,
                 "rejected", "rejected"))
     return res
@@ -5348,9 +5375,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 54,
+    "gate_selfcheck_tests": 56,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 799
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 801
 
 
 def main():

@@ -43,7 +43,9 @@ results = []  # (name, ok, detail)
 # R22 added two more (partial scan; internal check error) -> 30.
 # R23 added two more (invocation proof; omitted-invocation repro) -> 32.
 # R24 added two more (child-invoked-only-subset; child-suppressed-results) -> 34.
-EXPECTED_ACCEPT_CHECKS = 34
+# R25 replaced the count-based suppress check with exact-findings checks
+# (status-substitution; incomplete per-id evidence) -> 35.
+EXPECTED_ACCEPT_CHECKS = 35
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -279,14 +281,18 @@ def main():
         child_out = (p.stdout or "") + "\n" + (p.stderr or "")
         return p.returncode, declared, raw, child_out, inv
 
-    # R24-1: instrument the ACTUAL CLI child being certified. Before it runs the
-    # scan, wrap every registered check function with a recorder that notes (a)
-    # the check was invoked and (b) how many findings it returned; after the scan
-    # write that evidence to a <report>.inv sidecar. valid_cli_scan then certifies
-    # the report AND this same-process evidence together — a second independent
-    # scan can never stand in for the one being certified. ``attack`` lets a
-    # regression cripple the child's run_all to prove the evidence catches it.
-    def instrumented_expr(attack=""):
+    # R24-1 / R25-1: instrument the ACTUAL CLI child being certified. Before it
+    # runs the scan, wrap every registered check function with a recorder that
+    # notes (a) the check was invoked and (b) the EXACT findings it returned
+    # ([status, object, message, hint] rows); after the scan write that evidence
+    # to a <report>.inv sidecar. valid_cli_scan then certifies the report AND this
+    # same-process evidence together, requiring complete per-id evidence and an
+    # EXACT per-id findings match — a second independent scan can never stand in,
+    # and a dropped or status-swapped finding is caught even when the count is
+    # unchanged. ``attack`` runs before the scan (cripple run_all); ``post`` runs
+    # after it (tamper with the recorded evidence) so a regression can prove the
+    # gate catches each.
+    def instrumented_expr(attack="", post=""):
         return (
             "import sys, json\n"
             "import bl_ext.user_default.failsafe.engine as e\n"
@@ -295,7 +301,8 @@ def main():
             "    def rec(ctx, mk):\n"
             "        _inv.append(mid)\n"
             "        out = fn(ctx, mk)\n"
-            "        _ret[mid] = len(out or [])\n"
+            "        _ret[mid] = [[r.status, r.object_name, r.message, r.hint] "
+            "for r in (out or [])]\n"
             "        return out\n"
             "    return rec\n"
             "for _m in e.CHECKS:\n    _m.func = _wrap(_m.id, _m.func)\n"
@@ -303,15 +310,15 @@ def main():
             "import bl_ext.user_default.failsafe.cli as c\n"
             "jp = r'%s'\n"
             "code, out = c.run(['--json'])\n"
+            + post +
             "open(jp, 'w', encoding='utf-8').write(out)\n"
             "open(jp + '.inv', 'w', encoding='utf-8').write("
-            "json.dumps({'invoked': _inv, 'returns': _ret}))\n"
+            "json.dumps({'invoked': _inv, 'findings': _ret}))\n"
             "open(jp + '.code', 'w').write(str(code))\n"
             "sys.exit(code)\n")
 
-    # A child run_all that INVOKES only {1,7,8,26} (and restores nothing it needs
-    # to): the report still lists 27 entries, but the child recorded only 4
-    # invocations.
+    # A child run_all that INVOKES only {1,7,8,26}: the report still lists 27
+    # entries, but the child recorded only 4 invocations.
     REDUCED_ATTACK = (
         "def _atk(context, hash_verify=None):\n"
         "    ctx = e.ScanContext(context, hash_verify=hash_verify)\n"
@@ -322,47 +329,55 @@ def main():
         "            if r: out.extend(r)\n"
         "    return out\n"
         "e.run_all = _atk\n")
-    # A child run_all that invokes ALL 27 (so invocation looks complete) but then
-    # DROPS every result outside {1,7,8,26}: result suppression.
-    SUPPRESS_ATTACK = (
+    # A child run_all that invokes ALL 27 but SWAPS every WARNING finding to PASS
+    # after the functions returned: same check ids, same finding counts, altered
+    # statuses. The recorder captured the real WARNINGs, so the report disagrees.
+    SUBSTITUTE_ATTACK = (
         "_orig = e.run_all\n"
-        "e.run_all = (lambda ctx, hash_verify=None: "
-        "[r for r in _orig(ctx, hash_verify=hash_verify) "
-        "if r.check_id in (1, 7, 8, 26)])\n")
+        "def _sub(context, hash_verify=None):\n"
+        "    out = _orig(context, hash_verify=hash_verify)\n"
+        "    for r in out:\n"
+        "        if r.status == e.Status.WARNING:\n"
+        "            r.status = e.Status.PASS\n"
+        "    return out\n"
+        "e.run_all = _sub\n")
+    # A child that invoked all 27 but DROPS its recorded evidence for every id
+    # outside {1,7,8,26} after the scan: incomplete per-id evidence.
+    MISSING_POST = (
+        "for _k in list(_ret):\n"
+        "    if _k not in (1, 7, 8, 26):\n        _ret.pop(_k)\n")
 
     registry_ids = [m.id for m in eng.CHECKS]
 
     def _evidence(inv):
         ids = list((inv or {}).get("invoked", []))
-        rets = {int(k): v for k, v in (inv or {}).get("returns", {}).items()}
-        return ids, rets
+        finds = {int(k): v for k, v in (inv or {}).get("findings", {}).items()}
+        return ids, finds
 
     # Scan the REAL saved fixture in an instrumented child; certify the report AND
-    # the child's own invocation + returned-result evidence together (R24-1). A
-    # defined scan verdict (clean / blocking / unverified = 0/1/2) is accepted; the
-    # exit code is only a cross-check, the complete EXECUTED+INVOKED report is the
-    # proof.
+    # the child's own invocation + exact returned-findings evidence together
+    # (R24-1/R25-1). A defined scan verdict (clean / blocking / unverified =
+    # 0/1/2) is accepted; the exit code is only a cross-check.
     rc_ok, decl_ok, raw_ok, out_ok, inv_ok = cli_json_child(instrumented_expr(),
                                                             open_blend=blend)
-    ids_ok, rets_ok = _evidence(inv_ok)
-    v_ok = gate_check.valid_cli_scan(rc_ok, raw_ok, ids_ok, rets_ok, registry_ids,
+    ids_ok, finds_ok = _evidence(inv_ok)
+    v_ok = gate_check.valid_cli_scan(rc_ok, raw_ok, ids_ok, finds_ok, registry_ids,
                                      child_stderr=out_ok, declared_code=decl_ok,
                                      allowed_codes=(0, 1, 2),
                                      required_ids=CLOTH_REQUIRED_IDS)
-    check("CLI child proved it INVOKED all 27 checks + report matches its results "
-          "(R21-2/R22-1/R24-1)",
-          v_ok.ok, "rc=%s invoked=%s executed=%s findings=%s missing=%s suppressed=%s; %s"
+    check("CLI child proved it INVOKED all 27 + report matches its exact findings "
+          "(R22-1/R24-1/R25-1)",
+          v_ok.ok, "rc=%s invoked=%s executed=%s missing_ev=%s mismatch=%s; %s"
           % (rc_ok, v_ok.info.get("invoked"), v_ok.info.get("executed"),
-             v_ok.info.get("findings"), v_ok.info.get("required_missing"),
-             v_ok.info.get("suppressed"), "; ".join(v_ok.reasons) or "ok"))
+             v_ok.info.get("evidence_missing"), v_ok.info.get("findings_mismatch"),
+             "; ".join(v_ok.reasons) or "ok"))
 
-    # R24-1 repro A: a child whose run_all INVOKED only {1,7,8,26} is REJECTED on
-    # its own recorded invocation evidence, even though its 27-entry report and the
-    # required fixture ids look fine.
+    # R24-1 repro: a child whose run_all INVOKED only {1,7,8,26} is REJECTED on its
+    # own recorded invocation evidence, even though its 27-entry report looks fine.
     rc_rd, decl_rd, raw_rd, out_rd, inv_rd = cli_json_child(
         instrumented_expr(REDUCED_ATTACK), open_blend=blend)
-    ids_rd, rets_rd = _evidence(inv_rd)
-    v_rd = gate_check.valid_cli_scan(rc_rd, raw_rd, ids_rd, rets_rd, registry_ids,
+    ids_rd, finds_rd = _evidence(inv_rd)
+    v_rd = gate_check.valid_cli_scan(rc_rd, raw_rd, ids_rd, finds_rd, registry_ids,
                                      child_stderr=out_rd, declared_code=decl_rd,
                                      allowed_codes=(0, 1, 2),
                                      required_ids=CLOTH_REQUIRED_IDS)
@@ -370,18 +385,31 @@ def main():
           not v_rd.ok, "invoked=%s -> %s"
           % (sorted(set(ids_rd)), "; ".join(v_rd.reasons)))
 
-    # R24-1 repro B: a child that invoked all 27 but DROPPED 23 checks' results is
-    # REJECTED on the result-suppression cross-check (its recorded returns disagree
-    # with the report).
-    rc_sp, decl_sp, raw_sp, out_sp, inv_sp = cli_json_child(
-        instrumented_expr(SUPPRESS_ATTACK), open_blend=blend)
-    ids_sp, rets_sp = _evidence(inv_sp)
-    v_sp = gate_check.valid_cli_scan(rc_sp, raw_sp, ids_sp, rets_sp, registry_ids,
-                                     child_stderr=out_sp, declared_code=decl_sp,
+    # R25-1 repro B: a child that invoked all 27 but SWAPPED a WARNING finding to
+    # PASS (same count, same check id) is REJECTED because its recorded findings
+    # disagree with the report — a count check could not catch this.
+    rc_su, decl_su, raw_su, out_su, inv_su = cli_json_child(
+        instrumented_expr(SUBSTITUTE_ATTACK), open_blend=blend)
+    ids_su, finds_su = _evidence(inv_su)
+    v_su = gate_check.valid_cli_scan(rc_su, raw_su, ids_su, finds_su, registry_ids,
+                                     child_stderr=out_su, declared_code=decl_su,
                                      allowed_codes=(0, 1, 2))
-    check("CLI child that invoked all 27 but SUPPRESSED 23 results is REJECTED (R24-1)",
-          not v_sp.ok, "invoked=%s suppressed=%s -> %s"
-          % (len(set(ids_sp)), v_sp.info.get("suppressed"), "; ".join(v_sp.reasons)))
+    check("CLI child that SWAPPED a WARNING finding to PASS (same count) is REJECTED (R25-1)",
+          not v_su.ok, "mismatch=%s -> %s"
+          % (v_su.info.get("findings_mismatch"), "; ".join(v_su.reasons)))
+
+    # R25-1 repro A: a child that invoked all 27 but recorded findings evidence for
+    # only {1,7,8,26} is REJECTED for incomplete per-id evidence — missing evidence
+    # is a hard failure, not silently skipped.
+    rc_mi, decl_mi, raw_mi, out_mi, inv_mi = cli_json_child(
+        instrumented_expr(post=MISSING_POST), open_blend=blend)
+    ids_mi, finds_mi = _evidence(inv_mi)
+    v_mi = gate_check.valid_cli_scan(rc_mi, raw_mi, ids_mi, finds_mi, registry_ids,
+                                     child_stderr=out_mi, declared_code=decl_mi,
+                                     allowed_codes=(0, 1, 2))
+    check("CLI child with incomplete per-check findings evidence is REJECTED (R25-1)",
+          not v_mi.ok, "missing_ev=%s -> %s"
+          % (v_mi.info.get("evidence_missing"), "; ".join(v_mi.reasons)))
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
     # report (the crash-exit-0 class) must be REJECTED by the very same gate.
