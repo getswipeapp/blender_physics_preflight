@@ -1138,6 +1138,65 @@ RESULT
   0 raw crash signatures; certified child invoked=27 missing_ev=[] mismatch=[],
   the reduced child REJECTED (invoked=4), the status-swap child REJECTED
   (mismatch=[7,17]), the incomplete-evidence child REJECTED (missing 23 ids).
+  Windows CI run 45473530097 (headSha c6b1a61 = d90bc0e + toggle; branch tip
+  51b2c60 identical) genuinely PASS, verified in logs: 4x SUITE_DONE expected=801
+  ok=yes + GATE PASS version-enforced; ACCEPT_DONE 35/35 expected=35 ok=yes +
+  GATE PASS; certified child invoked=27 missing_ev=[] mismatch=[] (PASS), reduced
+  REJECTED (invoked=4), swap REJECTED (mismatch=[7,17]), incomplete-evidence
+  REJECTED (missing 23); real-batch marker GATE PASS; 0 raw crash signatures.
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.
+
+======================================================================
+ROUND 26 — THE REPORT'S OWN VERDICTS MUST AGREE WITH ITS FINDINGS (commit pending)
+======================================================================
+The 9th independent review of d90bc0e returned PARTIAL PASS: R25-1 CLOSED. One
+remaining blocker:
+
+R26-1  valid_cli_scan compared the findings exactly, but never checked that the
+  report's TOP-LEVEL verdicts agreed with them: a check's per-check `status`, the
+  `summary` distribution, and `overall` could all lie while the findings stayed
+  intact, so the R25 comparison still passed. (valid_cli_report only checked the
+  TOTAL non-N/A count, not the per-status distribution.)
+
+REPRODUCED ON REAL BLENDER 5.2.3 (findings + evidence intact, verdicts tampered),
+before coding — the committed valid_cli_scan ACCEPTED all three:
+  * overall_lie: report `overall` rewritten WARNING -> PASS -> accepted.
+  * status_lie: every WARNING check `status` flipped to PASS (findings intact) ->
+    accepted.
+  * summary_lie: summary WARNING count moved into PASS (total non-N/A unchanged,
+    so it even slipped past valid_cli_report's non-N/A-total integrity: 6==6) ->
+    accepted.
+
+FIX (derive the verdicts from the findings and require the report to match)
+  tests/gate_check.py
+    * _FINDING_SEVERITY (mirrors engine.SEVERITY) + _derived_status(rows) (worst
+      finding by severity, NOT APPLICABLE when none — mirrors engine.check_status)
+      + _derived_overall(statuses) (worst that occurred; NA/PASS -> PASS — mirrors
+      build_json_report).
+    * valid_cli_scan now, with complete evidence, DERIVES from the child's recorded
+      findings: each check's expected status, the exact summary distribution, and
+      overall; it requires the report's per-check `status`, `summary` buckets and
+      `overall` to match. A report that keeps real WARNING/UNKNOWN/FAIL findings
+      but declares a rosier status/summary/overall is rejected. Legitimate N/A and
+      UNKNOWN are preserved (they must match on both sides).
+  certification/ci/win_acceptance.py
+    * Three new verdict-lie regressions via the child `post` hook (rewrite only the
+      report's overall / a check's status / the summary distribution, findings +
+      evidence intact): each REJECTED. EXPECTED_ACCEPT_CHECKS 35 -> 38.
+  tests/run_tests.py
+    * 4 new gate_selfcheck regressions (a verdict-consistent report accepted; a
+      false overall, a per-check status lie, and a faked summary distribution each
+      rejected). gate_selfcheck 56 -> 60; grand total 801 -> 805.
+  (failsafe/engine.py unchanged this round.)
+
+RESULT
+  Plain-Python valid_cli_scan cases: all pass. Mac matrix 4.2.9/4.5.9/5.0.1/
+  5.2.3 each 805 passed / 0 failed, SUITE_DONE expected=805 ok=yes, GATE PASS
+  version-enforced, equal totals, release gate PASS. win_acceptance on the real
+  5.2.3 INSTALLED extension: 38/38, ACCEPT_DONE expected=38 ok=yes, gate PASS,
+  0 raw crash signatures; certified child invoked=27 missing_ev=[] mismatch=[],
+  and the overall / per-check-status / summary verdict lies each REJECTED.
   Windows CI: pending re-run on this commit. Independent review of the corrected
   commit still required before certification is claimed restored. No merge,
   publication, or spending.

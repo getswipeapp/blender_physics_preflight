@@ -45,7 +45,9 @@ results = []  # (name, ok, detail)
 # R24 added two more (child-invoked-only-subset; child-suppressed-results) -> 34.
 # R25 replaced the count-based suppress check with exact-findings checks
 # (status-substitution; incomplete per-id evidence) -> 35.
-EXPECTED_ACCEPT_CHECKS = 35
+# R26 added three verdict-consistency repros (overall / per-check status /
+# summary distribution lies) -> 38.
+EXPECTED_ACCEPT_CHECKS = 38
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -346,6 +348,18 @@ def main():
     MISSING_POST = (
         "for _k in list(_ret):\n"
         "    if _k not in (1, 7, 8, 26):\n        _ret.pop(_k)\n")
+    # R26-1 tampers: keep the real findings + evidence, but rewrite the report's
+    # top-level verdicts. Each must be caught because the verdicts are DERIVED from
+    # the recorded findings and must match.
+    OVERALL_LIE = ("import json as _j\n_d = _j.loads(out)\n"
+                   "_d['overall'] = 'PASS'\nout = _j.dumps(_d)\n")
+    STATUS_LIE = ("import json as _j\n_d = _j.loads(out)\n"
+                  "for _c in _d['checks']:\n"
+                  "    if _c.get('status') == 'WARNING':\n        _c['status'] = 'PASS'\n"
+                  "out = _j.dumps(_d)\n")
+    SUMMARY_LIE = ("import json as _j\n_d = _j.loads(out)\n_s = _d['summary']\n"
+                   "_s['PASS'] = _s.get('PASS', 0) + _s.get('WARNING', 0)\n"
+                   "_s['WARNING'] = 0\nout = _j.dumps(_d)\n")
 
     registry_ids = [m.id for m in eng.CHECKS]
 
@@ -410,6 +424,26 @@ def main():
     check("CLI child with incomplete per-check findings evidence is REJECTED (R25-1)",
           not v_mi.ok, "missing_ev=%s -> %s"
           % (v_mi.info.get("evidence_missing"), "; ".join(v_mi.reasons)))
+
+    # R26-1 repros: the findings + child evidence are intact, but the report's
+    # top-level verdicts are rewritten. Each must be REJECTED because the gate
+    # derives the verdicts from the recorded findings and requires them to match.
+    def _verdict_lie(post, info_key, label):
+        rc_, decl_, raw_, out_, inv_ = cli_json_child(
+            instrumented_expr(post=post), open_blend=blend)
+        ids_, finds_ = _evidence(inv_)
+        v_ = gate_check.valid_cli_scan(rc_, raw_, ids_, finds_, registry_ids,
+                                       child_stderr=out_, declared_code=decl_,
+                                       allowed_codes=(0, 1, 2))
+        check(label, not v_.ok, "%s=%s -> %s"
+              % (info_key, v_.info.get(info_key), "; ".join(v_.reasons)))
+
+    _verdict_lie(OVERALL_LIE, "overall_expected",
+                 "CLI child whose report lies overall=PASS (real WARNING) is REJECTED (R26-1)")
+    _verdict_lie(STATUS_LIE, "status_mismatch",
+                 "CLI child whose report flips a check status to PASS is REJECTED (R26-1)")
+    _verdict_lie(SUMMARY_LIE, "overall_expected",
+                 "CLI child whose report fakes the summary distribution is REJECTED (R26-1)")
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
     # report (the crash-exit-0 class) must be REJECTED by the very same gate.

@@ -5335,6 +5335,39 @@ def gate_selfcheck_tests():
                 gc.valid_cli_scan(5, rep_f, full27, ev_match, full27,
                                   allowed_codes=(0, 1, 2)).ok is False,
                 "rejected", "rejected"))
+
+    # ---- R26-1: the report's own VERDICTS must agree with its findings --------
+    # Even with findings intact and complete evidence, the report's per-check
+    # status, summary distribution and overall verdict are derived from the
+    # recorded findings and must match — a report that keeps real WARNING/UNKNOWN
+    # findings but declares a rosier verdict is rejected. (Live overall/status/
+    # summary lies run in win_acceptance on real Blender.)
+    res.append(("gate_check R26-1: a verdict-consistent report is ACCEPTED",
+                gc.valid_cli_scan(2, _rep_find({1, 7, 8}), full27, ev_match, full27,
+                                  allowed_codes=(0, 1, 2)).ok is True,
+                "accepted", "accepted"))
+    rep_overall_lie = _json.loads(_rep_find({1, 7, 8}))
+    rep_overall_lie["overall"] = "PASS"  # real WARNING findings, says PASS
+    res.append(("gate_check R26-1: a false overall=PASS (real WARNING) is REJECTED",
+                gc.valid_cli_scan(2, _json.dumps(rep_overall_lie), full27, ev_match,
+                                  full27, allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
+    rep_status_lie = _json.loads(_rep_find({1, 7, 8}))
+    for _c in rep_status_lie["checks"]:
+        if _c["id"] == 1:
+            _c["status"] = "PASS"  # finding still WARNING, top-level status lies
+    res.append(("gate_check R26-1: a per-check status lie (finding WARNING, status PASS) is REJECTED",
+                gc.valid_cli_scan(2, _json.dumps(rep_status_lie), full27, ev_match,
+                                  full27, allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
+    rep_summary_lie = _json.loads(_rep_find({1, 7, 8}))
+    rep_summary_lie["summary"]["PASS"] = (rep_summary_lie["summary"].get("PASS", 0)
+                                          + rep_summary_lie["summary"]["WARNING"])
+    rep_summary_lie["summary"]["WARNING"] = 0  # distribution faked, total unchanged
+    res.append(("gate_check R26-1: a faked summary distribution is REJECTED",
+                gc.valid_cli_scan(2, _json.dumps(rep_summary_lie), full27, ev_match,
+                                  full27, allowed_codes=(0, 1, 2)).ok is False,
+                "rejected", "rejected"))
     return res
 
 
@@ -5375,9 +5408,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 56,
+    "gate_selfcheck_tests": 60,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 801
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 805
 
 
 def main():

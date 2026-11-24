@@ -386,6 +386,36 @@ def _norm_findings(rows):
                    for row in (rows or [])])
 
 
+# Severity of a FINDING status, mirroring engine.SEVERITY, for rolling a check's
+# findings up to its per-check verdict (worst wins). A check with no findings is
+# NOT APPLICABLE. Used to DERIVE the verdicts a truthful report must show from the
+# findings the checks actually returned (R26-1).
+_FINDING_SEVERITY = {"FAIL": 4, "WARNING": 3, "UNKNOWN": 2, _NA_DISPLAY: 1,
+                     "PASS": 0}
+
+
+def _derived_status(rows):
+    """The per-check status the engine assigns from a check's findings: the worst
+    finding status by severity, or NOT APPLICABLE when it returned none (mirrors
+    engine.check_status)."""
+    if not rows:
+        return _NA_DISPLAY
+    return max((("" if r[0] is None else str(r[0])) for r in rows if r),
+               key=lambda s: _FINDING_SEVERITY.get(s, -1))
+
+
+def _derived_overall(statuses):
+    """The engine's overall verdict: the worst that actually occurred among the
+    checks (NOT APPLICABLE / PASS -> PASS), mirroring build_json_report."""
+    if "FAIL" in statuses:
+        return "FAIL"
+    if "WARNING" in statuses:
+        return "WARNING"
+    if "UNKNOWN" in statuses:
+        return "UNKNOWN"
+    return "PASS"
+
+
 def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_ids,
                    allowed_codes=(0,), child_stderr="", declared_code=_UNSET,
                    required_ids=None):
@@ -409,6 +439,13 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
         independent). So a report that dropped findings, or swapped a genuine
         UNKNOWN/FAIL for a PASS while keeping the count, is rejected — counts alone
         never proved the report tells the truth about the findings.
+      * verdict-consistency (R26-1) — the report's own verdicts must agree with
+        those findings: each check's top-level ``status`` must equal the worst
+        finding it returned (NOT APPLICABLE when none), the ``summary`` must hold
+        the exact per-status distribution, and ``overall`` must be the worst
+        verdict that occurred. All are derived from the recorded findings with the
+        engine's severity rules, so a report that keeps real UNKNOWN/WARNING/FAIL
+        findings yet declares a rosier status, summary or overall is rejected.
 
     The invocation ids and returned findings MUST come from inside the same child
     process that wrote ``text`` (a recorder wrapped around each registered check
@@ -460,6 +497,46 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
             reasons.append("report findings disagree with what the checks returned "
                            "inside the scan for %s (results altered or suppressed) "
                            "(R25-1)" % mismatched)
+        # R26-1: the report's own VERDICTS must agree with its findings. Derive
+        # each check's status, the summary distribution and the overall verdict
+        # from the child's recorded findings (ground truth) using the engine's
+        # severity rules, and require the report to match — so a report that keeps
+        # real UNKNOWN/WARNING/FAIL findings but declares a rosier per-check
+        # status, summary count or overall verdict is rejected. Only meaningful
+        # with complete evidence (otherwise already rejected above).
+        if not missing_ev:
+            derived = {cid: _derived_status(ev.get(cid) or []) for cid in expected}
+            rep_status = {c.get("id"): c.get("status") for c in checks
+                          if isinstance(c, dict)}
+            st_bad = [(cid, rep_status.get(cid), derived[cid]) for cid in expected
+                      if rep_status.get(cid) != derived[cid]]
+            info["status_mismatch"] = [b[0] for b in st_bad]
+            if st_bad:
+                reasons.append("report per-check status disagrees with the findings "
+                               "(id,reported,derived)=%s (R26-1)" % st_bad[:8])
+            exp_summary = {"FAIL": 0, "WARNING": 0, "UNKNOWN": 0, "PASS": 0,
+                           _NA_DISPLAY: 0}
+            for cid in expected:
+                exp_summary[derived[cid]] = exp_summary.get(derived[cid], 0) + 1
+            rep_summary = jd.get("summary") if isinstance(jd.get("summary"), dict) else {}
+            summ_bad = {}
+            for k, want in exp_summary.items():
+                try:
+                    got = int(rep_summary.get(k, 0))
+                except (TypeError, ValueError):
+                    got = None
+                if got != want:
+                    summ_bad[k] = (got, want)
+            if summ_bad:
+                reasons.append("report summary distribution disagrees with the "
+                               "findings (bucket: reported,derived)=%s (R26-1)"
+                               % summ_bad)
+            exp_overall = _derived_overall([derived[cid] for cid in expected])
+            info["overall_expected"] = exp_overall
+            if jd.get("overall") != exp_overall:
+                reasons.append("report overall=%r disagrees with the findings-"
+                               "derived verdict %r (R26-1)"
+                               % (jd.get("overall"), exp_overall))
     elif returned_findings:
         reasons.append("report has no checks array to cross-check returned findings "
                        "(R25-1)")
