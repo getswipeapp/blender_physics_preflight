@@ -1254,6 +1254,68 @@ RESULT
   5.2.3 INSTALLED extension: 39/39, ACCEPT_DONE expected=39 ok=yes, gate PASS,
   0 raw crash signatures; certified child invoked=27 missing_ev=[] mismatch=[],
   and the display-lie child REJECTED (meta_mismatch=[(7,'display')]).
-  Windows CI: pending re-run on this commit. Independent review of the corrected
-  commit still required before certification is claimed restored. No merge,
-  publication, or spending.
+  Windows CI run 45485042370 (headSha 5610c82 = 2383e79 + toggle; branch tip
+  08047e1 identical) genuinely PASS, verified in logs: 4x SUITE_DONE expected=811
+  ok=yes + GATE PASS version-enforced; ACCEPT_DONE 39/39 expected=39 ok=yes +
+  GATE PASS; certified child invoked=27 missing_ev=[] mismatch=[] (PASS), the
+  display-lie child REJECTED (meta_mismatch=[(7,'display')]); real-batch marker
+  GATE PASS; 0 raw crash signatures.
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.
+
+======================================================================
+ROUND 28 — METADATA FAIL-CLOSED + REPORT PROVENANCE (commit pending)
+======================================================================
+The 11th independent review of 2383e79 returned PARTIAL PASS: R27-1 CLOSED. Two
+remaining blockers:
+
+R28-1  The metadata check FAILED OPEN: valid_cli_scan used `if report_meta:`, so
+  an absent/empty metadata dict skipped the display/name/group check entirely;
+  it also tolerated missing name/group fields.
+R28-2  Report PROVENANCE was never verified: the report's `blender` and `file`
+  fields were not checked against the child, so a report could claim it scanned a
+  different Blender version or .blend file.
+
+REPRODUCED ON REAL BLENDER 5.2.3 (against the committed R27 validator), before
+coding: with report_meta={} a display lie was ACCEPTED (fail-open); a report with
+blender='9.9.9' was ACCEPTED; a report with file='/evil/other.blend' was ACCEPTED.
+
+FIX
+  certification/ci/win_acceptance.py
+    * The instrumented child now also records its ACTUAL provenance
+      (bpy.app.version_string + bpy.data.filepath) in the .inv sidecar. A
+      _certify() helper runs every CLI-child check in FULL certification mode:
+      require_meta=True, provenance=<child's>, expected_blender=bpy.app.version_
+      string, expected_file=<the fixture>. New repros: dropped canonical metadata
+      (REJECTED, not skipped), a report omitting a per-check field (REJECTED), a
+      blender-version lie (REJECTED), a .blend-file lie (REJECTED).
+      EXPECTED_ACCEPT_CHECKS 39 -> 43.
+  tests/gate_check.py
+    * valid_cli_scan gains require_meta, provenance, expected_blender,
+      expected_file. With require_meta the canonical metadata must be COMPLETE for
+      all 27 ids and present on every report check (fail-closed). Provenance:
+      report blender/file must equal the child's actual values, the version must
+      equal expected, and the fixture basename must match. cache_disk_usage totals
+      must add up.
+  tests/run_tests.py
+    * 6 new gate_selfcheck regressions (honest cert report accepted; empty
+      metadata, omitted field, version lie, file lie, cache mismatch each
+      rejected). gate_selfcheck 66 -> 72; grand total 811 -> 817.
+  (failsafe/engine.py and report.py unchanged this round.)
+
+RESULT
+  Plain-Python valid_cli_scan cases: all pass. Blender 5.2.3 local suite: 817
+  passed / 0 failed, SUITE_DONE expected=817 ok=yes, GATE PASS. win_acceptance on
+  the real 5.2.3 INSTALLED extension: 43/43, ACCEPT_DONE expected=43 ok=yes, gate
+  PASS, 0 raw crash signatures; certified child invoked=27 missing_ev=[]
+  mismatch=[], and the dropped-metadata / omitted-field / blender-lie / file-lie
+  children each REJECTED.
+  NOTE: the local four-version Mac matrix could NOT run this round — the
+  4.2.9 / 4.5.9 / 5.0.1 builds under ~/Downloads/blender_runtime_certification/
+  are no longer on the machine (the whole folder is gone); only the system 5.2.3
+  remains. Four-version coverage is provided by Windows CI below, which downloads
+  all four official Blender builds. (If the local builds return, re-run
+  tests/run_all_versions.sh to confirm the Mac matrix.)
+  Windows CI: pending re-run on this commit (runs 4.2.9/4.5.9/5.0.1/5.2.3).
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.

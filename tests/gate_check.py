@@ -43,6 +43,7 @@ Usage:
         [--forbid "FORBIDDEN MARKER" ...] [--exit-code N]
 """
 import json
+import os
 import re
 import sys
 
@@ -418,7 +419,8 @@ def _derived_overall(statuses):
 
 def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_ids,
                    allowed_codes=(0,), child_stderr="", declared_code=_UNSET,
-                   required_ids=None, report_meta=None):
+                   required_ids=None, report_meta=None, require_meta=False,
+                   provenance=None, expected_blender=None, expected_file=None):
     """R24-1 / R25-1: certify a CLI scan from the SAME child's report AND that
     child's OWN recorded execution evidence — never from a second, independent
     scan.
@@ -453,6 +455,15 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
         cannot show reassuring PASS-style wording and no check can be relabelled.
         Also: check ids are unique and exactly the registry set, ``schema`` is the
         known value, and ``summary`` carries no unexpected buckets.
+      * metadata completeness (R28-1) — with ``require_meta`` (certification mode)
+        the canonical metadata must be COMPLETE: a recorded {display,name,group}
+        for every registered id and those fields present on every report check,
+        so the display check can never fail open when the evidence omits metadata.
+      * provenance (R28-2) — when ``provenance`` (the child's actual {blender,
+        file}) and/or ``expected_blender`` / ``expected_file`` are given, the
+        report's ``blender`` and ``file`` must match what the child really ran and
+        the intended fixture, so a report cannot claim it scanned a different
+        version or .blend. ``cache_disk_usage`` totals must also add up.
 
     The invocation ids and returned findings MUST come from inside the same child
     process that wrote ``text`` (a recorder wrapped around each registered check
@@ -563,9 +574,15 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
             if extra_keys:
                 reasons.append("report summary has unexpected keys %s (R27-1)"
                                % extra_keys)
-            if report_meta:
+            # R28-1: in certification mode (``require_meta``) the canonical
+            # metadata must be COMPLETE — a recorded {display,name,group} for every
+            # registered id AND those fields present on every report check — so the
+            # display check can never silently switch off when the evidence omits
+            # metadata. Outside certification mode the check only runs on the ids
+            # that WERE recorded.
+            if require_meta or report_meta:
                 rm = {}
-                for k, val in report_meta.items():
+                for k, val in (report_meta or {}).items():
                     try:
                         rm[int(k)] = val
                     except (TypeError, ValueError):
@@ -576,18 +593,60 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
                     want = rm.get(cid)
                     c = rep_by_id.get(cid, {})
                     if not isinstance(want, dict):
-                        meta_bad.append((cid, "no canonical meta recorded"))
+                        if require_meta:
+                            meta_bad.append((cid, "no canonical meta"))
                         continue
+                    if require_meta and any(want.get(f) is None
+                                            for f in ("display", "name", "group")):
+                        meta_bad.append((cid, "incomplete canonical meta"))
                     if c.get("display") != want.get("display"):
                         meta_bad.append((cid, "display"))
-                    if "name" in c and c.get("name") != want.get("name"):
+                    if (require_meta or "name" in c) and c.get("name") != want.get("name"):
                         meta_bad.append((cid, "name"))
-                    if "group" in c and c.get("group") != want.get("group"):
+                    if (require_meta or "group" in c) and c.get("group") != want.get("group"):
                         meta_bad.append((cid, "group"))
                 info["meta_mismatch"] = meta_bad[:12]
                 if meta_bad:
-                    reasons.append("report display/name/group disagrees with the "
-                                   "registry %s (R27-1)" % meta_bad[:8])
+                    reasons.append("report display/name/group is missing or disagrees "
+                                   "with the registry %s (R27-1/R28-1)" % meta_bad[:8])
+        # R28-2: report provenance — the report must not claim a different Blender
+        # version or .blend file than the child actually ran, and its cache-usage
+        # total must add up. ``provenance`` is the child's own {blender, file};
+        # ``expected_*`` are what the acceptance intended to scan.
+        if (provenance is not None or expected_blender is not None
+                or expected_file is not None):
+            rep_bl = jd.get("blender")
+            rep_file = jd.get("file")
+            prov = provenance or {}
+            pv_bl = prov.get("blender")
+            pv_file = prov.get("file")
+            if pv_bl is not None and rep_bl != pv_bl:
+                reasons.append("report blender=%r != the child's actual %r (R28-2)"
+                               % (rep_bl, pv_bl))
+            if expected_blender is not None and rep_bl != expected_blender:
+                reasons.append("report blender=%r != expected %r (R28-2)"
+                               % (rep_bl, expected_blender))
+            if provenance is not None and rep_file != pv_file:
+                reasons.append("report file=%r != the child's actual %r (R28-2)"
+                               % (rep_file, pv_file))
+            if expected_file is not None:
+                want_base = os.path.basename(str(expected_file))
+                src = pv_file if pv_file is not None else rep_file
+                got_base = os.path.basename(str(src)) if src else ""
+                if not got_base or got_base != want_base:
+                    reasons.append("report/child scanned %r, expected fixture %r "
+                                   "(R28-2)" % (got_base, want_base))
+        cdu = jd.get("cache_disk_usage")
+        if isinstance(cdu, dict):
+            items = cdu.get("items") or []
+            try:
+                s = sum(int(i.get("bytes") or 0) for i in items
+                        if isinstance(i, dict))
+                if int(cdu.get("total_bytes") or 0) != s:
+                    reasons.append("cache_disk_usage total_bytes=%r != sum of items "
+                                   "%d (R28-2)" % (cdu.get("total_bytes"), s))
+            except (TypeError, ValueError):
+                reasons.append("cache_disk_usage has non-integer byte counts (R28-2)")
     elif returned_findings:
         reasons.append("report has no checks array to cross-check returned findings "
                        "(R25-1)")

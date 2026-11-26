@@ -5425,6 +5425,45 @@ def gate_selfcheck_tests():
     r_key["summary"]["SNEAKY"] = 0  # stray bucket, non-N/A total unchanged
     res.append(("gate_check R27-1: an unexpected summary bucket is REJECTED",
                 _scan(r_key, ev_key, m_key) is False, "rejected", "rejected"))
+
+    # ---- R28-1/R28-2: metadata fail-closed + report provenance ---------------
+    # In certification mode the canonical metadata must be COMPLETE (a missing or
+    # empty metadata dict can no longer skip the display check), and the report's
+    # blender/file provenance must match what the child really ran.
+    EXP_BL = "5.2.3 LTS"
+
+    def _cert(rep, ev, meta, prov):
+        return gc.valid_cli_scan(2, _json.dumps(rep), full27, ev, full27,
+                                 allowed_codes=(0, 1, 2), report_meta=meta,
+                                 require_meta=True, provenance=prov,
+                                 expected_blender=EXP_BL,
+                                 expected_file="/x/fix.blend").ok
+
+    _prov = {"blender": EXP_BL, "file": "/tmp/fix.blend"}
+    r0, e0, m0 = _rep_full({1, 7, 8})
+    r0["blender"], r0["file"] = EXP_BL, "/tmp/fix.blend"
+    res.append(("gate_check R28: an honest cert report (complete meta + provenance) is ACCEPTED",
+                _cert(r0, e0, m0, _prov) is True, "accepted", "accepted"))
+    res.append(("gate_check R28-1: require_meta with empty metadata is REJECTED (fail-closed)",
+                _cert(r0, e0, {}, _prov) is False, "rejected", "rejected"))
+    r1, e1, m1 = _rep_full({1, 7, 8})
+    r1["blender"], r1["file"] = EXP_BL, "/tmp/fix.blend"
+    del r1["checks"][0]["name"]  # report omits a per-check metadata field
+    res.append(("gate_check R28-1: a report omitting a per-check metadata field is REJECTED",
+                _cert(r1, e1, m1, _prov) is False, "rejected", "rejected"))
+    r2, e2, m2 = _rep_full({1, 7, 8})
+    r2["blender"], r2["file"] = "9.9.9", "/tmp/fix.blend"  # version lie
+    res.append(("gate_check R28-2: a report claiming a different Blender version is REJECTED",
+                _cert(r2, e2, m2, _prov) is False, "rejected", "rejected"))
+    r3, e3, m3 = _rep_full({1, 7, 8})
+    r3["blender"], r3["file"] = EXP_BL, "/evil/other.blend"  # file lie
+    res.append(("gate_check R28-2: a report claiming a different .blend file is REJECTED",
+                _cert(r3, e3, m3, _prov) is False, "rejected", "rejected"))
+    r4, e4, m4 = _rep_full({1, 7, 8})
+    r4["blender"], r4["file"] = EXP_BL, "/tmp/fix.blend"
+    r4["cache_disk_usage"] = {"total_bytes": 999, "items": [{"object": "a", "bytes": 1}]}
+    res.append(("gate_check R28-2: an inconsistent cache_disk_usage total is REJECTED",
+                _cert(r4, e4, m4, _prov) is False, "rejected", "rejected"))
     return res
 
 
@@ -5465,9 +5504,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 66,
+    "gate_selfcheck_tests": 72,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 811
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 817
 
 
 def main():
