@@ -1501,6 +1501,16 @@ RESULT
   4.2.9/4.5.9/5.0.1 builds under ~/Downloads/blender_runtime_certification/ are
   still absent; only system 5.2.3 remains. Four-version coverage this round comes
   from Windows CI (downloads all four official builds).
-  Windows CI run: <pending — recorded after the verified run below>.
-  Independent review of the corrected commit still required before certification
-  is claimed restored. No merge, publication, or spending.
+  Windows CI run 46026889573 (headSha 3dab770 = R30 commit 4003ea5 + push toggle;
+  branch tip 1aabfef is the clean revert, functionally identical) genuinely PASS,
+  verified in the downloaded log artifacts — the SOLE four-version signal this
+  round: 4x SUITE_DONE expected=832 ok=yes with gate_selfcheck n=87 on all four
+  (4.2.9/4.5.9/5.0.1/5.2.3); ACCEPT_DONE 52/52 expected=52 ok=yes; honest certify
+  PASS (invoked=27 missing_ev=[] mismatch=[]); every R30 trap behaved — false-zero
+  (total:0 over unmeasured) REJECTED, verified-total-over-unmeasured REJECTED,
+  honest-unknown (null total) ACCEPTED, the real report carries the two-axis
+  schema, _same_file identical-missing=False/real=True/decoy=False; real-batch
+  "ALL CHECKS PASSED"; 0 genuine crash signatures; all four jobs succeeded (so
+  every gate step exited 0 = GATE PASS version-enforced).
+  Independent review of the corrected commit (4003ea5) still required before
+  certification is claimed restored. No merge, publication, or spending.
