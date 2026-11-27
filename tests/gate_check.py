@@ -109,8 +109,16 @@ def _same_file(a, b):
     except OSError:
         # One or both do not exist right now — fall back to canonical paths.
         pass
+    # Canonical real-path equality, but ONLY when the resolved path actually
+    # EXISTS. Two identical *nonexistent* paths resolve to the same string yet
+    # prove no real file identity (R30-2): the identity of a missing/deleted file
+    # cannot be established, so report False rather than a false match. (Two
+    # genuinely different paths already differ here, preserving the R29-1
+    # basename-is-not-enough rejection.)
     try:
-        return os.path.realpath(str(a)) == os.path.realpath(str(b))
+        ra = os.path.realpath(str(a))
+        rb = os.path.realpath(str(b))
+        return ra == rb and os.path.exists(ra)
     except OSError:
         return False
 
@@ -492,12 +500,19 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
         canonical path), not by basename, so a different file that merely shares
         the fixture's name (``/evil/win fixture.blend`` vs the real
         ``/good/win fixture.blend``) is rejected.
-      * cache honesty (R28-2 / R29-2) — ``cache_disk_usage`` totals must add up,
-        AND with ``require_cache_verified`` (certification mode) the report must
-        prove the figure was actually measured: ``enumerated`` must be ``True``.
-        A cache enumeration that FAILED now reports ``enumerated: false`` with a
-        null total rather than a fabricated ``0``, so a could-not-enumerate can
-        never be certified as a verified zero.
+      * cache honesty (R28-2 / R29-2 / R30-1) — ``cache_disk_usage`` totals must add
+        up, AND with ``require_cache_verified`` (certification mode) the cache
+        INVENTORY enumeration must have succeeded (``enumerated`` True — a failure
+        reports ``enumerated: false`` with a null total, never a fabricated ``0``,
+        R29-2). Size honesty is enforced on the TOTAL: a NON-NULL ``total_bytes``
+        claims a verified complete figure, so it must equal the sum of the item
+        byte counts, carry a ``measured: True`` attestation, and have NO unmeasured
+        caches behind it — a populated cache whose size could not be read can never
+        launder its unknown size into a confident number or a verified ``0``
+        (R30-1). A NULL ``total_bytes`` paired with ``measured: False`` is an honest
+        "some cache sizes could not be read" and is accepted (the informational
+        cache size need not be knowable for the correctness scan to certify); only a
+        null total dishonestly paired with ``measured: True`` is rejected.
 
     The invocation ids and returned findings MUST come from inside the same child
     process that wrote ``text`` (a recorder wrapped around each registered check
@@ -691,6 +706,7 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
         cdu = jd.get("cache_disk_usage")
         if isinstance(cdu, dict):
             enumerated = cdu.get("enumerated")
+            measured = cdu.get("measured")
             if require_cache_verified and enumerated is not True:
                 reasons.append("cache_disk_usage not verified (enumerated=%r); a "
                                "failed/absent enumeration cannot certify as a zero "
@@ -698,11 +714,46 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
             if enumerated is not False:
                 items = cdu.get("items") or []
                 try:
-                    s = sum(int(i.get("bytes") or 0) for i in items
-                            if isinstance(i, dict))
-                    if int(cdu.get("total_bytes") or 0) != s:
-                        reasons.append("cache_disk_usage total_bytes=%r != sum of "
-                                       "items %d (R28-2)" % (cdu.get("total_bytes"), s))
+                    # ``bytes`` is null for a cache whose size couldn't be read; it
+                    # contributes to the KNOWN subtotal as unknown, not as 0.
+                    s = sum(int(i["bytes"]) for i in items
+                            if isinstance(i, dict) and i.get("bytes") is not None)
+                    known = cdu.get("known_subtotal_bytes")
+                    if known is not None and int(known) != s:
+                        reasons.append("cache_disk_usage known_subtotal_bytes=%r != "
+                                       "sum of measured items %d (R30-1)"
+                                       % (known, s))
+                    tot = cdu.get("total_bytes")
+                    unmeasured = cdu.get("unmeasured")
+                    if tot is not None:
+                        # A NON-NULL total_bytes claims a VERIFIED COMPLETE figure.
+                        # It must add up, nothing may have gone unmeasured behind it,
+                        # and (in certification mode) it must carry the measured=True
+                        # attestation — so a populated-but-unmeasured scan can never
+                        # launder an unknown size into a confident number or a
+                        # verified ZERO (R30-1 / R28-2).
+                        if int(tot) != s:
+                            reasons.append("cache_disk_usage total_bytes=%r != sum of "
+                                           "items %d (R28-2)" % (tot, s))
+                        if unmeasured:
+                            reasons.append("cache_disk_usage declares a verified "
+                                           "total_bytes=%r while %r cache(s) went "
+                                           "unmeasured (R30-1)" % (tot, unmeasured))
+                        if require_cache_verified and measured is not True:
+                            reasons.append("cache_disk_usage states a total_bytes=%r "
+                                           "without a measured=True attestation "
+                                           "(measured=%r) — an unverified figure "
+                                           "cannot certify (R30-1)" % (tot, measured))
+                    elif require_cache_verified and measured is True:
+                        # Null total WITH a measured=True claim is self-contradictory:
+                        # a fully-measured cache set has a real total (0 for a
+                        # genuinely cache-free scene), not a null.
+                        reasons.append("cache_disk_usage claims measured=True yet "
+                                       "reports total_bytes=null (R30-1)")
+                    # A null total with measured not True is an HONEST unknown ("some
+                    # cache sizes could not be read") — it is truthfully labelled, not
+                    # a false zero, so it is accepted. The correctness certification
+                    # does not depend on an informational cache size being knowable.
                 except (TypeError, ValueError):
                     reasons.append("cache_disk_usage has non-integer byte counts "
                                    "(R28-2)")

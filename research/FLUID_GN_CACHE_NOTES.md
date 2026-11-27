@@ -1404,6 +1404,103 @@ RESULT
   4.2.9/4.5.9/5.0.1 builds under ~/Downloads/blender_runtime_certification/ are
   still absent (folder gone); only system 5.2.3 remains. Four-version coverage
   this round comes from Windows CI (downloads all four official builds).
-  Windows CI: pending re-run on this commit (runs 4.2.9/4.5.9/5.0.1/5.2.3).
+  Windows CI run 46015004987 (headSha 73bb2e2 = 7207a05 + toggle; branch tip
+  d5e499b identical) genuinely PASS, verified in logs — the SOLE four-version
+  signal this round: 4x SUITE_DONE expected=823 ok=yes + GATE PASS version-
+  enforced (4.2.9/4.5.9/5.0.1/5.2.3), with the 6 new R29 gate_selfcheck
+  regressions PASS on all four; ACCEPT_DONE 47/47 expected=47 ok=yes + GATE PASS;
+  certified child invoked=27 missing_ev=[] mismatch=[]; the same-basename decoy
+  child REJECTED by identity (the log shows the real Windows decoy path
+  C:\Users\RUNNER~1\AppData\Local\Temp\failsafe_decoy_...\win fixture.blend, so
+  the identity check ran against a genuinely different Windows file); the
+  provenance-dropped child REJECTED; the failed-enumeration report marked
+  enumerated:false/null; the unverified-zero cache REJECTED; real-batch marker
+  GATE PASS; 0 genuine crash signatures.
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.
+
+
+================================================================================
+ROUND 30 — cache SIZE-measurement false zero + _same_file missing-path identity
+================================================================================
+Independent review of 7207a05: PARTIAL PASS. R29-1 and R29-2 (enumeration
+exceptions) CLOSED. Two further gaps:
+
+R30-1  SIZE FAILURE CAN STILL LOOK LIKE VERIFIED ZERO
+  cache_inspect._dir_size() / _point_cache_bytes() return None when a per-cache
+  SIZE measurement fails, while enumerate_caches() still finishes successfully.
+  report._cache_usage_block() EXCLUDED entries whose disk_bytes is None, set
+  enumerated=True and summed only the survivors — so an unmeasured cache silently
+  disappeared and a populated scene could report total_bytes:0 as a VERIFIED zero
+  (or a silent undercount). valid_cli_scan accepted it (enumerated:true, 0==sum).
+  REPRODUCED on real 5.2.3 (repro via real CacheEntry through the real
+  build_json_report): one measured (4096) + one unmeasured -> the unmeasured cache
+  DROPPED, total understated; unmeasured-only -> enumerated:true, total_bytes:0,
+  items:[] (false verified zero); the current gate did NOT reject it.
+
+R30-2  _same_file realpath fallback matched two identical NONEXISTENT paths
+  _same_file() fell back to os.path.realpath equality when os.path.samefile
+  raised; two identical MISSING paths resolve to the same string -> returned True,
+  so a deleted/missing fixture could "match". REPRODUCED on real 5.2.3:
+  _same_file(missing, missing) == True while the path does not exist; a DIFFERENT
+  missing path -> False (R29-1 preserved).
+
+FIX
+  failsafe/report.py
+    * _cache_usage_block now reports TWO independent facts: `enumerated` (did the
+      inventory enumeration succeed, R29-2) and `measured` (was EVERY enumerated
+      cache's on-disk size measured). total_bytes is a verified COMPLETE figure
+      ONLY when measured; the moment any cache goes unmeasured it is null (unknown),
+      never a fabricated 0/undercount. The measured caches' sum is reported,
+      labelled, as `known_subtotal_bytes`; every enumerated cache appears in
+      `items` (an unmeasured one with bytes:null) so an unknown size is preserved,
+      not dropped. Text/HTML reports label a "Subtotal (measured)" and name the
+      "N cache(s) of unknown size" when any size is unmeasured.
+  tests/gate_check.py
+    * _same_file fallback now requires the resolved real-path to EXIST — identity
+      of a missing/deleted file can't be established, so identical missing paths
+      return False (R30-2); real-file identity and the R29-1 basename rejection are
+      unchanged.
+    * cache honesty: a NON-NULL total_bytes claims a verified complete figure, so
+      it must equal the sum of item bytes, carry measured:true, and have no
+      unmeasured caches behind it — a false zero (total:0 over an unmeasured cache)
+      is REJECTED (R30-1). A NULL total paired with measured:false is an HONEST
+      "size unknown" and is ACCEPTED (the correctness scan doesn't hinge on a
+      knowable informational size); a null total dishonestly claiming measured:true
+      is REJECTED.
+  certification/ci/win_acceptance.py
+    * +5 regressions: false-zero (total:0 over unmeasured) REJECTED; verified total
+      over unmeasured REJECTED; honest-unknown (null total) ACCEPTED; real report
+      carries the honest two-axis schema and never a non-null total it didn't
+      measure; _same_file identical-missing rejected / real confirmed / decoy
+      rejected. ACCEPT 47 -> 52.
+  tests/run_tests.py
+    * +9 gate_selfcheck regressions (false-zero reject, honest-unknown accept,
+      null-claiming-measured reject, verified-total-over-unmeasured reject, honest
+      fully-measured accept, inconsistent known_subtotal reject; _same_file
+      identical-missing reject, real-identity confirm, cert-naming-missing-fixture
+      reject). _CACHE_OK updated to the measured:true shape. gate_selfcheck
+      78 -> 87; grand total 823 -> 832.
+  (failsafe/cli.py, batch.py unchanged — they already thread cache_ok; the new
+   measured/known_subtotal/unmeasured fields are computed inside _cache_usage_block.)
+
+RESULT
+  Both blockers reproduced on real 5.2.3 BEFORE coding (above). After the fix, on
+  real 5.2.3: mixed measured+unmeasured -> unmeasured preserved (bytes:null),
+  measured:false, total_bytes:null, known_subtotal_bytes labelled; unmeasured-only
+  -> NOT a verified zero; fully-measured -> total verified; a genuinely cache-free
+  scene -> measured:true, total_bytes:0 (a legitimate verified zero still works);
+  _same_file identical-missing=False, real-identity=True, diff-missing=False.
+  Local 5.2.3 suite: 832 passed / 0 failed, SUITE_DONE expected=832 ok=yes, GATE
+  PASS version-enforced (gate_selfcheck n=87). win_acceptance on the real 5.2.3
+  INSTALLED extension (rebuilt failsafe-1.0.0.zip, reinstalled): 52/52, ACCEPT_DONE
+  expected=52 ok=yes, GATE PASS; the honest certify path passes (the real fixture's
+  own unmeasured cache -> null total -> accepted), the false-zero REJECTED, the
+  honest-unknown ACCEPTED, _same_file traps behave. 0 real crash signatures.
+  NOTE: the local four-version Mac matrix again could NOT run — the
+  4.2.9/4.5.9/5.0.1 builds under ~/Downloads/blender_runtime_certification/ are
+  still absent; only system 5.2.3 remains. Four-version coverage this round comes
+  from Windows CI (downloads all four official builds).
+  Windows CI run: <pending — recorded after the verified run below>.
   Independent review of the corrected commit still required before certification
   is claimed restored. No merge, publication, or spending.

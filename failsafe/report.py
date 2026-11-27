@@ -79,17 +79,48 @@ def _enumerate_caches_safe(scene=None):
 
 
 def _cache_usage_block(entries, ok):
-    """Build the JSON ``cache_disk_usage`` block honestly (R29-2). When
-    enumeration failed (``ok`` False) the total is ``null`` and ``enumerated`` is
-    ``False`` — a could-not-enumerate is never dressed up as a verified ``0``."""
+    """Build the JSON ``cache_disk_usage`` block honestly (R29-2 / R30-1).
+
+    Two INDEPENDENT facts are reported, never conflated:
+
+      * ``enumerated`` — did the cache INVENTORY enumeration succeed? ``False`` only
+        when enumeration raised (R29-2). A genuinely cache-free scene is
+        ``True`` with an empty ``items`` list.
+      * ``measured`` — was the on-disk SIZE of EVERY enumerated cache actually
+        measured? A populated cache whose size could not be read (``disk_bytes``
+        is ``None`` — ``_dir_size`` / ``_point_cache_bytes`` returned ``None``
+        while enumeration still succeeded) leaves this ``False``.
+
+    ``total_bytes`` is a VERIFIED COMPLETE figure only when both are true; the
+    moment any enumerated cache went unmeasured it is ``null`` (unknown), never a
+    misleading ``0`` or an undercount presented as the whole (R30-1). The sum of
+    the caches that WERE measured is still reported, explicitly labelled, as
+    ``known_subtotal_bytes``, and every enumerated cache — measured or not —
+    appears in ``items`` (an unmeasured one with ``bytes: null``), so an
+    unmeasurable size is preserved as unknown rather than silently dropped."""
     if not ok:
-        return {"enumerated": False, "total_bytes": None, "items": [],
+        return {"enumerated": False, "measured": False, "total_bytes": None,
+                "known_subtotal_bytes": None, "unmeasured": None, "items": [],
                 "error": "cache enumeration failed"}
-    items = [{"object": e.obj_name, "system": e.system,
-              "bytes": getattr(e, "disk_bytes", None)}
-             for e in (entries or []) if getattr(e, "disk_bytes", None) is not None]
+    items = []
+    subtotal = 0
+    unmeasured = 0
+    for e in (entries or []):
+        b = getattr(e, "disk_bytes", None)
+        items.append({"object": e.obj_name, "system": e.system, "bytes": b})
+        if b is None:
+            unmeasured += 1
+        else:
+            subtotal += b
+    measured = (unmeasured == 0)
     return {"enumerated": True,
-            "total_bytes": sum(i["bytes"] for i in items), "items": items}
+            "measured": measured,
+            # A verified complete figure ONLY when nothing went unmeasured;
+            # otherwise null (unknown), never a fabricated/undercounted total.
+            "total_bytes": (subtotal if measured else None),
+            "known_subtotal_bytes": subtotal,
+            "unmeasured": unmeasured,
+            "items": items}
 
 
 def _cache_size_rows(entries):
@@ -139,14 +170,24 @@ def build_text_report(results, entries=None):
     if entries is None:
         entries = _enumerate_caches_safe()
     rows = _cache_size_rows(entries)
-    if rows:
+    unmeasured = sum(1 for e in (entries or [])
+                     if getattr(e, "disk_bytes", None) is None)
+    if rows or unmeasured:
         total = sum(b for _, _, b in rows)
         from . import cache_inspect as ci
         lines.append("Cache disk usage")
         lines.append("-" * len("Cache disk usage"))
         for label, human, _ in sorted(rows, key=lambda r: r[2], reverse=True):
             lines.append("        %-40s %s" % (label, human))
-        lines.append("        %-40s %s" % ("TOTAL", ci.human_bytes(total)))
+        # Honest labelling (R30-1): when some caches couldn't be sized, the sum
+        # above is a KNOWN SUBTOTAL, not the whole, and the unmeasured ones are
+        # named as unknown — never folded into a confident total of 0.
+        total_label = "SUBTOTAL (measured)" if unmeasured else "TOTAL"
+        lines.append("        %-40s %s" % (total_label, ci.human_bytes(total)))
+        if unmeasured:
+            lines.append("        %-40s %s"
+                         % ("%d cache(s) of unknown size" % unmeasured,
+                            "not included above"))
         lines.append("")
 
     lines.append("=" * 68)
@@ -285,7 +326,9 @@ def build_html_report(results, entries=None):
     if entries is None:
         entries = _enumerate_caches_safe()
     rows = _cache_size_rows(entries)
-    if rows:
+    unmeasured = sum(1 for en in (entries or [])
+                     if getattr(en, "disk_bytes", None) is None)
+    if rows or unmeasured:
         from . import cache_inspect as ci
         total = sum(b for _, _, b in rows)
         out.append('<h2>Cache disk usage</h2>')
@@ -293,8 +336,15 @@ def build_html_report(results, entries=None):
         for label, human, _b in sorted(rows, key=lambda r: r[2], reverse=True):
             out.append('<tr><td>%s</td><td class="num">%s</td></tr>'
                        % (e(label), e(human)))
-        out.append('<tr class="total"><td>TOTAL</td><td class="num">%s</td></tr>'
-                   % e(ci.human_bytes(total)))
+        # Honest labelling (R30-1): an unmeasured cache is shown as unknown and
+        # the sum is a measured subtotal, never a confident whole.
+        total_label = "Subtotal (measured)" if unmeasured else "TOTAL"
+        out.append('<tr class="total"><td>%s</td><td class="num">%s</td></tr>'
+                   % (e(total_label), e(ci.human_bytes(total))))
+        if unmeasured:
+            out.append('<tr><td>%d cache(s) of unknown size</td>'
+                       '<td class="num">not included</td></tr>'
+                       % unmeasured)
         out.append('</tbody></table>')
 
     out.append('<p class="foot">Read-only tool. For disk-backed caches we verify the '

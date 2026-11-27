@@ -5443,7 +5443,10 @@ def gate_selfcheck_tests():
     evil_file = os.path.join(evil_dir, "fix.blend")  # same basename, different dir
     for _p in (good_file, evil_file):
         open(_p, "wb").write(b"BLENDER-fake")
-    _CACHE_OK = {"enumerated": True, "total_bytes": 0, "items": []}
+    # Honest fully-measured cache shapes (the two-axis R30-1 schema the production
+    # report now emits): enumeration succeeded AND every cache's size was measured.
+    _CACHE_OK = {"enumerated": True, "measured": True, "total_bytes": 0,
+                 "known_subtotal_bytes": 0, "unmeasured": 0, "items": []}
 
     def _cert(rep, ev, meta, prov, expected_file=good_file,
               require_provenance=True, require_cache_verified=False):
@@ -5515,6 +5518,100 @@ def gate_selfcheck_tests():
     res.append(("gate_check R29-2: a legacy unverified zero cache is REJECTED",
                 _cert(rL, eL, mL, _prov, require_cache_verified=True) is False,
                 "rejected", "rejected"))
+
+    # ---- R30-1: a SUCCESSFUL enumeration whose per-cache SIZE could not be
+    # measured must not be laundered into a verified figure. The honesty is enforced
+    # on the TOTAL: a non-null total_bytes claims a complete measurement; an honest
+    # null total paired with measured:false truthfully says "size unknown".
+    # The false-zero vector: an unmeasured cache presented as total_bytes:0.
+    rU, eU, mU = _rep_full({1, 7, 8})
+    rU["blender"], rU["file"] = EXP_BL, good_file
+    rU["cache_disk_usage"] = {"enumerated": True, "measured": False,
+                              "total_bytes": 0, "known_subtotal_bytes": 0,
+                              "unmeasured": 1,
+                              "items": [{"object": "a", "system": "Cloth",
+                                         "bytes": None}]}
+    res.append(("gate_check R30-1: an unmeasured cache presented as total_bytes:0 is REJECTED (false zero)",
+                _cert(rU, eU, mU, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+    # The HONEST unknown (null total, measured:false) is ACCEPTED — a truthfully
+    # labelled "size unknown" is not a false zero, and the correctness scan does not
+    # depend on a knowable informational cache size.
+    rUn, eUn, mUn = _rep_full({1, 7, 8})
+    rUn["blender"], rUn["file"] = EXP_BL, good_file
+    rUn["cache_disk_usage"] = {"enumerated": True, "measured": False,
+                               "total_bytes": None, "known_subtotal_bytes": 0,
+                               "unmeasured": 1,
+                               "items": [{"object": "a", "system": "Cloth",
+                                          "bytes": None}]}
+    res.append(("gate_check R30-1: an honest unknown cache (null total, measured:false) is ACCEPTED",
+                _cert(rUn, eUn, mUn, _prov, require_cache_verified=True) is True,
+                "accepted", "accepted"))
+    # A null total dishonestly paired with measured:true is self-contradictory and REJECTED.
+    rUc, eUc, mUc = _rep_full({1, 7, 8})
+    rUc["blender"], rUc["file"] = EXP_BL, good_file
+    rUc["cache_disk_usage"] = {"enumerated": True, "measured": True,
+                               "total_bytes": None, "known_subtotal_bytes": 0,
+                               "unmeasured": 0, "items": []}
+    res.append(("gate_check R30-1: a null total claiming measured:true is REJECTED (contradiction)",
+                _cert(rUc, eUc, mUc, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+    # A non-null total_bytes declared over an admitted unmeasured cache — a
+    # confident number laid over an unknown — is REJECTED.
+    rH, eH, mH = _rep_full({1, 7, 8})
+    rH["blender"], rH["file"] = EXP_BL, good_file
+    rH["cache_disk_usage"] = {"enumerated": True, "measured": True,
+                              "total_bytes": 4096, "known_subtotal_bytes": 0,
+                              "unmeasured": 1,
+                              "items": [{"object": "a", "system": "Cloth",
+                                         "bytes": None}]}
+    res.append(("gate_check R30-1: a verified total declared over an unmeasured cache is REJECTED",
+                _cert(rH, eH, mH, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+    # An honest FULLY-measured cache (measured:true, total == known subtotal == sum
+    # of item bytes) is ACCEPTED — the two-axis schema does not reject a real figure.
+    rM, eM, mM = _rep_full({1, 7, 8})
+    rM["blender"], rM["file"] = EXP_BL, good_file
+    rM["cache_disk_usage"] = {"enumerated": True, "measured": True,
+                              "total_bytes": 4096, "known_subtotal_bytes": 4096,
+                              "unmeasured": 0,
+                              "items": [{"object": "a", "system": "Cloth",
+                                         "bytes": 4096}]}
+    res.append(("gate_check R30-1: an honest fully-measured cache is ACCEPTED",
+                _cert(rM, eM, mM, _prov, require_cache_verified=True) is True,
+                "accepted", "accepted"))
+    # A known_subtotal_bytes that disagrees with the sum of the measured item bytes
+    # is REJECTED (the labelled subtotal must still be internally consistent).
+    rK, eK, mK = _rep_full({1, 7, 8})
+    rK["blender"], rK["file"] = EXP_BL, good_file
+    rK["cache_disk_usage"] = {"enumerated": True, "measured": True,
+                              "total_bytes": 4096, "known_subtotal_bytes": 999,
+                              "unmeasured": 0,
+                              "items": [{"object": "a", "system": "Cloth",
+                                         "bytes": 4096}]}
+    res.append(("gate_check R30-1: an inconsistent known_subtotal_bytes is REJECTED",
+                _cert(rK, eK, mK, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+
+    # ---- R30-2: _same_file must not treat two identical NONEXISTENT paths as the
+    # same file — the identity of a missing/deleted file cannot be established.
+    _missing = os.path.join(_pdir, "gone", "fix.blend")  # never created
+    res.append(("gate_check R30-2: _same_file rejects two identical missing paths",
+                gc._same_file(_missing, _missing) is False, "False", "False"))
+    res.append(("gate_check R30-2: _same_file confirms a real file and rejects a diff missing path",
+                (gc._same_file(good_file, good_file) is True
+                 and gc._same_file(_missing, os.path.join(_pdir, "nope", "fix.blend")) is False),
+                "ok", "ok"))
+    # At the certification level: a report+provenance naming a MISSING fixture
+    # (identity unestablishable) is REJECTED, even though the report file matches
+    # the child's recorded file — a scan of a vanished file can't be certified.
+    rMiss, eMiss, mMiss = _rep_full({1, 7, 8})
+    rMiss["blender"], rMiss["file"] = EXP_BL, _missing
+    _provMiss = {"blender": EXP_BL, "file": _missing}
+    res.append(("gate_check R30-2: a cert naming a missing fixture (identity unestablishable) is REJECTED",
+                _cert(rMiss, eMiss, mMiss, _provMiss, expected_file=_missing,
+                      require_cache_verified=False) is False,
+                "rejected", "rejected"))
     return res
 
 
@@ -5555,9 +5652,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 78,
+    "gate_selfcheck_tests": 87,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 823
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 832
 
 
 def main():

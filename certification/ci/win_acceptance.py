@@ -52,7 +52,10 @@ results = []  # (name, ok, detail)
 # repros -> 43.
 # R29 added file-identity (not basename) + absent-provenance + cache false-zero
 # (real failure honesty + unverified-zero rejection) repros -> 47.
-EXPECTED_ACCEPT_CHECKS = 47
+# R30 added cache size-measurement honesty (false-zero rejection; verified-total-
+# over-unmeasured rejection; honest-unknown acceptance; honest two-axis schema) +
+# _same_file missing-path identity repros -> 52.
+EXPECTED_ACCEPT_CHECKS = 52
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -543,6 +546,83 @@ def main():
                             "out = _j.dumps(_d)\n")
     _tamper(CACHE_FALSEZERO_POST, "overall_expected",
             "CLI child whose report claims an unverified zero cache is REJECTED (R29-2)")
+
+    # R30-1 repro (the actual false-zero vector): a populated cache whose size went
+    # unmeasured, but the report presents total_bytes:0 as if it were a verified
+    # figure. An unknown size laundered into a confident zero must be REJECTED.
+    CACHE_FALSEZERO_UNMEASURED_POST = (
+        "import json as _j\n_d = _j.loads(out)\n"
+        "_d['cache_disk_usage'] = {'enumerated': True, 'measured': False,\n"
+        "    'total_bytes': 0, 'known_subtotal_bytes': 0, 'unmeasured': 1,\n"
+        "    'items': [{'object': 'Cloth', 'system': 'Cloth', 'bytes': None}]}\n"
+        "out = _j.dumps(_d)\n")
+    _tamper(CACHE_FALSEZERO_UNMEASURED_POST, "overall_expected",
+            "CLI child whose report presents total_bytes:0 for an unmeasured cache "
+            "is REJECTED (R30-1 false zero)")
+
+    # R30-1 repro: a report that declares a VERIFIED non-null total_bytes while
+    # still admitting an unmeasured cache behind it — a confident number laid over
+    # an unknown. The gate must REJECT (a verified total cannot hide unmeasured
+    # caches, and the total must equal the measured sum).
+    CACHE_HIDDEN_UNMEASURED_POST = (
+        "import json as _j\n_d = _j.loads(out)\n"
+        "_d['cache_disk_usage'] = {'enumerated': True, 'measured': True,\n"
+        "    'total_bytes': 4096, 'known_subtotal_bytes': 0, 'unmeasured': 1,\n"
+        "    'items': [{'object': 'Cloth', 'system': 'Cloth', 'bytes': None}]}\n"
+        "out = _j.dumps(_d)\n")
+    _tamper(CACHE_HIDDEN_UNMEASURED_POST, "overall_expected",
+            "CLI child whose report declares a verified total over an unmeasured "
+            "cache is REJECTED (R30-1)")
+
+    # R30-1 positive: a report that HONESTLY reports an unmeasured cache as unknown
+    # (total_bytes:null, measured:false) is ACCEPTED — the honest unknown is not a
+    # false zero, and the correctness certification does not hinge on a knowable
+    # informational cache size.
+    CACHE_HONEST_UNKNOWN_POST = (
+        "import json as _j\n_d = _j.loads(out)\n"
+        "_d['cache_disk_usage'] = {'enumerated': True, 'measured': False,\n"
+        "    'total_bytes': None, 'known_subtotal_bytes': 0, 'unmeasured': 1,\n"
+        "    'items': [{'object': 'Cloth', 'system': 'Cloth', 'bytes': None}]}\n"
+        "out = _j.dumps(_d)\n")
+    rc_hu, decl_hu, raw_hu, out_hu, inv_hu = cli_json_child(
+        instrumented_expr(post=CACHE_HONEST_UNKNOWN_POST), open_blend=blend)
+    v_hu = _certify(rc_hu, decl_hu, raw_hu, out_hu, inv_hu)
+    check("CLI child that HONESTLY reports an unmeasured cache as unknown (null "
+          "total) is ACCEPTED (R30-1 honest unknown)",
+          v_hu.ok, "ok=%s -> %s" % (v_hu.ok, "; ".join(v_hu.reasons) or "accepted"))
+
+    # R30-1 positive: the child's REAL report carries the honest two-axis cache
+    # schema (enumerated AND measured, with a labelled known subtotal) — proof the
+    # production builder, not just the gate, distinguishes a measured figure from
+    # an unmeasured one, and never emits a non-null total it did not measure.
+    try:
+        _ok_block = json.loads(raw_ok).get("cache_disk_usage", {})
+    except ValueError:
+        _ok_block = {}
+    _tot = _ok_block.get("total_bytes")
+    check("Real report states cache size on two honest axes (enumerated + measured, "
+          "labelled subtotal) and never a non-null total it didn't measure (R30-1)",
+          (_ok_block.get("enumerated") is True
+           and _ok_block.get("measured") in (True, False)
+           and "known_subtotal_bytes" in _ok_block
+           and "unmeasured" in _ok_block
+           and (_tot is None or _ok_block.get("measured") is True)),
+          "cache_disk_usage keys=%s measured=%s total=%s"
+          % (sorted(_ok_block.keys()), _ok_block.get("measured"), _tot))
+
+    # R30-2 repro: gate_check._same_file must not treat two identical NONEXISTENT
+    # paths as the same file (identity of a missing/deleted file can't be
+    # established), while still proving identity for a real file and rejecting two
+    # genuinely different paths (R29-1 preserved).
+    _miss = os.path.join(decoy_dir, "gone", "fixture.blend")
+    _same_missing = gate_check._same_file(_miss, _miss)
+    _same_real = gate_check._same_file(blend, blend)
+    _same_decoy = gate_check._same_file(blend, decoy)
+    check("_same_file rejects identical missing paths, confirms a real file, and "
+          "rejects a same-basename decoy (R30-2 / R29-1)",
+          (_same_missing is False and _same_real is True and _same_decoy is False),
+          "identical_missing=%s real=%s decoy=%s"
+          % (_same_missing, _same_real, _same_decoy))
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
     # report (the crash-exit-0 class) must be REJECTED by the very same gate.
