@@ -94,6 +94,27 @@ CHECK_INTERNAL_ERROR = "This check could not run (internal error)"
 _UNSET = object()
 
 
+def _same_file(a, b):
+    """True iff paths ``a`` and ``b`` denote the SAME real file — not merely a
+    matching basename (R29-1). Identity is by inode (``os.path.samefile``) when
+    both exist, which is robust to path-spelling differences (Windows 8.3 short
+    names, symlinks, redundant separators); otherwise it falls back to canonical
+    real-path equality. Two different files that happen to share a basename
+    (``/a/fix.blend`` vs ``/b/fix.blend``) are never treated as the same file."""
+    if not a or not b:
+        return False
+    try:
+        if os.path.samefile(a, b):
+            return True
+    except OSError:
+        # One or both do not exist right now — fall back to canonical paths.
+        pass
+    try:
+        return os.path.realpath(str(a)) == os.path.realpath(str(b))
+    except OSError:
+        return False
+
+
 def _sentinel_re(keyword):
     return re.compile(_SENTINEL_TMPL % re.escape(keyword))
 
@@ -420,7 +441,8 @@ def _derived_overall(statuses):
 def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_ids,
                    allowed_codes=(0,), child_stderr="", declared_code=_UNSET,
                    required_ids=None, report_meta=None, require_meta=False,
-                   provenance=None, expected_blender=None, expected_file=None):
+                   provenance=None, expected_blender=None, expected_file=None,
+                   require_provenance=False, require_cache_verified=False):
     """R24-1 / R25-1: certify a CLI scan from the SAME child's report AND that
     child's OWN recorded execution evidence — never from a second, independent
     scan.
@@ -459,11 +481,23 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
         the canonical metadata must be COMPLETE: a recorded {display,name,group}
         for every registered id and those fields present on every report check,
         so the display check can never fail open when the evidence omits metadata.
-      * provenance (R28-2) — when ``provenance`` (the child's actual {blender,
-        file}) and/or ``expected_blender`` / ``expected_file`` are given, the
-        report's ``blender`` and ``file`` must match what the child really ran and
-        the intended fixture, so a report cannot claim it scanned a different
-        version or .blend. ``cache_disk_usage`` totals must also add up.
+      * provenance (R28-2 / R29-1) — when ``provenance`` (the child's actual
+        {blender, file}) and/or ``expected_blender`` / ``expected_file`` are
+        given, the report's ``blender`` and ``file`` must match what the child
+        really ran and the intended fixture, so a report cannot claim it scanned
+        a different version or .blend. With ``require_provenance`` (certification
+        mode) the child's provenance must be PRESENT and COMPLETE — absent
+        provenance is a hard failure, never a skipped check — and the scanned
+        file is matched to the intended fixture by FILE IDENTITY (same inode /
+        canonical path), not by basename, so a different file that merely shares
+        the fixture's name (``/evil/win fixture.blend`` vs the real
+        ``/good/win fixture.blend``) is rejected.
+      * cache honesty (R28-2 / R29-2) — ``cache_disk_usage`` totals must add up,
+        AND with ``require_cache_verified`` (certification mode) the report must
+        prove the figure was actually measured: ``enumerated`` must be ``True``.
+        A cache enumeration that FAILED now reports ``enumerated: false`` with a
+        null total rather than a fabricated ``0``, so a could-not-enumerate can
+        never be certified as a verified zero.
 
     The invocation ids and returned findings MUST come from inside the same child
     process that wrote ``text`` (a recorder wrapped around each registered check
@@ -609,17 +643,26 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
                 if meta_bad:
                     reasons.append("report display/name/group is missing or disagrees "
                                    "with the registry %s (R27-1/R28-1)" % meta_bad[:8])
-        # R28-2: report provenance — the report must not claim a different Blender
-        # version or .blend file than the child actually ran, and its cache-usage
-        # total must add up. ``provenance`` is the child's own {blender, file};
-        # ``expected_*`` are what the acceptance intended to scan.
+        # R28-2 / R29-1: report provenance — the report must not claim a different
+        # Blender version or .blend file than the child actually ran. ``provenance``
+        # is the child's OWN recorded {blender, file}; ``expected_*`` are what the
+        # acceptance intended to scan. In certification mode (``require_provenance``)
+        # provenance must be present and complete, and the scanned file is matched
+        # to the fixture by FILE IDENTITY, not basename.
+        rep_bl = jd.get("blender")
+        rep_file = jd.get("file")
+        prov = provenance or {}
+        pv_bl = prov.get("blender")
+        pv_file = prov.get("file")
+        if require_provenance:
+            if provenance is None or not pv_bl or not pv_file:
+                reasons.append("child provenance absent or incomplete; cannot "
+                               "certify which Blender/file actually ran (R29-1)")
+            if expected_blender is None or expected_file is None:
+                reasons.append("certification requires an expected blender and "
+                               "fixture to anchor provenance against (R29-1)")
         if (provenance is not None or expected_blender is not None
-                or expected_file is not None):
-            rep_bl = jd.get("blender")
-            rep_file = jd.get("file")
-            prov = provenance or {}
-            pv_bl = prov.get("blender")
-            pv_file = prov.get("file")
+                or expected_file is not None or require_provenance):
             if pv_bl is not None and rep_bl != pv_bl:
                 reasons.append("report blender=%r != the child's actual %r (R28-2)"
                                % (rep_bl, pv_bl))
@@ -630,23 +673,42 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
                 reasons.append("report file=%r != the child's actual %r (R28-2)"
                                % (rep_file, pv_file))
             if expected_file is not None:
-                want_base = os.path.basename(str(expected_file))
-                src = pv_file if pv_file is not None else rep_file
-                got_base = os.path.basename(str(src)) if src else ""
-                if not got_base or got_base != want_base:
-                    reasons.append("report/child scanned %r, expected fixture %r "
-                                   "(R28-2)" % (got_base, want_base))
+                # Identity, not basename (R29-1): the file the child really opened
+                # must be the SAME file as the intended fixture. A different file
+                # that merely shares the basename is rejected.
+                actual = pv_file if pv_file is not None else rep_file
+                if not actual:
+                    reasons.append("no scanned-file path to verify against the "
+                                   "intended fixture %r (R29-1)" % expected_file)
+                elif not _same_file(actual, expected_file):
+                    reasons.append("child scanned %r, not the intended fixture %r "
+                                   "(a matching basename is not enough) (R29-1)"
+                                   % (actual, expected_file))
+        # Cache honesty (R28-2 / R29-2): totals must add up, and a certified report
+        # must prove the figure was actually measured (``enumerated`` True). A
+        # could-not-enumerate reports ``enumerated: false`` with a null total; it is
+        # never certified as a verified zero.
         cdu = jd.get("cache_disk_usage")
         if isinstance(cdu, dict):
-            items = cdu.get("items") or []
-            try:
-                s = sum(int(i.get("bytes") or 0) for i in items
-                        if isinstance(i, dict))
-                if int(cdu.get("total_bytes") or 0) != s:
-                    reasons.append("cache_disk_usage total_bytes=%r != sum of items "
-                                   "%d (R28-2)" % (cdu.get("total_bytes"), s))
-            except (TypeError, ValueError):
-                reasons.append("cache_disk_usage has non-integer byte counts (R28-2)")
+            enumerated = cdu.get("enumerated")
+            if require_cache_verified and enumerated is not True:
+                reasons.append("cache_disk_usage not verified (enumerated=%r); a "
+                               "failed/absent enumeration cannot certify as a zero "
+                               "(R29-2)" % (enumerated,))
+            if enumerated is not False:
+                items = cdu.get("items") or []
+                try:
+                    s = sum(int(i.get("bytes") or 0) for i in items
+                            if isinstance(i, dict))
+                    if int(cdu.get("total_bytes") or 0) != s:
+                        reasons.append("cache_disk_usage total_bytes=%r != sum of "
+                                       "items %d (R28-2)" % (cdu.get("total_bytes"), s))
+                except (TypeError, ValueError):
+                    reasons.append("cache_disk_usage has non-integer byte counts "
+                                   "(R28-2)")
+        elif require_cache_verified:
+            reasons.append("cache_disk_usage missing; a certified report must state "
+                           "a verified cache figure (R29-2)")
     elif returned_findings:
         reasons.append("report has no checks array to cross-check returned findings "
                        "(R25-1)")

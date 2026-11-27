@@ -1316,6 +1316,94 @@ RESULT
   remains. Four-version coverage is provided by Windows CI below, which downloads
   all four official Blender builds. (If the local builds return, re-run
   tests/run_all_versions.sh to confirm the Mac matrix.)
+  Windows CI run 45842589093 (headSha 26ef202 = e9acd2a + toggle; branch tip
+  157648f identical) genuinely PASS, verified in logs — the SOLE four-version
+  signal this round: 4x SUITE_DONE expected=817 ok=yes + GATE PASS version-
+  enforced (4.2.9/4.5.9/5.0.1/5.2.3); ACCEPT_DONE 43/43 expected=43 ok=yes +
+  GATE PASS; certified child invoked=27 missing_ev=[] mismatch=[], the meta-drop
+  ("no canonical meta"), omitted-field ("name"), blender-lie (vs child's
+  '5.2.3 LTS') and file-lie (vs the child's real Windows path) children each
+  REJECTED; real-batch marker GATE PASS; 0 raw crash signatures.
+  Independent review of the corrected commit still required before certification
+  is claimed restored. No merge, publication, or spending.
+
+================================================================================
+ROUND 29 — provenance bypass (same-basename / absent provenance) + false-zero cache
+================================================================================
+REVIEW (independent, on e9acd2a): PARTIAL PASS. R28-1 CLOSED (metadata fail-
+closed). R28-2 PARTIAL. Two blockers:
+  R29-1 PROVENANCE BYPASS. valid_cli_scan skipped the child's actual-file check
+    when provenance=None, and expected_file compared only os.path.basename() —
+    so the R28 self-test accepted actual /tmp/fix.blend against expected
+    /x/fix.blend. A child opening a DIFFERENT file with the SAME basename passes.
+  R29-2 CACHE FALSE ZERO. report._enumerate_caches_safe() caught every
+    enumeration error and returned [] — a failed enumeration looked identical to
+    a genuine zero ({total_bytes:0, items:[]}), and the gate tolerated a missing
+    cache block. A could-not-enumerate certified as a verified zero.
+
+REPRODUCED FIRST on real Blender 5.2.3 (before any fix), with a genuine 27-check
+report from an installed scan:
+  * expected_file = a different dir, same basename "win fixture.blend" -> ok=True
+    (ACCEPTED, bug). provenance=None + wrong expected -> ok=True (ACCEPTED, bug).
+  * monkeypatched cache_inspect.enumerate_caches to raise -> build_json_report
+    emitted cache_disk_usage {total_bytes:0, items:[]}, byte-identical to an
+    empty scene (confirmed Indistinguishable == True).
+
+FIX
+  tests/gate_check.py
+    * new _same_file(a, b): file identity by inode (os.path.samefile, robust to
+      Windows 8.3 short names / symlinks / separators) with a canonical-realpath
+      fallback — never basename alone (R29-1).
+    * valid_cli_scan gains require_provenance and require_cache_verified.
+      - require_provenance: provenance must be PRESENT and COMPLETE (blender+file),
+        and expected_blender+expected_file must be supplied; absent/incomplete
+        provenance is a hard failure, not a skipped check.
+      - the scanned file is matched to the intended fixture by _same_file identity,
+        not basename, so /evil/win fixture.blend != /good/win fixture.blend.
+      - require_cache_verified: cache_disk_usage must be present and
+        enumerated==True; enumerated:false (or the legacy no-'enumerated' zero)
+        can never certify as a verified zero (R29-2).
+  failsafe/report.py
+    * _enumerate_caches() returns (entries, ok); ok=False only when enumeration
+      RAISED. _cache_usage_block() emits {"enumerated":true,...} for a real
+      measurement and {"enumerated":false,"total_bytes":null,...} for a failure —
+      never a fabricated 0. build_json_report gains cache_ok.
+  failsafe/cli.py, failsafe/batch.py
+    * both scan paths that already caught enumeration errors now thread cache_ok
+      (True on success, False on failure) into build_json_report, so a failure is
+      reported honestly rather than as entries=[] -> false zero.
+  certification/ci/win_acceptance.py
+    * _certify() now passes require_provenance=True, require_cache_verified=True.
+    * 4 new regressions: (R29-1) a child that really opens a decoy file sharing
+      the fixture's basename -> REJECTED by identity; a child that drops its
+      provenance -> REJECTED (fail-closed). (R29-2) a real cache-enumeration
+      failure -> report marks enumerated:false/null (honesty assertion); a report
+      presenting the legacy unverified-zero shape -> REJECTED. ACCEPT 43 -> 47.
+  tests/run_tests.py
+    * provenance self-tests rewritten to use REAL temp files (good/ and evil/ each
+      holding "fix.blend") so identity is genuinely exercised — the old
+      /tmp/fix.blend vs /x/fix.blend basename acceptance is gone. +6 gate_selfcheck
+      regressions (same-basename reject, absent/incomplete provenance reject,
+      verified-cache accept, enumerated:false reject, legacy-zero reject).
+      gate_selfcheck 72 -> 78; grand total 817 -> 823.
+  (failsafe/engine.py unchanged this round.)
+
+RESULT
+  Both blockers reproduced on real 5.2.3 before coding (above). After the fix:
+  _same_file correct (same=True, different=False, different-spelling-same=True).
+  Blender 5.2.3 local suite: 823 passed / 0 failed, SUITE_DONE expected=823
+  ok=yes, GATE PASS version-enforced. win_acceptance on the real 5.2.3 INSTALLED
+  extension (rebuilt failsafe-1.0.0.zip, reinstalled): 47/47, ACCEPT_DONE
+  expected=47 ok=yes, GATE PASS; certified child invoked=27 missing_ev=[]
+  mismatch=[]; the same-basename-different-file child REJECTED by identity, the
+  provenance-dropped child REJECTED, the failed-enumeration report marked
+  enumerated:false/null, the unverified-zero cache REJECTED. 0 real crash
+  signatures (the one "Traceback<redacted>" line is the R21-1 regression's own
+  redacted description, and the ACCEPT gate passed).
+  NOTE: the local four-version Mac matrix again could NOT run — the
+  4.2.9/4.5.9/5.0.1 builds under ~/Downloads/blender_runtime_certification/ are
+  still absent (folder gone); only system 5.2.3 remains. Four-version coverage
+  this round comes from Windows CI (downloads all four official builds).
   Windows CI: pending re-run on this commit (runs 4.2.9/4.5.9/5.0.1/5.2.3).
   Independent review of the corrected commit still required before certification
   is claimed restored. No merge, publication, or spending.

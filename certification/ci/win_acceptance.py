@@ -50,7 +50,9 @@ results = []  # (name, ok, detail)
 # R27 added a customer-facing display-lie repro -> 39.
 # R28 added metadata-fail-closed + missing-field + blender/file provenance
 # repros -> 43.
-EXPECTED_ACCEPT_CHECKS = 43
+# R29 added file-identity (not basename) + absent-provenance + cache false-zero
+# (real failure honesty + unverified-zero rejection) repros -> 47.
+EXPECTED_ACCEPT_CHECKS = 47
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -403,7 +405,8 @@ def main():
             rc, raw, ids_, finds_, registry_ids, child_stderr=out,
             declared_code=decl, allowed_codes=(0, 1, 2), required_ids=required_ids,
             report_meta=meta_, require_meta=True, provenance=prov_,
-            expected_blender=EXP_BLENDER, expected_file=blend)
+            expected_blender=EXP_BLENDER, expected_file=blend,
+            require_provenance=True, require_cache_verified=True)
 
     rc_ok, decl_ok, raw_ok, out_ok, inv_ok = cli_json_child(instrumented_expr(),
                                                             open_blend=blend)
@@ -490,6 +493,56 @@ def main():
                 "_d['file'] = '/evil/other.blend'\nout = _j.dumps(_d)\n")
     _tamper(FILE_LIE, "overall_expected",
             "CLI child whose report claims a different .blend file is REJECTED (R28-2)")
+
+    # R29-1 repro: the child really opens a DIFFERENT file that shares the
+    # fixture's basename. Provenance stays truthful (it records the decoy it
+    # actually opened), so a basename-only check would ACCEPT it; matching the
+    # scanned file to the intended fixture by IDENTITY REJECTS it.
+    decoy_dir = tempfile.mkdtemp(prefix="failsafe_decoy_")
+    decoy = os.path.join(decoy_dir, os.path.basename(blend))  # same name, other dir
+    with open(blend, "rb") as _src, open(decoy, "wb") as _dst:
+        _dst.write(_src.read())
+    rc_dc, decl_dc, raw_dc, out_dc, inv_dc = cli_json_child(instrumented_expr(),
+                                                            open_blend=decoy)
+    v_dc = _certify(rc_dc, decl_dc, raw_dc, out_dc, inv_dc)
+    check("CLI child that scanned a different file sharing the fixture's basename "
+          "is REJECTED (identity, not basename) (R29-1)",
+          not v_dc.ok, "scanned=%s expected=%s -> %s"
+          % (_evidence(inv_dc)[3], os.path.basename(blend), "; ".join(v_dc.reasons)))
+
+    # R29-1 repro: the child's recorded provenance is dropped. require_provenance
+    # must fail CLOSED — an absent provenance cannot certify which file ran, so it
+    # is a hard failure, never a silently skipped check.
+    _tamper("_prov.clear()\n", "overall_expected",
+            "CLI child that omits its provenance is REJECTED, not skipped (R29-1)")
+
+    # R29-2 repro: a REAL cache-enumeration failure in the child. The report must
+    # mark the cache UNKNOWN (enumerated:false, null total) instead of fabricating
+    # a zero, so a could-not-enumerate is never mistaken for a verified empty.
+    CACHE_FAIL_ATTACK = (
+        "import bl_ext.user_default.failsafe.cache_inspect as _ci2\n"
+        "def _cboom(*a, **k):\n"
+        "    raise RuntimeError('cache enumeration failed (simulated)')\n"
+        "_ci2.enumerate_caches = _cboom\n")
+    rc_cf, decl_cf, raw_cf, out_cf, inv_cf = cli_json_child(
+        instrumented_expr(attack=CACHE_FAIL_ATTACK), open_blend=blend)
+    try:
+        _cf_block = json.loads(raw_cf).get("cache_disk_usage", {})
+    except ValueError:
+        _cf_block = {}
+    check("Report marks a FAILED cache enumeration as unknown, not a false zero "
+          "(enumerated:false, null total) (R29-2)",
+          _cf_block.get("enumerated") is False and _cf_block.get("total_bytes") is None,
+          "cache_disk_usage=%s" % (_cf_block,))
+
+    # R29-2 repro: a report presenting the legacy false-zero cache shape (0 bytes,
+    # no enumeration attestation) must be REJECTED in certification mode — an
+    # unverified zero cannot certify.
+    CACHE_FALSEZERO_POST = ("import json as _j\n_d = _j.loads(out)\n"
+                            "_d['cache_disk_usage'] = {'total_bytes': 0, 'items': []}\n"
+                            "out = _j.dumps(_d)\n")
+    _tamper(CACHE_FALSEZERO_POST, "overall_expected",
+            "CLI child whose report claims an unverified zero cache is REJECTED (R29-2)")
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
     # report (the crash-exit-0 class) must be REJECTED by the very same gate.

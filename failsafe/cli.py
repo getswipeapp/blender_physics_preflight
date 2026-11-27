@@ -209,10 +209,12 @@ def _scan_current(context, opts):
     from . import cache_inspect as ci
     try:
         entries = ci.enumerate_caches(context.scene)
+        cache_ok = True
     except Exception:
         entries = []
+        cache_ok = False
     if opts["format"] == "json":
-        out = report.build_json_report(results, entries=entries)
+        out = report.build_json_report(results, entries=entries, cache_ok=cache_ok)
     elif opts["format"] == "html":
         out = report.build_html_report(results, entries=entries)
     else:
@@ -266,12 +268,15 @@ def run_batch(folder, opts):
             results = engine.run_all(bpy.context, hash_verify=hr)
             try:
                 entries = ci.enumerate_caches(bpy.context.scene)
+                cache_ok = True
             except Exception:
                 entries = []
+                cache_ok = False
             # A requested-but-failed verification floors this file's code (B1).
             code = aggregate_exit([verdict_exit_code(results, opts["strict"]),
                                    verify_floor(hr, opts.get("verify_hashes"))])
-            data = _json.loads(report.build_json_report(results, entries=entries))
+            data = _json.loads(report.build_json_report(results, entries=entries,
+                                                        cache_ok=cache_ok))
             per_file.append({"file": f, "exit": code,
                              "overall": data["overall"],
                              "summary": data["summary"],

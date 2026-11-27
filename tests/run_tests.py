@@ -5426,44 +5426,95 @@ def gate_selfcheck_tests():
     res.append(("gate_check R27-1: an unexpected summary bucket is REJECTED",
                 _scan(r_key, ev_key, m_key) is False, "rejected", "rejected"))
 
-    # ---- R28-1/R28-2: metadata fail-closed + report provenance ---------------
-    # In certification mode the canonical metadata must be COMPLETE (a missing or
-    # empty metadata dict can no longer skip the display check), and the report's
-    # blender/file provenance must match what the child really ran.
+    # ---- R28-1/R28-2 + R29-1/R29-2: metadata fail-closed, provenance identity,
+    # and cache honesty. In certification mode the canonical metadata must be
+    # COMPLETE; the report's blender/file provenance must match what the child
+    # really ran; the scanned file must be the SAME FILE as the intended fixture
+    # by IDENTITY, not basename (R29-1); provenance must be present (R29-1); and a
+    # cache figure must be a VERIFIED measurement, never a could-not-enumerate
+    # dressed up as a zero (R29-2). Real temp files make the identity check honest.
     EXP_BL = "5.2.3 LTS"
+    _pdir = tempfile.mkdtemp(prefix="gate_prov_")
+    good_dir = os.path.join(_pdir, "good")
+    evil_dir = os.path.join(_pdir, "evil")
+    os.makedirs(good_dir)
+    os.makedirs(evil_dir)
+    good_file = os.path.join(good_dir, "fix.blend")
+    evil_file = os.path.join(evil_dir, "fix.blend")  # same basename, different dir
+    for _p in (good_file, evil_file):
+        open(_p, "wb").write(b"BLENDER-fake")
+    _CACHE_OK = {"enumerated": True, "total_bytes": 0, "items": []}
 
-    def _cert(rep, ev, meta, prov):
+    def _cert(rep, ev, meta, prov, expected_file=good_file,
+              require_provenance=True, require_cache_verified=False):
         return gc.valid_cli_scan(2, _json.dumps(rep), full27, ev, full27,
                                  allowed_codes=(0, 1, 2), report_meta=meta,
                                  require_meta=True, provenance=prov,
-                                 expected_blender=EXP_BL,
-                                 expected_file="/x/fix.blend").ok
+                                 expected_blender=EXP_BL, expected_file=expected_file,
+                                 require_provenance=require_provenance,
+                                 require_cache_verified=require_cache_verified).ok
 
-    _prov = {"blender": EXP_BL, "file": "/tmp/fix.blend"}
+    _prov = {"blender": EXP_BL, "file": good_file}
     r0, e0, m0 = _rep_full({1, 7, 8})
-    r0["blender"], r0["file"] = EXP_BL, "/tmp/fix.blend"
+    r0["blender"], r0["file"] = EXP_BL, good_file
     res.append(("gate_check R28: an honest cert report (complete meta + provenance) is ACCEPTED",
                 _cert(r0, e0, m0, _prov) is True, "accepted", "accepted"))
     res.append(("gate_check R28-1: require_meta with empty metadata is REJECTED (fail-closed)",
                 _cert(r0, e0, {}, _prov) is False, "rejected", "rejected"))
     r1, e1, m1 = _rep_full({1, 7, 8})
-    r1["blender"], r1["file"] = EXP_BL, "/tmp/fix.blend"
+    r1["blender"], r1["file"] = EXP_BL, good_file
     del r1["checks"][0]["name"]  # report omits a per-check metadata field
     res.append(("gate_check R28-1: a report omitting a per-check metadata field is REJECTED",
                 _cert(r1, e1, m1, _prov) is False, "rejected", "rejected"))
     r2, e2, m2 = _rep_full({1, 7, 8})
-    r2["blender"], r2["file"] = "9.9.9", "/tmp/fix.blend"  # version lie
+    r2["blender"], r2["file"] = "9.9.9", good_file  # version lie
     res.append(("gate_check R28-2: a report claiming a different Blender version is REJECTED",
                 _cert(r2, e2, m2, _prov) is False, "rejected", "rejected"))
     r3, e3, m3 = _rep_full({1, 7, 8})
-    r3["blender"], r3["file"] = EXP_BL, "/evil/other.blend"  # file lie
+    r3["blender"], r3["file"] = EXP_BL, "/evil/other.blend"  # report file != child
     res.append(("gate_check R28-2: a report claiming a different .blend file is REJECTED",
                 _cert(r3, e3, m3, _prov) is False, "rejected", "rejected"))
     r4, e4, m4 = _rep_full({1, 7, 8})
-    r4["blender"], r4["file"] = EXP_BL, "/tmp/fix.blend"
+    r4["blender"], r4["file"] = EXP_BL, good_file
     r4["cache_disk_usage"] = {"total_bytes": 999, "items": [{"object": "a", "bytes": 1}]}
     res.append(("gate_check R28-2: an inconsistent cache_disk_usage total is REJECTED",
                 _cert(r4, e4, m4, _prov) is False, "rejected", "rejected"))
+
+    # R29-1: the child really scanned a DIFFERENT file that shares the fixture's
+    # basename. provenance+report are truthful about the decoy, so only a basename
+    # check would accept it; identity matching rejects it.
+    rD, eD, mD = _rep_full({1, 7, 8})
+    rD["blender"], rD["file"] = EXP_BL, evil_file
+    _provD = {"blender": EXP_BL, "file": evil_file}
+    res.append(("gate_check R29-1: a scan of a same-basename different file is REJECTED (identity)",
+                _cert(rD, eD, mD, _provD, expected_file=good_file) is False,
+                "rejected", "rejected"))
+    # R29-1: absent / incomplete provenance fails CLOSED under require_provenance.
+    res.append(("gate_check R29-1: absent provenance is REJECTED (fail-closed)",
+                _cert(r0, e0, m0, None) is False, "rejected", "rejected"))
+    res.append(("gate_check R29-1: incomplete provenance (no file) is REJECTED",
+                _cert(r0, e0, m0, {"blender": EXP_BL}) is False, "rejected", "rejected"))
+
+    # R29-2: a verified cache figure is required; a could-not-enumerate (or the
+    # legacy false-zero shape) can never certify as a clean zero.
+    rC, eC, mC = _rep_full({1, 7, 8})
+    rC["blender"], rC["file"] = EXP_BL, good_file
+    rC["cache_disk_usage"] = dict(_CACHE_OK)
+    res.append(("gate_check R29-2: an honest verified cache (enumerated:true) is ACCEPTED",
+                _cert(rC, eC, mC, _prov, require_cache_verified=True) is True,
+                "accepted", "accepted"))
+    rF, eF, mF = _rep_full({1, 7, 8})
+    rF["blender"], rF["file"] = EXP_BL, good_file
+    rF["cache_disk_usage"] = {"enumerated": False, "total_bytes": None, "items": []}
+    res.append(("gate_check R29-2: a could-not-enumerate cache (enumerated:false) is REJECTED",
+                _cert(rF, eF, mF, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+    rL, eL, mL = _rep_full({1, 7, 8})
+    rL["blender"], rL["file"] = EXP_BL, good_file
+    rL["cache_disk_usage"] = {"total_bytes": 0, "items": []}  # legacy false-zero
+    res.append(("gate_check R29-2: a legacy unverified zero cache is REJECTED",
+                _cert(rL, eL, mL, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
     return res
 
 
@@ -5504,9 +5555,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 72,
+    "gate_selfcheck_tests": 78,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 817
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 823
 
 
 def main():

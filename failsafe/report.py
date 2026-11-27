@@ -58,15 +58,38 @@ h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:#5b6672;bo
 """.strip()
 
 
-def _enumerate_caches_safe(scene=None):
-    """Best-effort cache list for the disk-size section. Never raises."""
+def _enumerate_caches(scene=None):
+    """Enumerate caches, returning ``(entries, ok)``. ``ok`` is ``False`` when
+    enumeration RAISED — the caller must then report cache usage as UNKNOWN, never
+    as a verified zero (R29-2). A genuinely cache-free scene returns ``([], True)``;
+    an enumeration that failed returns ``([], False)`` — the two are distinct."""
     try:
         from . import cache_inspect as ci
         if scene is None:
             scene = bpy.context.scene
-        return ci.enumerate_caches(scene)
+        return list(ci.enumerate_caches(scene)), True
     except Exception:
-        return []
+        return [], False
+
+
+def _enumerate_caches_safe(scene=None):
+    """Best-effort cache list for the informational text/HTML size section.
+    Never raises; drops the ok flag (callers that need it use ``_enumerate_caches``)."""
+    return _enumerate_caches(scene)[0]
+
+
+def _cache_usage_block(entries, ok):
+    """Build the JSON ``cache_disk_usage`` block honestly (R29-2). When
+    enumeration failed (``ok`` False) the total is ``null`` and ``enumerated`` is
+    ``False`` — a could-not-enumerate is never dressed up as a verified ``0``."""
+    if not ok:
+        return {"enumerated": False, "total_bytes": None, "items": [],
+                "error": "cache enumeration failed"}
+    items = [{"object": e.obj_name, "system": e.system,
+              "bytes": getattr(e, "disk_bytes", None)}
+             for e in (entries or []) if getattr(e, "disk_bytes", None) is not None]
+    return {"enumerated": True,
+            "total_bytes": sum(i["bytes"] for i in items), "items": items}
 
 
 def _cache_size_rows(entries):
@@ -135,7 +158,7 @@ def build_text_report(results, entries=None):
     return "\n".join(lines)
 
 
-def build_json_report(results, entries=None):
+def build_json_report(results, entries=None, cache_ok=None):
     """Machine-readable report (A7). A dict, JSON-serialised. Stable shape:
 
       {
@@ -144,8 +167,13 @@ def build_json_report(results, entries=None):
         "summary": {"FAIL":n,"WARNING":n,"UNKNOWN":n,"PASS":n,"NA":n},
         "overall": "FAIL"|"WARNING"|"UNKNOWN"|"PASS",
         "checks": [ {id,name,group,status,display,findings:[{status,object,message,hint}]} ],
-        "cache_disk_usage": {"total_bytes":n,"items":[{object,system,bytes}]}
+        "cache_disk_usage": {"enumerated":bool,"total_bytes":n|null,"items":[{object,system,bytes}]}
       }
+
+    ``cache_ok`` tells the report whether the caller's ``entries`` came from a
+    SUCCESSFUL enumeration. When ``entries`` is ``None`` the report enumerates
+    itself and tracks success. A failed enumeration is reported as
+    ``enumerated: false`` with a null total, never as a verified zero (R29-2).
     """
     counts = summary_counts(results)
     summary = {Status.FAIL: counts[Status.FAIL],
@@ -174,10 +202,9 @@ def build_json_report(results, entries=None):
                        "findings": findings})
 
     if entries is None:
-        entries = _enumerate_caches_safe()
-    items = [{"object": e.obj_name, "system": e.system,
-              "bytes": getattr(e, "disk_bytes", None)}
-             for e in (entries or []) if getattr(e, "disk_bytes", None) is not None]
+        entries, ok = _enumerate_caches()
+    else:
+        ok = True if cache_ok is None else bool(cache_ok)
     data = {
         "tool": "failsafe", "schema": 1,
         "blender": bpy.app.version_string,
@@ -185,8 +212,7 @@ def build_json_report(results, entries=None):
         "summary": summary,
         "overall": overall,
         "checks": checks,
-        "cache_disk_usage": {"total_bytes": sum(i["bytes"] for i in items),
-                             "items": items},
+        "cache_disk_usage": _cache_usage_block(entries, ok),
     }
     return json.dumps(data, indent=2)
 
