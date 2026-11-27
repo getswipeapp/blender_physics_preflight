@@ -5612,6 +5612,137 @@ def gate_selfcheck_tests():
                 _cert(rMiss, eMiss, mMiss, _provMiss, expected_file=_missing,
                       require_cache_verified=False) is False,
                 "rejected", "rejected"))
+
+    # ---- R31-2: the measured/unmeasured SUMMARY fields must AGREE with the
+    # actual item null-byte counts. A contradictory report (measured=True over a
+    # null item, or an unmeasured count that disagrees with the null items) is a
+    # tamper/bug signal and must never certify — the gate's companion to the
+    # cache_inspect R31-1 fix that stops a partial size measurement from ever
+    # becoming a numeric item.
+    # (a) measured:true asserted while an item's byte size is null -> REJECTED.
+    rC1, eC1, mC1 = _rep_full({1, 7, 8})
+    rC1["blender"], rC1["file"] = EXP_BL, good_file
+    rC1["cache_disk_usage"] = {"enumerated": True, "measured": True,
+                               "total_bytes": None, "known_subtotal_bytes": 0,
+                               "unmeasured": 0,
+                               "items": [{"object": "a", "system": "Cloth",
+                                          "bytes": None}]}
+    res.append(("gate_check R31-2: measured:true over a null-byte item is REJECTED (contradiction)",
+                _cert(rC1, eC1, mC1, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+    # (b) unmeasured count disagrees with the number of null-byte items -> REJECTED.
+    rC2, eC2, mC2 = _rep_full({1, 7, 8})
+    rC2["blender"], rC2["file"] = EXP_BL, good_file
+    rC2["cache_disk_usage"] = {"enumerated": True, "measured": False,
+                               "total_bytes": None, "known_subtotal_bytes": 100,
+                               "unmeasured": 2,  # claims 2, but only 1 null item
+                               "items": [{"object": "a", "system": "Cloth",
+                                          "bytes": 100},
+                                         {"object": "b", "system": "Cloth",
+                                          "bytes": None}]}
+    res.append(("gate_check R31-2: an unmeasured count disagreeing with null items is REJECTED",
+                _cert(rC2, eC2, mC2, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+    # (c) measured:false asserted while EVERY item is measured -> REJECTED.
+    rC3, eC3, mC3 = _rep_full({1, 7, 8})
+    rC3["blender"], rC3["file"] = EXP_BL, good_file
+    rC3["cache_disk_usage"] = {"enumerated": True, "measured": False,
+                               "total_bytes": None, "known_subtotal_bytes": 100,
+                               "unmeasured": 0,
+                               "items": [{"object": "a", "system": "Cloth",
+                                          "bytes": 100}]}
+    res.append(("gate_check R31-2: measured:false while every item is measured is REJECTED",
+                _cert(rC3, eC3, mC3, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+    # (d) POSITIVE: an honest PARTIAL-unknown cache — one measured, one genuinely
+    # unmeasured, a null total, a labelled known subtotal, and fields that match
+    # the items — is ACCEPTED. This is exactly what the fixed cache_inspect emits
+    # when one stage/frame could be read and another could not.
+    rC4, eC4, mC4 = _rep_full({1, 7, 8})
+    rC4["blender"], rC4["file"] = EXP_BL, good_file
+    rC4["cache_disk_usage"] = {"enumerated": True, "measured": False,
+                               "total_bytes": None, "known_subtotal_bytes": 100,
+                               "unmeasured": 1,
+                               "items": [{"object": "a", "system": "Cloth",
+                                          "bytes": 100},
+                                         {"object": "b", "system": "Cloth",
+                                          "bytes": None}]}
+    res.append(("gate_check R31-2: an honest partial-unknown cache (fields match items) is ACCEPTED",
+                _cert(rC4, eC4, mC4, _prov, require_cache_verified=True) is True,
+                "accepted", "accepted"))
+
+    # ---- R31-1: cache_inspect size helpers must propagate ANY failed per-file
+    # measurement as unknown (None), never a silently understated partial sum or a
+    # false verified zero — while a genuine 0-byte file stays a MEASURED zero.
+    from failsafe import cache_inspect as _ci
+    _sdir = tempfile.mkdtemp(prefix="r31_dir_")
+    for _n in ("a.vdb", "b.vdb", "c.vdb"):
+        with open(os.path.join(_sdir, _n), "wb") as _fh:
+            _fh.write(b"\0" * 100)
+    res.append(("cache_inspect R31-1: _dir_size measures three real files (300 B)",
+                _ci._dir_size(_sdir) == 300, "300", str(_ci._dir_size(_sdir))))
+
+    _real_scandir = os.scandir
+
+    def _wrap_scandir(fail_names):
+        class _E:
+            def __init__(s, de): s._de = de
+            @property
+            def name(s): return s._de.name
+            def is_file(s, follow_symlinks=True):
+                return s._de.is_file(follow_symlinks=follow_symlinks)
+            def stat(s, follow_symlinks=True):
+                if fail_names is None or s._de.name in fail_names:
+                    raise OSError("forced stat failure")
+                return s._de.stat(follow_symlinks=follow_symlinks)
+
+        class _Ctx:
+            def __init__(s, p): s._it = _real_scandir(p)
+            def __enter__(s): return (_E(de) for de in s._it)
+            def __exit__(s, *a): s._it.close()
+        return lambda p: _Ctx(p)
+
+    try:
+        _ci.os.scandir = _wrap_scandir({"a.vdb"})
+        _one = _ci._dir_size(_sdir)
+        _ci.os.scandir = _wrap_scandir(None)   # every file fails
+        _all = _ci._dir_size(_sdir)
+    finally:
+        _ci.os.scandir = _real_scandir
+    res.append(("cache_inspect R31-1: _dir_size with ONE stat failure is unknown (None), not a partial",
+                _one is None, "None", repr(_one)))
+    res.append(("cache_inspect R31-1: _dir_size with ALL stat failures is unknown (None), not a false 0",
+                _all is None, "None", repr(_all)))
+
+    # _point_cache_bytes: one present frame's getsize fails -> whole total None.
+    _pcd = tempfile.mkdtemp(prefix="r31_pc_")
+    _prefix, _idx, _frames = "506C616E65", 0, [1, 2, 3]
+    for _fr in _frames:
+        with open(os.path.join(_pcd, "%s_%06d_%02d.bphys" % (_prefix, _fr, _idx)), "wb") as _fh:
+            _fh.write(b"\0" * 100)
+    res.append(("cache_inspect R31-1: _point_cache_bytes measures three real frames (300 B)",
+                _ci._point_cache_bytes(_pcd, _prefix, _idx, _frames) == 300,
+                "300", str(_ci._point_cache_bytes(_pcd, _prefix, _idx, _frames))))
+    _real_getsize = os.path.getsize
+    _fail_path = os.path.join(_pcd, "%s_%06d_%02d.bphys" % (_prefix, 2, _idx))
+
+    def _getsize_fail(p):
+        if os.path.abspath(p) == os.path.abspath(_fail_path):
+            raise OSError("forced getsize failure")
+        return _real_getsize(p)
+    try:
+        _ci.os.path.getsize = _getsize_fail
+        _pc_one = _ci._point_cache_bytes(_pcd, _prefix, _idx, _frames)
+    finally:
+        _ci.os.path.getsize = _real_getsize
+    res.append(("cache_inspect R31-1: _point_cache_bytes with one unreadable frame is unknown (None)",
+                _pc_one is None, "None", repr(_pc_one)))
+
+    # A genuine 0-byte file is a MEASURED zero, not a measurement failure.
+    _zdir = tempfile.mkdtemp(prefix="r31_zero_")
+    open(os.path.join(_zdir, "empty.vdb"), "wb").close()
+    res.append(("cache_inspect R31-1: a genuine 0-byte file stays a measured zero (not None)",
+                _ci._dir_size(_zdir) == 0, "0", repr(_ci._dir_size(_zdir))))
     return res
 
 
@@ -5652,9 +5783,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 87,
+    "gate_selfcheck_tests": 97,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 832
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 842
 
 
 def main():

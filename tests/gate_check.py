@@ -512,7 +512,13 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
         (R30-1). A NULL ``total_bytes`` paired with ``measured: False`` is an honest
         "some cache sizes could not be read" and is accepted (the informational
         cache size need not be knowable for the correctness scan to certify); only a
-        null total dishonestly paired with ``measured: True`` is rejected.
+        null total dishonestly paired with ``measured: True`` is rejected. The
+        ``measured``/``unmeasured`` summary fields must also AGREE with the actual
+        items: ``measured: True`` with any null-byte item, or an ``unmeasured``
+        count that disagrees with the number of null-byte items, is a contradictory
+        report and is rejected (R31-2) — the companion at the gate to the
+        cache_inspect fix that stops a partial size measurement from surfacing as a
+        numeric item in the first place (R31-1).
 
     The invocation ids and returned findings MUST come from inside the same child
     process that wrote ``text`` (a recorder wrapped around each registered check
@@ -718,13 +724,38 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
                     # contributes to the KNOWN subtotal as unknown, not as 0.
                     s = sum(int(i["bytes"]) for i in items
                             if isinstance(i, dict) and i.get("bytes") is not None)
+                    # The number of enumerated caches whose size is genuinely
+                    # unknown, read straight from the items — the ground truth the
+                    # summary fields must agree with (R31-2).
+                    null_count = sum(1 for i in items
+                                     if isinstance(i, dict) and i.get("bytes") is None)
+                    unmeasured = cdu.get("unmeasured")
+                    # R31-2: the measured/unmeasured SUMMARY fields must match the
+                    # actual items. A report cannot claim measured=True while an
+                    # item's byte size is null, nor state an unmeasured count that
+                    # disagrees with the null-byte items. Contradictory fields are a
+                    # tamper/bug signal and must never certify — this closes the
+                    # cache_inspect partial-stat leak at the gate as well as at the
+                    # source: were a present-but-unmeasured frame ever to surface as
+                    # a numeric item, measured=True over it would be rejected here.
+                    if isinstance(unmeasured, int) and unmeasured != null_count:
+                        reasons.append("cache_disk_usage unmeasured=%r disagrees with "
+                                       "the %d item(s) carrying a null (unread) byte "
+                                       "size (R31-2)" % (unmeasured, null_count))
+                    if measured is True and null_count:
+                        reasons.append("cache_disk_usage claims measured=True while %d "
+                                       "item(s) have an unread (null) byte size "
+                                       "(R31-2)" % (null_count,))
+                    if measured is False and null_count == 0 and items:
+                        reasons.append("cache_disk_usage claims measured=False yet every "
+                                       "one of its %d item(s) has a measured byte size "
+                                       "(R31-2)" % (len(items),))
                     known = cdu.get("known_subtotal_bytes")
                     if known is not None and int(known) != s:
                         reasons.append("cache_disk_usage known_subtotal_bytes=%r != "
                                        "sum of measured items %d (R30-1)"
                                        % (known, s))
                     tot = cdu.get("total_bytes")
-                    unmeasured = cdu.get("unmeasured")
                     if tot is not None:
                         # A NON-NULL total_bytes claims a VERIFIED COMPLETE figure.
                         # It must add up, nothing may have gone unmeasured behind it,

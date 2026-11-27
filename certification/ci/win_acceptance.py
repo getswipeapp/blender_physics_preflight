@@ -55,7 +55,11 @@ results = []  # (name, ok, detail)
 # R30 added cache size-measurement honesty (false-zero rejection; verified-total-
 # over-unmeasured rejection; honest-unknown acceptance; honest two-axis schema) +
 # _same_file missing-path identity repros -> 52.
-EXPECTED_ACCEPT_CHECKS = 52
+# R31 added cache partial-measurement honesty: measured/unmeasured fields must
+# agree with the item null-byte counts (two contradiction rejections + one honest
+# partial-unknown acceptance), plus a direct installed cache_inspect size-helper
+# repro (one/all per-file stat failures -> None; 0-byte -> measured zero) -> 56.
+EXPECTED_ACCEPT_CHECKS = 56
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -623,6 +627,98 @@ def main():
           (_same_missing is False and _same_real is True and _same_decoy is False),
           "identical_missing=%s real=%s decoy=%s"
           % (_same_missing, _same_real, _same_decoy))
+
+    # R31-2 repro: the measured/unmeasured SUMMARY fields must agree with the
+    # actual items. measured:true asserted over a null-byte (unread) item is a
+    # contradiction and must be REJECTED — the gate's companion to the R31-1 fix
+    # that stops a partial size measurement from ever becoming a numeric item.
+    CACHE_MEASURED_OVER_NULL_POST = (
+        "import json as _j\n_d = _j.loads(out)\n"
+        "_d['cache_disk_usage'] = {'enumerated': True, 'measured': True,\n"
+        "    'total_bytes': None, 'known_subtotal_bytes': 0, 'unmeasured': 0,\n"
+        "    'items': [{'object': 'Cloth', 'system': 'Cloth', 'bytes': None}]}\n"
+        "out = _j.dumps(_d)\n")
+    _tamper(CACHE_MEASURED_OVER_NULL_POST, "overall_expected",
+            "CLI child claiming measured:true over a null-byte cache item is "
+            "REJECTED (R31-2 contradiction)")
+
+    # R31-2 repro: an unmeasured count that disagrees with the number of null-byte
+    # items is a contradictory report and must be REJECTED.
+    CACHE_UNMEASURED_COUNT_LIE_POST = (
+        "import json as _j\n_d = _j.loads(out)\n"
+        "_d['cache_disk_usage'] = {'enumerated': True, 'measured': False,\n"
+        "    'total_bytes': None, 'known_subtotal_bytes': 100, 'unmeasured': 2,\n"
+        "    'items': [{'object': 'A', 'system': 'Cloth', 'bytes': 100},\n"
+        "              {'object': 'B', 'system': 'Cloth', 'bytes': None}]}\n"
+        "out = _j.dumps(_d)\n")
+    _tamper(CACHE_UNMEASURED_COUNT_LIE_POST, "overall_expected",
+            "CLI child whose unmeasured count disagrees with its null-byte items "
+            "is REJECTED (R31-2)")
+
+    # R31-2 positive: an HONEST partial-unknown cache — one stage/frame measured,
+    # another genuinely unmeasured, a null total, a labelled known subtotal, and
+    # summary fields that match the items — is ACCEPTED. This is exactly what the
+    # fixed cache_inspect emits when one measurement succeeds and another fails.
+    CACHE_HONEST_PARTIAL_POST = (
+        "import json as _j\n_d = _j.loads(out)\n"
+        "_d['cache_disk_usage'] = {'enumerated': True, 'measured': False,\n"
+        "    'total_bytes': None, 'known_subtotal_bytes': 100, 'unmeasured': 1,\n"
+        "    'items': [{'object': 'A', 'system': 'Cloth', 'bytes': 100},\n"
+        "              {'object': 'B', 'system': 'Cloth', 'bytes': None}]}\n"
+        "out = _j.dumps(_d)\n")
+    rc_hp, decl_hp, raw_hp, out_hp, inv_hp = cli_json_child(
+        instrumented_expr(post=CACHE_HONEST_PARTIAL_POST), open_blend=blend)
+    v_hp = _certify(rc_hp, decl_hp, raw_hp, out_hp, inv_hp)
+    check("CLI child HONESTLY reporting a partial-unknown cache (one measured, one "
+          "unmeasured, fields consistent) is ACCEPTED (R31-2)",
+          v_hp.ok, "ok=%s -> %s" % (v_hp.ok, "; ".join(v_hp.reasons) or "accepted"))
+
+    # R31-1 repro on the REAL INSTALLED build: the cache_inspect size helpers must
+    # propagate a per-file measurement failure as unknown (None), never a silently
+    # understated partial or a false verified zero, while a genuine 0-byte file
+    # stays a MEASURED zero. Forced via a scandir/getsize wrapper over real files,
+    # the exact "file present, size unreadable" condition (R31-1).
+    import importlib as _il
+    _ci = _il.import_module(MOD + ".cache_inspect")
+    _sd = tempfile.mkdtemp(prefix="acc_r31_")
+    for _n in ("a.vdb", "b.vdb"):
+        with open(os.path.join(_sd, _n), "wb") as _fh:
+            _fh.write(b"\0" * 100)
+    _full = _ci._dir_size(_sd)
+    _rs = os.scandir
+
+    def _mk(fail):
+        class _E:
+            def __init__(s, de): s._de = de
+            @property
+            def name(s): return s._de.name
+            def is_file(s, follow_symlinks=True):
+                return s._de.is_file(follow_symlinks=follow_symlinks)
+            def stat(s, follow_symlinks=True):
+                if fail is None or s._de.name in fail:
+                    raise OSError("forced stat failure")
+                return s._de.stat(follow_symlinks=follow_symlinks)
+
+        class _C:
+            def __init__(s, p): s._it = _rs(p)
+            def __enter__(s): return (_E(d) for d in s._it)
+            def __exit__(s, *a): s._it.close()
+        return lambda p: _C(p)
+    try:
+        _ci.os.scandir = _mk({"a.vdb"})
+        _one = _ci._dir_size(_sd)
+        _ci.os.scandir = _mk(None)
+        _allf = _ci._dir_size(_sd)
+    finally:
+        _ci.os.scandir = _rs
+    _zd = tempfile.mkdtemp(prefix="acc_r31z_")
+    open(os.path.join(_zd, "empty.vdb"), "wb").close()
+    _zero = _ci._dir_size(_zd)
+    check("Installed cache_inspect propagates a failed size measurement as unknown "
+          "(None), never a partial or false zero; 0-byte stays measured (R31-1)",
+          (_full == 200 and _one is None and _allf is None and _zero == 0),
+          "full=%r one_fail=%r all_fail=%r zero=%r"
+          % (_full, _one, _allf, _zero))
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
     # report (the crash-exit-0 class) must be REJECTED by the very same gate.

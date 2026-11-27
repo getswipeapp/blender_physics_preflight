@@ -161,7 +161,16 @@ def cloud_sync_marker(path):
 
 def _dir_size(path):
     """Best-effort total size in bytes of files directly in ``path`` (one level).
-    Read-only. Returns None if the directory can't be read."""
+    Read-only.
+
+    Returns None if the directory can't be read OR if the size of ANY file in it
+    could not be measured. A single per-file ``stat`` failure must force the whole
+    result to unknown, never a silently understated partial sum: with the old
+    ``except OSError: continue`` the failed file was dropped and a numeric total
+    returned, so an unmeasurable 300-byte stage reported 200, and a wholly
+    unmeasurable stage reported a false verified 0 (review R31-1). A genuine 0-byte
+    file is a *measured* zero (``st_size`` returns 0 with no error), so it is summed
+    normally and does NOT force None — only an actual measurement failure does."""
     if not path or not os.path.isdir(path):
         return None
     total = 0
@@ -172,14 +181,24 @@ def _dir_size(path):
                     if de.is_file(follow_symlinks=False):
                         total += de.stat(follow_symlinks=False).st_size
                 except OSError:
-                    continue
+                    # Cannot measure this file (or even tell it is one): the
+                    # directory total is now incomplete, so report unknown rather
+                    # than a partial number that would read as a verified size.
+                    return None
     except OSError:
         return None
     return total
 
 
 def _point_cache_bytes(cache_dir, prefix, index, frames_present):
-    """Sum the on-disk size of the present point-cache frame files (A4)."""
+    """Sum the on-disk size of the present point-cache frame files (A4).
+
+    Returns None if the size of ANY present frame could not be read. A present
+    frame whose ``getsize`` fails (the file was enumerated but can no longer be
+    stat'd) must turn the whole total unknown, never be dropped to leave a
+    silently understated number that would read as the full verified size
+    (review R31-1). A genuine 0-byte frame returns 0 from ``getsize`` without
+    error, so it is a *measured* zero and does not force None."""
     if not cache_dir or not os.path.isdir(cache_dir) or not frames_present:
         return None
     total = 0
@@ -189,7 +208,7 @@ def _point_cache_bytes(cache_dir, prefix, index, frames_present):
         try:
             total += os.path.getsize(p)
         except OSError:
-            continue
+            return None
     return total
 
 
@@ -1360,16 +1379,29 @@ def inspect_fluid_domain(obj, mod, scene):
             e.frames_empty |= (ce_empty & data_present)
             e.frames_unreadable |= (cu & data_present)
 
-    # total on-disk size across all fluid sub-caches (A4), best-effort
+    # total on-disk size across all fluid sub-caches (A4), best-effort.
+    # A sub-cache directory that EXISTS but can't be fully measured must void the
+    # whole fluid total (unknown), not silently drop to an understated number:
+    # otherwise an unreadable `data/` stage would leave `config/`'s bytes posing
+    # as the complete fluid size (review R31-1, point 4). A stage that is simply
+    # absent (feature not enabled) is not an unknown — it is skipped. The total is
+    # a verified figure only when at least one stage was measured AND no present
+    # stage went unmeasured.
     if e.cache_dir and os.path.isdir(e.cache_dir):
         total = 0
-        got = False
+        measured_any = False
+        unmeasured_stage = False
         for sub in ("data", "config", "mesh", "noise", "particles", "guiding"):
-            sz = _dir_size(os.path.join(e.cache_dir, sub))
-            if sz is not None:
+            subpath = os.path.join(e.cache_dir, sub)
+            if not os.path.isdir(subpath):
+                continue  # stage legitimately absent — not an unknown
+            sz = _dir_size(subpath)
+            if sz is None:
+                unmeasured_stage = True   # present but unmeasurable -> unknown total
+            else:
                 total += sz
-                got = True
-        e.disk_bytes = total if got else None
+                measured_any = True
+        e.disk_bytes = total if (measured_any and not unmeasured_stage) else None
     return e
 
 
