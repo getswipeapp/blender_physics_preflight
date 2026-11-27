@@ -730,6 +730,19 @@ def valid_cli_scan(returncode, text, invoked_ids, returned_findings, expected_id
                     null_count = sum(1 for i in items
                                      if isinstance(i, dict) and i.get("bytes") is None)
                     unmeasured = cdu.get("unmeasured")
+                    # R32-2: in certification mode the unmeasured count must be an
+                    # explicit integer. The R31-2 agreement check below only fires
+                    # when ``unmeasured`` is an int, so a tampered/garbled report
+                    # could dodge it by dropping the field to null or a string while
+                    # still carrying null-byte items — close that by requiring the
+                    # summary to be stated outright whenever any items were enumerated.
+                    if (require_cache_verified and items
+                            and not isinstance(unmeasured, int)):
+                        reasons.append("cache_disk_usage omits an integer unmeasured "
+                                       "count (unmeasured=%r) while reporting %d "
+                                       "item(s); certification requires an explicit "
+                                       "measured/unmeasured summary (R32-2)"
+                                       % (unmeasured, len(items)))
                     # R31-2: the measured/unmeasured SUMMARY fields must match the
                     # actual items. A report cannot claim measured=True while an
                     # item's byte size is null, nor state an unmeasured count that

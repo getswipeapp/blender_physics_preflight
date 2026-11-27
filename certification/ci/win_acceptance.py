@@ -59,7 +59,12 @@ results = []  # (name, ok, detail)
 # agree with the item null-byte counts (two contradiction rejections + one honest
 # partial-unknown acceptance), plus a direct installed cache_inspect size-helper
 # repro (one/all per-file stat failures -> None; 0-byte -> measured zero) -> 56.
-EXPECTED_ACCEPT_CHECKS = 56
+# R32 added orphaned-cache + symlink size honesty: a direct installed repro of
+# scan_orphans_in_dir / _dir_size (failed orphan size -> unknown, detection stays
+# independent of size, 0-byte orphan measured, symlinked cache file measured at its
+# target) + a gate tamper rejecting a null (non-integer) unmeasured count in
+# certification mode (R32-2) -> 58.
+EXPECTED_ACCEPT_CHECKS = 58
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -692,6 +697,9 @@ def main():
             def __init__(s, de): s._de = de
             @property
             def name(s): return s._de.name
+            @property
+            def path(s): return s._de.path
+            def is_symlink(s): return s._de.is_symlink()
             def is_file(s, follow_symlinks=True):
                 return s._de.is_file(follow_symlinks=follow_symlinks)
             def stat(s, follow_symlinks=True):
@@ -719,6 +727,56 @@ def main():
           (_full == 200 and _one is None and _allf is None and _zero == 0),
           "full=%r one_fail=%r all_fail=%r zero=%r"
           % (_full, _one, _allf, _zero))
+
+    # R32-1 repro on the REAL INSTALLED build: scan_orphans_in_dir must propagate a
+    # failed orphan-size measurement as unknown (bytes None) while detection stays
+    # independent of size, a genuine 0-byte orphan stays a measured zero, and a
+    # symlinked cache file is measured at its target rather than skipped to a 0.
+    _od = tempfile.mkdtemp(prefix="acc_r32o_")
+    with open(os.path.join(_od, "AAAAAAAA_000001_00.bphys"), "wb") as _fh:
+        _fh.write(b"x" * 300)
+    _ofull = _ci.scan_orphans_in_dir(_od, set())
+    try:
+        _ci.os.scandir = _mk(None)   # every orphan stat fails
+        _ofail = _ci.scan_orphans_in_dir(_od, set())
+    finally:
+        _ci.os.scandir = _rs
+    _ozd = tempfile.mkdtemp(prefix="acc_r32z_")
+    open(os.path.join(_ozd, "BBBBBBBB_000001_00.bphys"), "wb").close()
+    _ozero = _ci.scan_orphans_in_dir(_ozd, set())
+    _syd = tempfile.mkdtemp(prefix="acc_r32s_")
+    _syt = os.path.join(_syd, "target.bin")
+    with open(_syt, "wb") as _fh:
+        _fh.write(b"y" * 300)
+    _syh = tempfile.mkdtemp(prefix="acc_r32sh_")
+    try:
+        os.symlink(_syt, os.path.join(_syh, "AAAAAAAA_000002_00.bphys"))
+        _sym = _ci._dir_size(_syh)
+    except OSError:
+        _sym = 300   # platform without symlink support — treat as pass
+    _of_ok = (len(_ofull) == 1 and _ofull[0]["bytes"] == 300
+              and len(_ofail) == 1 and _ofail[0]["bytes"] is None
+              and _ofail[0]["files"] == 1
+              and len(_ozero) == 1 and _ozero[0]["bytes"] == 0
+              and _sym == 300)
+    check("Installed cache_inspect orphan/symlink sizing: failed measurement -> "
+          "unknown, detection independent, 0-byte measured, symlink at target (R32-1)",
+          _of_ok,
+          "full=%r fail=%r zero=%r symlink=%r"
+          % (_ofull[0]["bytes"] if _ofull else None,
+             (_ofail[0]["bytes"], _ofail[0]["files"]) if _ofail else None,
+             _ozero[0]["bytes"] if _ozero else None, _sym))
+
+    # R32-2 repro: in certification mode a cache_disk_usage that carries items but
+    # drops the unmeasured count to a non-integer (null) must be REJECTED — it can
+    # no longer dodge the R31-2 agreement check by garbling the summary.
+    CACHE_NULL_UNMEASURED_POST = (
+        "_rep['cache_disk_usage'] = {'enumerated': True, 'measured': False,\n"
+        "    'total_bytes': None, 'known_subtotal_bytes': 0, 'unmeasured': None,\n"
+        "    'items': [{'object': 'a', 'system': 'Cloth', 'bytes': None}]}\n")
+    _tamper(CACHE_NULL_UNMEASURED_POST, "overall_expected",
+            "A certified cache_disk_usage with items but a null (non-integer) "
+            "unmeasured count is REJECTED (R32-2)")
 
     # Real child-failure repro (R20-1): a child that exits 0 but produces NO
     # report (the crash-exit-0 class) must be REJECTED by the very same gate.

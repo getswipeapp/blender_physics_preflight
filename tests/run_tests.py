@@ -5689,6 +5689,9 @@ def gate_selfcheck_tests():
             def __init__(s, de): s._de = de
             @property
             def name(s): return s._de.name
+            @property
+            def path(s): return s._de.path
+            def is_symlink(s): return s._de.is_symlink()
             def is_file(s, follow_symlinks=True):
                 return s._de.is_file(follow_symlinks=follow_symlinks)
             def stat(s, follow_symlinks=True):
@@ -5743,6 +5746,79 @@ def gate_selfcheck_tests():
     open(os.path.join(_zdir, "empty.vdb"), "wb").close()
     res.append(("cache_inspect R31-1: a genuine 0-byte file stays a measured zero (not None)",
                 _ci._dir_size(_zdir) == 0, "0", repr(_ci._dir_size(_zdir))))
+
+    # ---- R32-1: scan_orphans_in_dir must propagate a failed orphan-size
+    # measurement as UNKNOWN (bytes None), never a silently understated partial or
+    # a false 0, while DETECTION (files count) stays independent of size; a genuine
+    # 0-byte orphan stays a measured zero; and a symlinked cache file is measured at
+    # its target rather than skipped to a false 0.
+    _odir = tempfile.mkdtemp(prefix="r32_orph_")
+    with open(os.path.join(_odir, "AAAAAAAA_000001_00.bphys"), "wb") as _fh:
+        _fh.write(b"x" * 300)
+    _o_full = _ci.scan_orphans_in_dir(_odir, set())
+    res.append(("cache_inspect R32-1: scan_orphans measures a real orphan file (300 B)",
+                len(_o_full) == 1 and _o_full[0]["bytes"] == 300 and _o_full[0]["files"] == 1,
+                "bytes=300 files=1",
+                "bytes=%r files=%r" % (_o_full[0]["bytes"], _o_full[0]["files"]) if _o_full else "[]"))
+    try:
+        _ci.os.scandir = _wrap_scandir(None)   # every stat fails
+        _o_fail = _ci.scan_orphans_in_dir(_odir, set())
+    finally:
+        _ci.os.scandir = _real_scandir
+    res.append(("cache_inspect R32-1: an unreadable orphan size is unknown (None), not a false 0",
+                len(_o_fail) == 1 and _o_fail[0]["bytes"] is None,
+                "bytes=None", "bytes=%r" % (_o_fail[0]["bytes"],) if _o_fail else "[]"))
+    res.append(("cache_inspect R32-1: orphan DETECTION stays independent of size (files still 1)",
+                len(_o_fail) == 1 and _o_fail[0]["files"] == 1,
+                "files=1", "files=%r" % (_o_fail[0]["files"],) if _o_fail else "[]"))
+    _ozdir = tempfile.mkdtemp(prefix="r32_orphzero_")
+    open(os.path.join(_ozdir, "BBBBBBBB_000001_00.bphys"), "wb").close()
+    _oz = _ci.scan_orphans_in_dir(_ozdir, set())
+    res.append(("cache_inspect R32-1: a genuine 0-byte orphan stays a measured zero (not None)",
+                len(_oz) == 1 and _oz[0]["bytes"] == 0,
+                "bytes=0", "bytes=%r" % (_oz[0]["bytes"],) if _oz else "[]"))
+    # Symlinked cache file: Blender follows the symlink on read, so its target size
+    # must be measured, not skipped to a false 0 (no directory traversal).
+    _symdir = tempfile.mkdtemp(prefix="r32_sym_")
+    _symtgt = os.path.join(_symdir, "target.bin")
+    with open(_symtgt, "wb") as _fh:
+        _fh.write(b"y" * 300)
+    _symhost = tempfile.mkdtemp(prefix="r32_symhost_")
+    _sym_ok = None
+    try:
+        os.symlink(_symtgt, os.path.join(_symhost, "AAAAAAAA_000002_00.bphys"))
+        _sym_ok = _ci._dir_size(_symhost)
+    except OSError:
+        _sym_ok = "skip"   # platform without symlink support
+    res.append(("cache_inspect R32-1: a symlinked cache file is measured at its target (300 B, not 0)",
+                _sym_ok == 300 or _sym_ok == "skip", "300 (or skip)", repr(_sym_ok)))
+
+    # ---- R32-2: in certification mode the cache_disk_usage summary must state an
+    # explicit integer unmeasured count. A tampered/garbled report that drops the
+    # field to null while still carrying null-byte items must NOT slip past the
+    # R31-2 agreement check (which only fires on an int) — it is rejected outright.
+    rC5, eC5, mC5 = _rep_full({1, 7, 8})
+    rC5["blender"], rC5["file"] = EXP_BL, good_file
+    rC5["cache_disk_usage"] = {"enumerated": True, "measured": False,
+                               "total_bytes": None, "known_subtotal_bytes": 0,
+                               "unmeasured": None,   # dropped — must be rejected in cert mode
+                               "items": [{"object": "a", "system": "Cloth",
+                                          "bytes": None}]}
+    res.append(("gate_check R32-2: a null (non-integer) unmeasured count with items is REJECTED in cert mode",
+                _cert(rC5, eC5, mC5, _prov, require_cache_verified=True) is False,
+                "rejected", "rejected"))
+    # POSITIVE: the SAME report with an explicit integer unmeasured that matches the
+    # one null item is ACCEPTED — the rule targets the missing/garbled summary only.
+    rC6, eC6, mC6 = _rep_full({1, 7, 8})
+    rC6["blender"], rC6["file"] = EXP_BL, good_file
+    rC6["cache_disk_usage"] = {"enumerated": True, "measured": False,
+                               "total_bytes": None, "known_subtotal_bytes": 0,
+                               "unmeasured": 1,
+                               "items": [{"object": "a", "system": "Cloth",
+                                          "bytes": None}]}
+    res.append(("gate_check R32-2: the same report with an explicit matching unmeasured is ACCEPTED",
+                _cert(rC6, eC6, mC6, _prov, require_cache_verified=True) is True,
+                "accepted", "accepted"))
     return res
 
 
@@ -5783,9 +5859,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 97,
+    "gate_selfcheck_tests": 104,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 842
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 849
 
 
 def main():

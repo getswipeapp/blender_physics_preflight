@@ -159,6 +159,45 @@ def cloud_sync_marker(path):
     return None
 
 
+# Sentinel: a scandir entry that is legitimately NOT a measurable file (a plain
+# subdirectory, a symlink to a directory, or a dangling symlink). Distinct from a
+# measurement FAILURE (None) so one-level size sums can skip it without voiding the
+# whole total, while a real stat error still forces the total to unknown.
+_NOT_A_FILE = object()
+
+
+def _entry_file_bytes(de):
+    """Measured on-disk size of one scandir entry, following a FILE symlink to its
+    target (review R32-1), or a sentinel. Read-only, no directory traversal.
+
+    Returns:
+      * an int — ``de`` is a regular file, or a symlink that resolves to a regular
+        file (its target size, read via ``follow_symlinks=True``). A genuine 0-byte
+        file returns 0 (a measured zero).
+      * ``_NOT_A_FILE`` — ``de`` is a directory, a symlink to a directory, or a
+        dangling symlink: nothing a single cache file's size should count, skipped
+        without voiding a surrounding total.
+      * ``None`` — the size could NOT be measured (``stat`` raised): an honest
+        unknown, never a silently dropped file or a false 0.
+
+    Following a file symlink to stat its target is safe (no recursion into
+    directories, OS ELOOP guards symlink chains); dir/dangling symlinks are NOT
+    traversed."""
+    try:
+        if de.is_symlink():
+            # A symlinked .bphys is a real cache file Blender follows on read, so
+            # its target occupies space and must be measured — but only when it
+            # resolves to a regular file; a dir/dangling symlink is not traversed.
+            if de.is_file(follow_symlinks=True):
+                return os.stat(de.path, follow_symlinks=True).st_size
+            return _NOT_A_FILE
+        if de.is_file(follow_symlinks=False):
+            return de.stat(follow_symlinks=False).st_size
+        return _NOT_A_FILE
+    except OSError:
+        return None
+
+
 def _dir_size(path):
     """Best-effort total size in bytes of files directly in ``path`` (one level).
     Read-only.
@@ -170,21 +209,24 @@ def _dir_size(path):
     returned, so an unmeasurable 300-byte stage reported 200, and a wholly
     unmeasurable stage reported a false verified 0 (review R31-1). A genuine 0-byte
     file is a *measured* zero (``st_size`` returns 0 with no error), so it is summed
-    normally and does NOT force None — only an actual measurement failure does."""
+    normally and does NOT force None — only an actual measurement failure does. A
+    symlinked cache file is measured at its target rather than skipped to a false 0
+    (review R32-1); a plain subdirectory or dir/dangling symlink is skipped."""
     if not path or not os.path.isdir(path):
         return None
     total = 0
     try:
         with os.scandir(path) as it:
             for de in it:
-                try:
-                    if de.is_file(follow_symlinks=False):
-                        total += de.stat(follow_symlinks=False).st_size
-                except OSError:
-                    # Cannot measure this file (or even tell it is one): the
-                    # directory total is now incomplete, so report unknown rather
-                    # than a partial number that would read as a verified size.
+                v = _entry_file_bytes(de)
+                if v is None:
+                    # Cannot measure this file: the directory total is now
+                    # incomplete, so report unknown rather than a partial number
+                    # that would read as a verified size.
                     return None
+                if v is _NOT_A_FILE:
+                    continue
+                total += v
     except OSError:
         return None
     return total
@@ -400,7 +442,18 @@ def scan_orphans_in_dir(cache_dir, owned_identities):
     ``owned_identities``. Returns [{prefix, index, files, bytes}]. Read-only.
 
     Raises ``OSError`` if the directory can't be enumerated — a read failure must
-    surface as "Couldn't verify", never be silently treated as "no orphans". (R22)"""
+    surface as "Couldn't verify", never be silently treated as "no orphans". (R22)
+
+    ``files`` (detection) is ALWAYS counted — an orphan is reported whether or not
+    its size can be read, so detection never depends on size availability. ``bytes``
+    is the reclaimable size: it is ``None`` (unknown) the moment ANY file in that
+    orphan group can't be stat'd, never a silently understated partial or a false 0
+    — the customer-facing reclaimable figure must not read as measured when it was
+    not (review R32-1). A genuine 0-byte file stats fine (``st_size`` 0, no error)
+    and stays a measured zero. A symlinked .bphys is a real cache file Blender
+    follows on read, so its target size is measured via ``follow_symlinks=True``
+    (no directory traversal); a broken/dir symlink can't be measured and voids the
+    group's size (``None``)."""
     if not cache_dir or not os.path.isdir(cache_dir):
         return []
     owned = {(str(p).upper(), int(i)) for (p, i) in owned_identities}
@@ -416,10 +469,17 @@ def scan_orphans_in_dir(cache_dir, owned_identities):
             rec = found.setdefault(key, {"prefix": key[0], "index": key[1],
                                          "files": 0, "bytes": 0})
             rec["files"] += 1
-            try:
-                rec["bytes"] += de.stat(follow_symlinks=False).st_size
-            except OSError:
-                pass
+            # Size is best-effort and must never understate: once a file here can't
+            # be measured, the whole orphan group's reclaimable size is unknown.
+            if rec["bytes"] is not None:
+                sz = _entry_file_bytes(de)
+                # A matched .bphys that can't be measured (stat error) or isn't a
+                # plain/symlinked file (``_NOT_A_FILE`` — dir/dangling symlink) can't
+                # be given an honest reclaimable size, so the group's size is unknown.
+                if isinstance(sz, int):
+                    rec["bytes"] += sz
+                else:
+                    rec["bytes"] = None
     return list(found.values())
 
 

@@ -701,12 +701,20 @@ def c25_orphan_files(ctx, mk):
                    "Every cache file in the project's blendcache folder belongs "
                    "to a simulation in this .blend.")]
     files = sum(o["files"] for o in orphans)
-    total = sum(o["bytes"] for o in orphans)
+    # Reclaimable size is best-effort. The orphans are DETECTED regardless of size
+    # (the warning stands), but if any orphan's size couldn't be read the total is
+    # unknown — never report a silently understated or false-0 reclaimable figure
+    # (review R32-1). A genuine 0-byte orphan stays a measured zero.
+    sizes = [o["bytes"] for o in orphans]
+    if any(b is None for b in sizes):
+        size_label = "unknown size — some files couldn't be measured"
+    else:
+        size_label = ci.human_bytes(sum(sizes))
     return [mk(Status.WARNING,
                "%d cache file%s (%s) in the blendcache folder aren't owned by "
                "any simulation in this scene — likely left over from a renamed "
                "or deleted object."
-               % (files, "" if files == 1 else "s", ci.human_bytes(total)),
+               % (files, "" if files == 1 else "s", size_label),
                hint="Safe to delete to reclaim space once you're sure no other "
                     ".blend shares this folder. Failsafe never deletes them for "
                     "you.")]
