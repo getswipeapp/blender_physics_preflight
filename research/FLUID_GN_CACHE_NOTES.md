@@ -1595,3 +1595,62 @@ identical). GENUINELY PASS, verified in the downloaded log artifacts:
     succeeded (every gate step exited 0 = GATE PASS version-enforced).
 Independent review of the corrected commit (1258ffa) still required before
 certification is claimed restored. No merge, publication, or spending.
+
+================================================================================
+ROUND 32 — ORPHANED-CACHE SIZE UNDERCOUNT + SYMLINK FALSE-ZERO (commit d9f0e5a)
+================================================================================
+
+BLOCKER R32-1 (independent review of 1258ffa, PARTIAL PASS). R31 closed the
+per-file leak in _dir_size / _point_cache_bytes, but cache_inspect.scan_orphans_in_dir
+still had `except OSError: pass` on an individual DirEntry.stat — it retained a
+numeric (possibly 0) orphan size, which c25_orphan_files shows to customers as the
+reclaimable figure. A true 300-byte orphan with one unreadable file reported 0.
+ADDITIONAL: _dir_size used is_file(follow_symlinks=False), so a symlink to a
+300-byte cache file measured 0 (Blender follows such symlinks on read).
+HARDENING: the gate's R31-2 unmeasured-agreement check only fired on an int, so a
+report could drop `unmeasured` to null and dodge it.
+
+REPRODUCED on real Blender 5.2.3 BEFORE coding (monkeypatch real helpers over real
+files): orphan one-stat-fail 300 -> 0; symlink _dir_size 0 (target 300); genuine
+0-byte orphan -> 0 (must stay measured).
+
+FIX, two layers:
+(1) SOURCE (failsafe/cache_inspect.py). New _entry_file_bytes(de) shared by
+_dir_size and scan_orphans: regular file -> st_size; symlink resolving to a regular
+file -> target size via follow_symlinks=True (single-file stat, NO directory
+traversal; dir/dangling symlinks return the _NOT_A_FILE sentinel and are skipped);
+OSError -> None. scan_orphans_in_dir now voids an orphan group's `bytes` to None
+the moment any file in it can't be measured, while ALWAYS counting `files`
+(detection independent of size); a genuine 0-byte orphan stays a measured zero.
+checks_cache c25 renders an unknown size as "unknown size — some files couldn't be
+measured" instead of a false number (guards against sum(None)).
+(2) GATE (tests/gate_check.py, R32-2). In certification mode cache_disk_usage must
+state an explicit integer `unmeasured` whenever items are enumerated; a non-integer
+(null/garbled) count is now rejected outright, closing the dodge around R31-2.
+
+REGRESSIONS: +7 gate_selfcheck (orphan full/one-fail-None/detection-independent/
+0-byte-measured/symlink-at-target; gate null-unmeasured REJECTED; honest explicit
+unmeasured ACCEPTED) -> n=104, suite total -> 849. +2 win_acceptance (direct
+installed-build orphan+symlink repro; gate null-unmeasured tamper) ->
+EXPECTED_ACCEPT_CHECKS 58. R17..R31 protections preserved.
+
+LOCAL 5.2.3: suite 849/0 GATE PASS (gate_selfcheck n=104); acceptance 58/58 GATE
+PASS, honest certify invoked=27 missing_ev=[] mismatch=[]; installed cache_inspect
+R32 repro full=300 fail=None zero=0 symlink=300 (after rebuild+reinstall — the
+installed module is what acceptance imports). Mac four-version matrix NOT run
+(4.2.9/4.5.9/5.0.1 builds absent) — four-version coverage via Windows CI.
+
+RESULT — Windows CI run 46078748648 (headSha bcdfa18 = d9f0e5a + push-trigger
+toggle; branch tip is the clean revert 3842b88 + these notes). GENUINELY PASS,
+verified in the downloaded log artifacts:
+  * 4× SUITE_DONE version=<4.2.9|4.5.9|5.0.1|5.2.3> passed=849 failed=0 total=849
+    expected=849 ok=yes, each with GROUP_COUNT gate_selfcheck_tests n=104 (all 7
+    R32 regressions present and passing on every version);
+  * ACCEPT_DONE version=5.2.3 passed=58 failed=0 total=58 expected=58 ok=yes;
+  * honest certify PASS (invoked=27 missing_ev=[] mismatch=[]);
+  * R32-1 installed cache_inspect repro full=300 fail=(None,1) zero=0 symlink=300;
+    R32-2 null-unmeasured tamper REJECTED;
+  * real-batch "REAL BATCH PROOF: ALL CHECKS PASSED"; 0 genuine crash signatures;
+    all four jobs succeeded (every gate step exited 0 = GATE PASS version-enforced).
+Independent review of the corrected commit (d9f0e5a) still required before
+certification is claimed restored. No merge, publication, or spending.
