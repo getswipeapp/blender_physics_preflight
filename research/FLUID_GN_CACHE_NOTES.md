@@ -1514,3 +1514,84 @@ RESULT
   every gate step exited 0 = GATE PASS version-enforced).
   Independent review of the corrected commit (4003ea5) still required before
   certification is claimed restored. No merge, publication, or spending.
+
+
+================================================================================
+ROUND 31 — cache partial-measurement false number (per-file stat failure)
+================================================================================
+Independent review of 4003ea5: PARTIAL PASS. R30-2 CLOSED (_same_file rejects
+missing files). R30-1 PARTIAL: unknown sizes are now represented honestly at the
+report/gate layer, but the SOURCE size helpers could still produce a false
+numeric measurement when an INDIVIDUAL file's stat failed.
+
+R31-1  SIZE FAILURE CAN STILL PRODUCE A FALSE NUMBER
+  cache_inspect._point_cache_bytes() did `except OSError: continue` per frame, and
+  _dir_size() did the same per DirEntry.stat(). A single per-file failure dropped
+  that file and returned a NUMERIC partial subtotal; report.py sees a numeric
+  disk_bytes and treats the cache as fully measured (measured:true). So a true
+  300 B stage with one unreadable file reported 200 B, and a wholly unreadable
+  stage reported a false VERIFIED 0 B — the R30-1 vector, moved one level down
+  from "whole measurement failed" to "one file's measurement failed".
+  REPRODUCED on real Blender 5.2.3 (forced per-file stat/getsize failure over real
+  files, exercising the REAL helpers): _dir_size 300 -> 200 (one fail) / 0 (all
+  fail); _point_cache_bytes 300 -> 200 (one fail); genuine 0-byte file -> 0
+  (correctly a measured zero, must be preserved).
+
+FIX
+  failsafe/cache_inspect.py
+    * _dir_size(): a per-file stat/is_file OSError now RETURNS None (whole-dir
+      total unknown) instead of `continue`. A genuine 0-byte file (st_size 0, no
+      error) is a MEASURED zero and is summed normally — only a real measurement
+      failure forces None.
+    * _point_cache_bytes(): a per-frame getsize OSError now RETURNS None instead
+      of `continue`. Same 0-byte-is-measured rule.
+    * fluid aggregation (inspect_fluid_domain): a sub-cache directory that EXISTS
+      but can't be fully measured now voids the whole fluid total (None), distinct
+      from a stage that is legitimately ABSENT (feature off — skipped). The total
+      is a verified figure only when >=1 stage measured AND no present stage went
+      unmeasured. Covers the fluid-subdirectory partial-measurement case.
+  tests/gate_check.py (R31-2 — companion at the gate)
+    * valid_cli_scan now cross-checks the measured/unmeasured SUMMARY fields
+      against the ACTUAL items: measured=True with any null-byte item, or an
+      `unmeasured` count that disagrees with the number of null-byte items (either
+      direction), or measured=False while every item is measured, is a
+      contradictory report and is REJECTED. So even if a partial number ever
+      surfaced as an item, a measured:true over it is caught at the gate too.
+
+REGRESSIONS
+  tests/run_tests.py gate_selfcheck_tests 87 -> 97 (grand total 832 -> 842):
+    +4 R31-2 field-consistency (measured:true over null REJECTED; unmeasured-count
+    mismatch REJECTED; measured:false over all-measured REJECTED; honest
+    partial-unknown ACCEPTED) and +6 R31-1 size-helper (dir 300 B; dir one-fail
+    None; dir all-fail None; pc 300 B; pc one-fail None; 0-byte measured zero).
+  certification/ci/win_acceptance.py EXPECTED_ACCEPT_CHECKS 52 -> 56:
+    +2 R31-2 contradiction rejections, +1 honest partial-unknown acceptance, +1
+    direct repro on the REAL INSTALLED build's cache_inspect (full=200, one-fail
+    None, all-fail None, 0-byte 0).
+  R17-R30 protections preserved.
+
+LOCAL (real Blender 5.2.3 only; the 4.2.9/4.5.9/5.0.1 runtime builds are absent
+from the dev machine this round, so the four-version Mac matrix could NOT run):
+  suite 842/0, SUITE_DONE expected=842 ok=yes, GATE PASS, gate_selfcheck n=97;
+  acceptance 56/56, ACCEPT_DONE expected=56 ok=yes, GATE PASS; honest certify path
+  intact (invoked=27 missing_ev=[] mismatch=[]); installed cache_inspect repro
+  full=200 one_fail=None all_fail=None zero=0.
+  Committed as 1258ffa.
+
+RESULT — Windows CI run 46052074360 (headSha 53fa33b = 1258ffa + push-trigger
+toggle; branch tip is the clean revert 4bcdafb + these notes, functionally
+identical). GENUINELY PASS, verified in the downloaded log artifacts:
+  * 4× SUITE_DONE version=<4.2.9|4.5.9|5.0.1|5.2.3> passed=842 failed=0 total=842
+    expected=842 consistent=yes ok=yes, each with GROUP_COUNT
+    gate_selfcheck_tests n=97 (all 10 R31 regressions present and passing on every
+    version);
+  * ACCEPT_DONE version=5.2.3 passed=56 failed=0 total=56 expected=56 ok=yes;
+  * honest certify PASS (invoked=27 missing_ev=[] mismatch=[]);
+  * R31-2 traps: measured:true-over-null-item REJECTED, unmeasured-count-lie
+    REJECTED, honest partial-unknown ACCEPTED; R31-1 installed cache_inspect repro
+    full=200 one_fail=None all_fail=None zero=0;
+  * real-batch "REAL BATCH PROOF: ALL CHECKS PASSED"; 0 genuine crash signatures;
+    acceptance/install/real-batch ran only on 5.2.3 (matrix guard), all four jobs
+    succeeded (every gate step exited 0 = GATE PASS version-enforced).
+Independent review of the corrected commit (1258ffa) still required before
+certification is claimed restored. No merge, publication, or spending.
