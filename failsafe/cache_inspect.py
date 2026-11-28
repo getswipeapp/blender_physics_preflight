@@ -241,7 +241,13 @@ def _point_cache_bytes(cache_dir, prefix, index, frames_present):
     stat'd) must turn the whole total unknown, never be dropped to leave a
     silently understated number that would read as the full verified size
     (review R31-1). A genuine 0-byte frame returns 0 from ``getsize`` without
-    error, so it is a *measured* zero and does not force None."""
+    error, so it is a *measured* zero and does not force None.
+
+    A SYMLINKED frame reads as unknown (None), never its target's size: ``getsize``
+    follows a symlink, so an owned point-cache frame that is a symlink to an
+    external file would otherwise be measured at the target and presented as a
+    verified occupied figure — the same symlink conflation closed for ``_dir_size``
+    in review R33-1, which review R34-1 found still open on this point-cache path."""
     if not cache_dir or not os.path.isdir(cache_dir) or not frames_present:
         return None
     total = 0
@@ -249,6 +255,11 @@ def _point_cache_bytes(cache_dir, prefix, index, frames_present):
         fn = "%s_%06d_%02d.bphys" % (prefix, fr, index)
         p = os.path.join(cache_dir, fn)
         try:
+            if os.path.islink(p):
+                # A symlinked frame: size unknown (the target may be shared,
+                # external, or referenced elsewhere), never the followed target's
+                # bytes presented as this cache's occupied space (R34-1).
+                return None
             total += os.path.getsize(p)
         except OSError:
             return None
@@ -438,6 +449,36 @@ def find_orphan_point_caches(scene, entries=None):
     return scan_orphans_in_dir(cache_dir, owned)
 
 
+def _orphan_reclaimable_bytes(de):
+    """Bytes that deleting this orphan file would ACTUALLY free, or None when that
+    can't be honestly promised. Read-only; no symlink followed, no traversal.
+
+    None (unknown reclaimable) when:
+      * the entry is a SYMLINK — deleting it frees only the link, not its (possibly
+        shared/external) target (review R33-1);
+      * the file has MORE THAN ONE hard link (``st_nlink`` > 1) — the data blocks
+        are shared, so deleting this name frees no blocks while another link
+        survives (review R34-2);
+      * ``stat`` raised, or the entry is not a regular file (a directory/other
+        can't be given a reclaimable size).
+    A plain regular file with a single link returns its ``st_size`` — a genuine
+    0-byte file returns 0, a measured zero. Distinct from ``_entry_file_bytes``
+    (used for OWNED-cache occupancy, where shared hardlinked blocks legitimately
+    count as occupied): reclaimable space is about what deletion frees, so a shared
+    link frees nothing and must not be promised."""
+    try:
+        if de.is_symlink():
+            return None
+        if not de.is_file(follow_symlinks=False):
+            return None
+        st = de.stat(follow_symlinks=False)
+        if getattr(st, "st_nlink", 1) > 1:
+            return None
+        return st.st_size
+    except OSError:
+        return None
+
+
 def scan_orphans_in_dir(cache_dir, owned_identities):
     """Pure scan: .bphys files in ``cache_dir`` whose ``(prefix, index)`` isn't in
     ``owned_identities``. Returns [{prefix, index, files, bytes}]. Read-only.
@@ -454,7 +495,11 @@ def scan_orphans_in_dir(cache_dir, owned_identities):
     and stays a measured zero. A symlinked .bphys voids the group's reclaimable size
     to ``None``: deleting the link frees only the link itself, not its (possibly
     shared or external) target, so no recoverable amount can be honestly promised
-    (review R33-1) — the orphan is still DETECTED, only its size is unknown."""
+    (review R33-1). A HARDLINKED .bphys (``st_nlink`` > 1) likewise voids the
+    group's reclaimable size: deleting this name frees no data blocks while another
+    hard link survives, so its logical bytes are not guaranteed reclaimable space
+    (review R34-2). In every such case the orphan is still DETECTED, only its size
+    is unknown."""
     if not cache_dir or not os.path.isdir(cache_dir):
         return []
     owned = {(str(p).upper(), int(i)) for (p, i) in owned_identities}
@@ -470,13 +515,11 @@ def scan_orphans_in_dir(cache_dir, owned_identities):
             rec = found.setdefault(key, {"prefix": key[0], "index": key[1],
                                          "files": 0, "bytes": 0})
             rec["files"] += 1
-            # Size is best-effort and must never understate: once a file here can't
-            # be measured, the whole orphan group's reclaimable size is unknown.
+            # Size is best-effort and must never OVERSTATE reclaimable space: once a
+            # file here can't be measured, is a link, or shares its blocks, the whole
+            # orphan group's reclaimable size is unknown.
             if rec["bytes"] is not None:
-                sz = _entry_file_bytes(de)
-                # A matched .bphys that can't be measured (stat error) or isn't a
-                # plain/symlinked file (``_NOT_A_FILE`` — dir/dangling symlink) can't
-                # be given an honest reclaimable size, so the group's size is unknown.
+                sz = _orphan_reclaimable_bytes(de)
                 if isinstance(sz, int):
                     rec["bytes"] += sz
                 else:

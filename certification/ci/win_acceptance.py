@@ -68,7 +68,11 @@ results = []  # (name, ok, detail)
 # os.symlink failure is reported uncreatable (never fabricated), and the existing
 # symlink/orphan check now requires a REAL symlink (symlink size None, external
 # symlink orphan reclaimable None) or FAILS as untested -> 59.
-EXPECTED_ACCEPT_CHECKS = 59
+# R34 closed the point-cache symlink path (getsize followed the link) and the
+# hardlinked-orphan reclaimable overpromise: +1 installed-build check (owned
+# point-cache symlink -> unknown, regular frame measured, hardlinked orphan
+# reclaimable unknown, forced os.link failure not fabricated) -> 60.
+EXPECTED_ACCEPT_CHECKS = 60
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -801,6 +805,57 @@ def main():
              (_ofail[0]["bytes"], _ofail[0]["files"]) if _ofail else None,
              _ozero[0]["bytes"] if _ozero else None, _sym,
              (_osr[0]["bytes"], _osr[0]["files"]) if _osr else "UNTESTED"))
+
+    # R34-1 / R34-2 repro on the REAL INSTALLED build. An owned point-cache frame
+    # that is a symlink reads as UNKNOWN (None), not the followed target's size; a
+    # regular frame is still measured (positive control). A hardlinked orphan with a
+    # surviving external link has UNKNOWN reclaimable size (deleting frees no
+    # blocks); a genuine ordinary orphan is still measured (positive control). No
+    # fail-open: a forced os.link failure is reported uncreatable, and a real
+    # symlink/hardlink is required or the check FAILS as untested.
+    def _mk_hardlink(src, dst):
+        try:
+            os.link(src, dst)
+            return True
+        except (OSError, NotImplementedError, AttributeError):
+            return False
+
+    _real_link = os.link
+    try:
+        os.link = lambda *a, **k: (_ for _ in ()).throw(OSError("forced"))
+        _forced_hl = _mk_hardlink("/nope", os.path.join(tempfile.mkdtemp(prefix="acc_r34f_"), "AAAAAAAA_000009_00.bphys"))
+    finally:
+        os.link = _real_link
+
+    _pcpfx, _pcidx = "506C616E65", 0
+    _pct = os.path.join(tempfile.mkdtemp(prefix="acc_r34pt_"), "ext.bin")
+    with open(_pct, "wb") as _fh:
+        _fh.write(b"z" * 300)
+    _pcsh = tempfile.mkdtemp(prefix="acc_r34ps_")
+    _made_pc = _mk_symlink(_pct, os.path.join(_pcsh, "%s_%06d_%02d.bphys" % (_pcpfx, 1, _pcidx)))
+    _pc_sym = _ci._point_cache_bytes(_pcsh, _pcpfx, _pcidx, [1]) if _made_pc else "UNTESTED"
+    _pcr = tempfile.mkdtemp(prefix="acc_r34pr_")
+    with open(os.path.join(_pcr, "%s_%06d_%02d.bphys" % (_pcpfx, 1, _pcidx)), "wb") as _fh:
+        _fh.write(b"x" * 150)
+    _pc_reg = _ci._point_cache_bytes(_pcr, _pcpfx, _pcidx, [1])
+
+    _hlo = os.path.join(tempfile.mkdtemp(prefix="acc_r34ho_"), "original.bin")
+    with open(_hlo, "wb") as _fh:
+        _fh.write(b"h" * 300)
+    _hlh = tempfile.mkdtemp(prefix="acc_r34hh_")
+    _made_hl = _mk_hardlink(_hlo, os.path.join(_hlh, "AAAAAAAA_000003_00.bphys"))
+    _hlr = _ci.scan_orphans_in_dir(_hlh, set()) if _made_hl else None
+    _r34_ok = (_forced_hl is False
+               and _made_pc and _pc_sym is None and _pc_reg == 150
+               and _made_hl and len(_hlr) == 1 and _hlr[0]["bytes"] is None
+               and _hlr[0]["files"] == 1)
+    check("Installed cache_inspect point-cache symlink + hardlinked orphan: pc "
+          "symlink size unknown (not target), pc regular measured, hardlinked orphan "
+          "reclaimable unknown, forced os.link failure not fabricated (R34-1/R34-2)",
+          _r34_ok,
+          "forced_link=%r pc_sym=%r pc_reg=%r hardlink_orphan=%r"
+          % (_forced_hl, _pc_sym, _pc_reg,
+             (_hlr[0]["bytes"], _hlr[0]["files"]) if _hlr else "UNTESTED"))
 
     # R32-2 repro: in certification mode a cache_disk_usage that carries items but
     # drops the unmeasured count to a non-integer (null) must be REJECTED — it can

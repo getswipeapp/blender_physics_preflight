@@ -5828,6 +5828,71 @@ def gate_selfcheck_tests():
                 ("bytes=%r files=%r" % (_osr[0]["bytes"], _osr[0]["files"]) if _osr
                  else "UNTESTED(symlink unavailable — not certified)")))
 
+    # ---- R34-1: an OWNED point-cache frame that is a symlink reads as UNKNOWN
+    # (None) — _point_cache_bytes uses getsize (which follows symlinks), so a frame
+    # symlinked to an external file would otherwise be measured at the target and
+    # presented as this cache's verified occupied size. Positive control: a regular
+    # three-frame point cache measures 300 (shares the R31 control above).
+    _pcsym_tgt = os.path.join(tempfile.mkdtemp(prefix="r34_pctgt_"), "ext.bin")
+    with open(_pcsym_tgt, "wb") as _fh:
+        _fh.write(b"z" * 300)
+    _pcsym_dir = tempfile.mkdtemp(prefix="r34_pcsym_")
+    _pcpfx, _pcidx = "506C616E65", 0
+    _made_pc = _mk_symlink(_pcsym_tgt, os.path.join(_pcsym_dir, "%s_%06d_%02d.bphys" % (_pcpfx, 1, _pcidx)))
+    _pc_sym = _ci._point_cache_bytes(_pcsym_dir, _pcpfx, _pcidx, [1]) if _made_pc else "UNTESTED(symlink unavailable — not certified)"
+    res.append(("cache_inspect R34-1: an owned point-cache symlink frame reads as unknown size (None), not the target size",
+                _pc_sym is None, "None", repr(_pc_sym)))
+    # Positive control: a regular owned point-cache frame is still measured.
+    _pcreg_dir = tempfile.mkdtemp(prefix="r34_pcreg_")
+    with open(os.path.join(_pcreg_dir, "%s_%06d_%02d.bphys" % (_pcpfx, 1, _pcidx)), "wb") as _fh:
+        _fh.write(b"x" * 150)
+    res.append(("cache_inspect R34-1: a regular owned point-cache frame is still measured (positive control)",
+                _ci._point_cache_bytes(_pcreg_dir, _pcpfx, _pcidx, [1]) == 150,
+                "150", repr(_ci._point_cache_bytes(_pcreg_dir, _pcpfx, _pcidx, [1]))))
+
+    # ---- R34-2: a HARDLINKED orphan (st_nlink > 1) has UNKNOWN reclaimable size —
+    # deleting it frees no data blocks while another hard link survives, so its
+    # logical bytes are not guaranteed reclaimable. Detection (files) still stands.
+    def _mk_hardlink(src, dst):
+        try:
+            os.link(src, dst)
+            return True
+        except (OSError, NotImplementedError, AttributeError):
+            return False
+
+    # R34-2 discriminating, platform-independent: a FORCED os.link failure is
+    # reported uncreatable (False), never fabricated as a pass (no fail-open).
+    _real_link = os.link
+    try:
+        os.link = lambda *a, **k: (_ for _ in ()).throw(OSError("forced link failure"))
+        _forced_hl = _mk_hardlink("/nonexistent/src", os.path.join(tempfile.mkdtemp(prefix="r34_hlf_"), "AAAAAAAA_000009_00.bphys"))
+    finally:
+        os.link = _real_link
+    res.append(("cache_inspect R34-2: a forced os.link failure is reported as uncreatable (False), never fabricated as a pass",
+                _forced_hl is False, "False", repr(_forced_hl)))
+
+    # Real hardlink: an external original survives, so deleting the orphan name
+    # frees nothing -> reclaimable UNKNOWN (None), detection intact (files 1).
+    _hl_orig = os.path.join(tempfile.mkdtemp(prefix="r34_hlo_"), "original.bin")
+    with open(_hl_orig, "wb") as _fh:
+        _fh.write(b"h" * 300)
+    _hl_host = tempfile.mkdtemp(prefix="r34_hlh_")
+    _made_hl = _mk_hardlink(_hl_orig, os.path.join(_hl_host, "AAAAAAAA_000003_00.bphys"))
+    _hlr = _ci.scan_orphans_in_dir(_hl_host, set()) if _made_hl else None
+    res.append(("cache_inspect R34-2: a hardlinked orphan with a surviving external link has UNKNOWN reclaimable size (bytes None, files 1)",
+                bool(_made_hl) and len(_hlr) == 1 and _hlr[0]["bytes"] is None and _hlr[0]["files"] == 1,
+                "bytes=None files=1 (real hardlink)",
+                ("bytes=%r files=%r" % (_hlr[0]["bytes"], _hlr[0]["files"]) if _hlr
+                 else "UNTESTED(hardlink unavailable — not certified)")))
+    # Positive control: a genuine ordinary single-link orphan is still measured.
+    _ord_dir = tempfile.mkdtemp(prefix="r34_ord_")
+    with open(os.path.join(_ord_dir, "EEEEEEEE_000001_00.bphys"), "wb") as _fh:
+        _fh.write(b"x" * 170)
+    _ordr = _ci.scan_orphans_in_dir(_ord_dir, set())
+    res.append(("cache_inspect R34-2: a genuine ordinary orphan is still measured (positive control)",
+                len(_ordr) == 1 and _ordr[0]["bytes"] == 170,
+                "bytes=170", "bytes=%r" % (_ordr[0]["bytes"],) if _ordr else "[]"))
+
     # ---- R32-2: in certification mode the cache_disk_usage summary must state an
     # explicit integer unmeasured count. A tampered/garbled report that drops the
     # field to null while still carrying null-byte items must NOT slip past the
@@ -5894,9 +5959,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 106,
+    "gate_selfcheck_tests": 111,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 851
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 856
 
 
 def main():
