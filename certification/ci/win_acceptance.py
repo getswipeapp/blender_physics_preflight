@@ -61,10 +61,14 @@ results = []  # (name, ok, detail)
 # repro (one/all per-file stat failures -> None; 0-byte -> measured zero) -> 56.
 # R32 added orphaned-cache + symlink size honesty: a direct installed repro of
 # scan_orphans_in_dir / _dir_size (failed orphan size -> unknown, detection stays
-# independent of size, 0-byte orphan measured, symlinked cache file measured at its
-# target) + a gate tamper rejecting a null (non-integer) unmeasured count in
-# certification mode (R32-2) -> 58.
-EXPECTED_ACCEPT_CHECKS = 58
+# independent of size, 0-byte orphan measured) + a gate tamper rejecting a null
+# (non-integer) unmeasured count in certification mode (R32-2) -> 58.
+# R33 made symlinked cache files read as UNKNOWN (not target size presented as
+# reclaimable) and removed the symlink-test fail-open: +1 check proving a forced
+# os.symlink failure is reported uncreatable (never fabricated), and the existing
+# symlink/orphan check now requires a REAL symlink (symlink size None, external
+# symlink orphan reclaimable None) or FAILS as untested -> 59.
+EXPECTED_ACCEPT_CHECKS = 59
 
 # R22-1: the saved cloth fixture structurally guarantees these registered checks
 # EXECUTE (reach a non-N/A verdict), so a scan that ran fewer (e.g. engine.run_all
@@ -728,10 +732,11 @@ def main():
           "full=%r one_fail=%r all_fail=%r zero=%r"
           % (_full, _one, _allf, _zero))
 
-    # R32-1 repro on the REAL INSTALLED build: scan_orphans_in_dir must propagate a
-    # failed orphan-size measurement as unknown (bytes None) while detection stays
-    # independent of size, a genuine 0-byte orphan stays a measured zero, and a
-    # symlinked cache file is measured at its target rather than skipped to a 0.
+    # R32-1 / R33-1 repro on the REAL INSTALLED build: scan_orphans_in_dir must
+    # propagate a failed orphan-size measurement as unknown (bytes None) while
+    # detection stays independent of size; a genuine 0-byte orphan stays a measured
+    # zero; and a symlinked cache file reads as UNKNOWN (None) — never a false 0 and
+    # never its (possibly external) target's size presented as reclaimable (R33-1).
     _od = tempfile.mkdtemp(prefix="acc_r32o_")
     with open(os.path.join(_od, "AAAAAAAA_000001_00.bphys"), "wb") as _fh:
         _fh.write(b"x" * 300)
@@ -744,28 +749,58 @@ def main():
     _ozd = tempfile.mkdtemp(prefix="acc_r32z_")
     open(os.path.join(_ozd, "BBBBBBBB_000001_00.bphys"), "wb").close()
     _ozero = _ci.scan_orphans_in_dir(_ozd, set())
-    _syd = tempfile.mkdtemp(prefix="acc_r32s_")
-    _syt = os.path.join(_syd, "target.bin")
+
+    # R33-2: no fail-open. The symlink cases need a REAL symlink; if the platform
+    # refuses, the capability is recorded UNTESTED and the check FAILS (not
+    # certified), never fabricated to pass. A forced os.symlink failure is proven to
+    # report uncreatable rather than silently pass.
+    def _mk_symlink(src, dst):
+        try:
+            os.symlink(src, dst)
+            return True
+        except (OSError, NotImplementedError, AttributeError):
+            return False
+
+    _real_symlink = os.symlink
+    try:
+        os.symlink = lambda *a, **k: (_ for _ in ()).throw(OSError("forced"))
+        _forced = _mk_symlink("/nope", os.path.join(tempfile.mkdtemp(prefix="acc_r33f_"), "AAAAAAAA_000009_00.bphys"))
+    finally:
+        os.symlink = _real_symlink
+    check("Installed-build symlink test does not fail open: a forced os.symlink "
+          "failure is reported as uncreatable (False), never a fabricated pass (R33-2)",
+          _forced is False, "False=%r" % (_forced,))
+
+    # Real symlink: _dir_size over a symlinked cache file -> None; an external-target
+    # symlink orphan is detected (files 1) with UNKNOWN reclaimable size (bytes None).
+    _syt = os.path.join(tempfile.mkdtemp(prefix="acc_r33t_"), "target.bin")
     with open(_syt, "wb") as _fh:
         _fh.write(b"y" * 300)
-    _syh = tempfile.mkdtemp(prefix="acc_r32sh_")
-    try:
-        os.symlink(_syt, os.path.join(_syh, "AAAAAAAA_000002_00.bphys"))
-        _sym = _ci._dir_size(_syh)
-    except OSError:
-        _sym = 300   # platform without symlink support — treat as pass
+    _syh = tempfile.mkdtemp(prefix="acc_r33sh_")
+    _made_d = _mk_symlink(_syt, os.path.join(_syh, "x.vdb"))
+    _sym = _ci._dir_size(_syh) if _made_d else "UNTESTED"
+    _ext = os.path.join(tempfile.mkdtemp(prefix="acc_r33e_"), "external.bin")
+    with open(_ext, "wb") as _fh:
+        _fh.write(b"z" * 300)
+    _oh = tempfile.mkdtemp(prefix="acc_r33o_")
+    _made_o = _mk_symlink(_ext, os.path.join(_oh, "AAAAAAAA_000002_00.bphys"))
+    _osr = _ci.scan_orphans_in_dir(_oh, set()) if _made_o else None
     _of_ok = (len(_ofull) == 1 and _ofull[0]["bytes"] == 300
               and len(_ofail) == 1 and _ofail[0]["bytes"] is None
               and _ofail[0]["files"] == 1
               and len(_ozero) == 1 and _ozero[0]["bytes"] == 0
-              and _sym == 300)
+              and _made_d and _sym is None
+              and _made_o and len(_osr) == 1 and _osr[0]["bytes"] is None
+              and _osr[0]["files"] == 1)
     check("Installed cache_inspect orphan/symlink sizing: failed measurement -> "
-          "unknown, detection independent, 0-byte measured, symlink at target (R32-1)",
+          "unknown, detection independent, 0-byte measured, symlink size unknown "
+          "(not target), external symlink orphan reclaimable unknown (R32-1/R33-1)",
           _of_ok,
-          "full=%r fail=%r zero=%r symlink=%r"
+          "full=%r fail=%r zero=%r symlink_dir=%r orphan_sym=%r"
           % (_ofull[0]["bytes"] if _ofull else None,
              (_ofail[0]["bytes"], _ofail[0]["files"]) if _ofail else None,
-             _ozero[0]["bytes"] if _ozero else None, _sym))
+             _ozero[0]["bytes"] if _ozero else None, _sym,
+             (_osr[0]["bytes"], _osr[0]["files"]) if _osr else "UNTESTED"))
 
     # R32-2 repro: in certification mode a cache_disk_usage that carries items but
     # drops the unmeasured count to a non-integer (null) must be REJECTED — it can

@@ -5777,21 +5777,56 @@ def gate_selfcheck_tests():
     res.append(("cache_inspect R32-1: a genuine 0-byte orphan stays a measured zero (not None)",
                 len(_oz) == 1 and _oz[0]["bytes"] == 0,
                 "bytes=0", "bytes=%r" % (_oz[0]["bytes"],) if _oz else "[]"))
-    # Symlinked cache file: Blender follows the symlink on read, so its target size
-    # must be measured, not skipped to a false 0 (no directory traversal).
-    _symdir = tempfile.mkdtemp(prefix="r32_sym_")
-    _symtgt = os.path.join(_symdir, "target.bin")
+    # ---- R33: a symlinked cache file's size is UNKNOWN (None) — never a false 0
+    # (R32-1) and never its target's size presented as occupied/reclaimable space
+    # (R33-1: deleting/reading the link frees/occupies a different amount than the
+    # target's bytes). The tests create a REAL symlink; if the platform cannot, the
+    # case is recorded as a FAILURE (untested -> not certified), NEVER fabricated to
+    # pass (R33-2 — the old `_sym = 300` / "skip"-is-pass fail-open is removed).
+    def _mk_symlink(src, dst):
+        """True if a real symlink was created, False if the platform refused — no
+        fabrication of the measured answer."""
+        try:
+            os.symlink(src, dst)
+            return True
+        except (OSError, NotImplementedError, AttributeError):
+            return False
+
+    # R33-2 (discriminating, platform-independent): a FORCED os.symlink failure must
+    # be reported as unable-to-create (False), never silently treated as a pass.
+    _real_symlink = os.symlink
+    try:
+        os.symlink = lambda *a, **k: (_ for _ in ()).throw(OSError("forced symlink failure"))
+        _forced = _mk_symlink("/nonexistent/src", os.path.join(tempfile.mkdtemp(prefix="r33_forced_"), "AAAAAAAA_000009_00.bphys"))
+    finally:
+        os.symlink = _real_symlink
+    res.append(("cache_inspect R33-2: a forced os.symlink failure is reported as uncreatable (False), never fabricated as a pass",
+                _forced is False, "False", repr(_forced)))
+
+    # R33: _dir_size over a symlinked cache file -> None (unknown), not 0 or target.
+    _symtgt = os.path.join(tempfile.mkdtemp(prefix="r33_tgt_"), "target.bin")
     with open(_symtgt, "wb") as _fh:
         _fh.write(b"y" * 300)
-    _symhost = tempfile.mkdtemp(prefix="r32_symhost_")
-    _sym_ok = None
-    try:
-        os.symlink(_symtgt, os.path.join(_symhost, "AAAAAAAA_000002_00.bphys"))
-        _sym_ok = _ci._dir_size(_symhost)
-    except OSError:
-        _sym_ok = "skip"   # platform without symlink support
-    res.append(("cache_inspect R32-1: a symlinked cache file is measured at its target (300 B, not 0)",
-                _sym_ok == 300 or _sym_ok == "skip", "300 (or skip)", repr(_sym_ok)))
+    _symhost = tempfile.mkdtemp(prefix="r33_symhost_")
+    _made_d = _mk_symlink(_symtgt, os.path.join(_symhost, "x.vdb"))
+    _sym_d = _ci._dir_size(_symhost) if _made_d else "UNTESTED(symlink unavailable — not certified)"
+    res.append(("cache_inspect R33: a symlinked cache file reads as unknown size (None), not a false 0 or target size",
+                _sym_d is None, "None", repr(_sym_d)))
+
+    # R33-1: an orphan that is a symlink to an EXTERNAL file is DETECTED but its
+    # reclaimable size is UNKNOWN (None) — deleting the link frees only the link,
+    # not the external target, so no recoverable amount is promised.
+    _exttgt = os.path.join(tempfile.mkdtemp(prefix="r33_ext_"), "external.bin")
+    with open(_exttgt, "wb") as _fh:
+        _fh.write(b"z" * 300)
+    _osh = tempfile.mkdtemp(prefix="r33_orphsym_")
+    _made_o = _mk_symlink(_exttgt, os.path.join(_osh, "AAAAAAAA_000002_00.bphys"))
+    _osr = _ci.scan_orphans_in_dir(_osh, set()) if _made_o else None
+    res.append(("cache_inspect R33-1: an external-target symlink orphan is detected with UNKNOWN reclaimable size (bytes None, files 1)",
+                bool(_made_o) and len(_osr) == 1 and _osr[0]["bytes"] is None and _osr[0]["files"] == 1,
+                "bytes=None files=1 (real symlink)",
+                ("bytes=%r files=%r" % (_osr[0]["bytes"], _osr[0]["files"]) if _osr
+                 else "UNTESTED(symlink unavailable — not certified)")))
 
     # ---- R32-2: in certification mode the cache_disk_usage summary must state an
     # explicit integer unmeasured count. A tampered/garbled report that drops the
@@ -5859,9 +5894,9 @@ EXPECTED_GROUP_COUNTS = {
     "hash_edge2_tests": 30,
     "hash_fluid_tests": 93,
     "hash_gn_tests": 75,
-    "gate_selfcheck_tests": 104,
+    "gate_selfcheck_tests": 106,
     "couldnt_verify_tests": 7,
-}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 849
+}  # EXPECTED_CASES + EXPECTED_CACHE_REGRESSION + sum(...) == 851
 
 
 def main():

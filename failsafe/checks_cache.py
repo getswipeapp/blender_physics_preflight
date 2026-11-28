@@ -707,7 +707,8 @@ def c25_orphan_files(ctx, mk):
     # (review R32-1). A genuine 0-byte orphan stays a measured zero.
     sizes = [o["bytes"] for o in orphans]
     if any(b is None for b in sizes):
-        size_label = "unknown size — some files couldn't be measured"
+        size_label = ("unknown reclaimable size — some files are links or couldn't "
+                      "be measured, so the space they'd free can't be promised")
     else:
         size_label = ci.human_bytes(sum(sizes))
     return [mk(Status.WARNING,

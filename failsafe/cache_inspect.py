@@ -167,30 +167,30 @@ _NOT_A_FILE = object()
 
 
 def _entry_file_bytes(de):
-    """Measured on-disk size of one scandir entry, following a FILE symlink to its
-    target (review R32-1), or a sentinel. Read-only, no directory traversal.
+    """Measured on-disk size of one scandir entry, or a sentinel. Read-only; no
+    symlink is followed and no directory is traversed.
 
     Returns:
-      * an int — ``de`` is a regular file, or a symlink that resolves to a regular
-        file (its target size, read via ``follow_symlinks=True``). A genuine 0-byte
-        file returns 0 (a measured zero).
-      * ``_NOT_A_FILE`` — ``de`` is a directory, a symlink to a directory, or a
-        dangling symlink: nothing a single cache file's size should count, skipped
-        without voiding a surrounding total.
-      * ``None`` — the size could NOT be measured (``stat`` raised): an honest
-        unknown, never a silently dropped file or a false 0.
+      * an int — ``de`` is a REGULAR file: its ``st_size`` (a genuine 0-byte file
+        returns 0, a measured zero).
+      * ``None`` — the size is UNKNOWN: either ``stat`` raised, OR ``de`` is a
+        SYMLINK. A symlinked cache file is deliberately NOT measured at its target.
+        Following it would conflate the REFERENCED target size with the space
+        actually occupied or reclaimable HERE: the target may be shared, external,
+        or referenced elsewhere, so deleting or reading the link frees/occupies a
+        different amount than the target's bytes. The honest size is therefore
+        unknown — never the target's bytes presented as a measured/reclaimable
+        figure (review R33-1), and never a false 0 from silently skipping it
+        (review R32-1).
+      * ``_NOT_A_FILE`` — a plain directory (not a file, not a symlink): skipped by
+        a one-level size sum without voiding the whole total.
 
-    Following a file symlink to stat its target is safe (no recursion into
-    directories, OS ELOOP guards symlink chains); dir/dangling symlinks are NOT
-    traversed."""
+    The earlier R32-1 approach measured a file symlink's target; review R33-1 showed
+    that number is misleading as occupied/reclaimable space, so symlinks now read as
+    unknown rather than a target-size promise."""
     try:
         if de.is_symlink():
-            # A symlinked .bphys is a real cache file Blender follows on read, so
-            # its target occupies space and must be measured — but only when it
-            # resolves to a regular file; a dir/dangling symlink is not traversed.
-            if de.is_file(follow_symlinks=True):
-                return os.stat(de.path, follow_symlinks=True).st_size
-            return _NOT_A_FILE
+            return None
         if de.is_file(follow_symlinks=False):
             return de.stat(follow_symlinks=False).st_size
         return _NOT_A_FILE
@@ -210,8 +210,9 @@ def _dir_size(path):
     unmeasurable stage reported a false verified 0 (review R31-1). A genuine 0-byte
     file is a *measured* zero (``st_size`` returns 0 with no error), so it is summed
     normally and does NOT force None — only an actual measurement failure does. A
-    symlinked cache file is measured at its target rather than skipped to a false 0
-    (review R32-1); a plain subdirectory or dir/dangling symlink is skipped."""
+    symlinked cache file reads as unknown (None), never a false 0 and never its
+    target's size presented as occupied space (reviews R32-1 / R33-1); a plain
+    subdirectory is skipped."""
     if not path or not os.path.isdir(path):
         return None
     total = 0
@@ -450,10 +451,10 @@ def scan_orphans_in_dir(cache_dir, owned_identities):
     orphan group can't be stat'd, never a silently understated partial or a false 0
     — the customer-facing reclaimable figure must not read as measured when it was
     not (review R32-1). A genuine 0-byte file stats fine (``st_size`` 0, no error)
-    and stays a measured zero. A symlinked .bphys is a real cache file Blender
-    follows on read, so its target size is measured via ``follow_symlinks=True``
-    (no directory traversal); a broken/dir symlink can't be measured and voids the
-    group's size (``None``)."""
+    and stays a measured zero. A symlinked .bphys voids the group's reclaimable size
+    to ``None``: deleting the link frees only the link itself, not its (possibly
+    shared or external) target, so no recoverable amount can be honestly promised
+    (review R33-1) — the orphan is still DETECTED, only its size is unknown."""
     if not cache_dir or not os.path.isdir(cache_dir):
         return []
     owned = {(str(p).upper(), int(i)) for (p, i) in owned_identities}
