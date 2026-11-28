@@ -1654,3 +1654,63 @@ verified in the downloaded log artifacts:
     all four jobs succeeded (every gate step exited 0 = GATE PASS version-enforced).
 Independent review of the corrected commit (d9f0e5a) still required before
 certification is claimed restored. No merge, publication, or spending.
+
+================================================================================
+ROUND 33 — SYMLINK RECLAIMABLE PROMISE + TEST FAIL-OPEN (commit 23466c3)
+================================================================================
+
+BLOCKER R33-1 (independent review of d9f0e5a, PARTIAL PASS). R32-1 closed for
+unreadable orphans / 0-byte / detection-independence, R32-2 PASS. But the R32
+symlink fix measured a symlinked cache file at its TARGET, and c25_orphan_files
+presents orphan size as RECLAIMABLE space. Deleting an orphan symlink frees only
+the link inode, not its (possibly shared/external) target — so the target's size
+is a misleading reclaimable promise. REPRODUCED on real Blender 5.2.3 before
+coding: an orphan symlink to a 300-byte EXTERNAL file reported 300 B reclaimable,
+while os.lstat(link).st_size = 73 B is all that deleting the link would free.
+
+BLOCKER R33-2. The symlink regressions FAILED OPEN: win_acceptance.py did
+`except OSError: _sym = 300` (fabricated the expected answer) and run_tests.py
+accepted `"skip"` as a pass, so a green Windows CI did not prove symlink handling
+was exercised at all.
+
+FIX:
+(1) SOURCE (cache_inspect.py). _entry_file_bytes now returns None (UNKNOWN) for
+ANY symlink — never the target size presented as occupied/reclaimable, never a
+false 0. Both _dir_size (owned occupancy) and scan_orphans_in_dir (reclaimable)
+read a symlinked cache file as unknown; the orphan is still DETECTED (files
+counted), only its size is unknown. A genuine 0-byte regular file stays a measured
+zero. checks_cache c25 renders this as "unknown reclaimable size — some files are
+links or couldn't be measured, so the space they'd free can't be promised".
+(2) TESTS (R33-2 — no fail-open). Removed `_sym = 300` and the "skip"-is-pass.
+The symlink cases require a REAL symlink (assert symlink size None / external
+symlink orphan reclaimable None) or the case FAILS as UNTESTED (not certified),
+never fabricated. Added a platform-independent discriminating regression: a FORCED
+os.symlink failure is reported uncreatable (False), never silently passed; plus an
+external-target symlink orphan regression.
+
+REGRESSIONS: gate_selfcheck 104 -> 106 (replaced the R32 symlink-at-target case
+with symlink-size-unknown-None, external-symlink-orphan-reclaimable-None, and
+forced-os.symlink-failure-reported-uncreatable); suite total -> 851. win_acceptance
+58 -> 59 (forced-failure no-fail-open check; existing symlink/orphan check now
+requires a real symlink -> None). R17..R32 preserved.
+
+LOCAL 5.2.3: suite 851/0 GATE PASS (gate_selfcheck n=106); acceptance 59/59 GATE
+PASS, honest certify invoked=27 missing_ev=[] mismatch=[]; installed repro
+symlink_dir=None orphan_sym=(None,1) forced=False. Mac four-version matrix NOT run
+(4.2.9/4.5.9/5.0.1 builds absent) — four-version coverage via Windows CI.
+
+RESULT — Windows CI run 46097939150 (headSha 29e30be = 23466c3 + push-trigger
+toggle; branch tip is the clean revert 105ba04 + these notes). GENUINELY PASS,
+verified in the downloaded log artifacts:
+  * 4× SUITE_DONE version=<4.2.9|4.5.9|5.0.1|5.2.3> passed=851 failed=0 total=851
+    expected=851 ok=yes, each with GROUP_COUNT gate_selfcheck_tests n=106;
+  * ACCEPT_DONE version=5.2.3 passed=59 failed=0 total=59 expected=59 ok=yes;
+  * honest certify PASS (invoked=27 missing_ev=[] mismatch=[]);
+  * R33-2 forced-os.symlink-failure reported uncreatable (False=False) — no
+    fail-open; R32-1/R33-1 installed repro full=300 fail=(None,1) zero=0
+    symlink_dir=None orphan_sym=(None,1) — the symlink test GENUINELY RAN on the
+    Windows runner (a real symlink was created and measured None, not skipped);
+  * real-batch "REAL BATCH PROOF: ALL CHECKS PASSED"; 0 genuine crash signatures;
+    all four jobs succeeded (every gate step exited 0 = GATE PASS version-enforced).
+Independent review of the corrected commit (23466c3) still required before
+certification is claimed restored. No merge, publication, or spending.
