@@ -471,10 +471,17 @@ def _orphan_reclaimable_bytes(de):
             return None
         if not de.is_file(follow_symlinks=False):
             return None
-        st = de.stat(follow_symlinks=False)
-        if getattr(st, "st_nlink", 1) > 1:
+        size = de.stat(follow_symlinks=False).st_size
+        # Read the link count from a FULL os.stat, not the cached DirEntry.stat():
+        # on Windows a DirEntry's stat comes from the directory-enumeration record
+        # and does NOT populate st_nlink (it reads 0), so a hardlink would pass the
+        # check below and its shared blocks be wrongly promised as reclaimable.
+        # os.stat() opens the file and reports the real link count on NTFS and POSIX
+        # alike (review R34-2, surfaced by the Windows matrix).
+        nlink = getattr(os.stat(de.path, follow_symlinks=False), "st_nlink", 1)
+        if nlink > 1:
             return None
-        return st.st_size
+        return size
     except OSError:
         return None
 
