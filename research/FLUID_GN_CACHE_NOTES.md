@@ -1714,3 +1714,67 @@ verified in the downloaded log artifacts:
     all four jobs succeeded (every gate step exited 0 = GATE PASS version-enforced).
 Independent review of the corrected commit (23466c3) still required before
 certification is claimed restored. No merge, publication, or spending.
+
+================================================================================
+ROUND 34 — POINT-CACHE SYMLINK + HARDLINKED ORPHAN (commits 7409940, 4a4014d)
+================================================================================
+
+BLOCKERS (independent review of 23466c3, PARTIAL PASS; R33-1/R33-2 CLOSED).
+R34-1: _point_cache_bytes used os.path.getsize, which FOLLOWS a symlink and
+measures its target. An owned point-cache frame symlinked to an external file was
+measured at the target and assigned to disk_bytes -> report.py could claim a
+verified occupied total. The symlink conflation closed for _dir_size in R33-1 was
+still open on this point-cache path. REPRODUCED on real 5.2.3 before coding: a
+point-cache symlink to a 300 B external file reported 300.
+R34-2: a HARDLINK is not a symlink, so scan_orphans measured a hardlinked orphan at
+its full logical size and c25 presented it as reclaimable — but deleting that name
+frees no blocks while another hard link survives. REPRODUCED: a 300 B hardlinked
+orphan (st_nlink=2) reported 300 reclaimable; deleting it leaves the original.
+
+FIX (source, cache_inspect.py):
+- _point_cache_bytes: a symlinked frame (os.path.islink) returns None (unknown),
+  never the followed target's bytes; regular/0-byte/stat-error behavior unchanged.
+- new _orphan_reclaimable_bytes: voids an orphan group's reclaimable size to None
+  when any file is a symlink OR has st_nlink > 1 (shared blocks) OR can't be
+  stat'd; a single-link regular file is measured (0-byte -> measured zero);
+  detection (files) stays independent. Owned-cache occupancy (_dir_size /
+  _entry_file_bytes) still counts hardlinked blocks as occupied — reclaimable vs
+  occupied distinction.
+
+WINDOWS MATRIX CAUGHT A REAL BUG (first attempt, commit 7409940, run 46169552272):
+the hardlinked-orphan regression FAILED on all four versions (bytes=300 not None),
+and the gate correctly REJECTED it (SUITE_DONE failed=1 ok=no). Cause:
+os.DirEntry.stat() does NOT populate st_nlink on Windows (returns 0 from the
+directory-enumeration record), so the hardlink went undetected there — the R34-2
+defect was unfixed on Windows. FIX (commit 4a4014d): _orphan_reclaimable_bytes
+reads the link count from a FULL os.stat(de.path) (real count on NTFS and POSIX),
+while the size still comes from DirEntry.stat() so the R32-1 forced-stat-failure
+regression (which patches DirEntry.stat) is unchanged.
+
+REGRESSIONS: gate_selfcheck 106 -> 111 (owned pc symlink -> None + regular pc
+control; hardlinked orphan -> None + ordinary orphan control; forced os.link
+failure reported uncreatable, no fail-open); suite total -> 856. win_acceptance
+59 -> 60 (installed pc-symlink/hardlinked-orphan repro, real link required or
+untested, forced os.link failure not fabricated). R17..R33 preserved.
+
+LOCAL 5.2.3: suite 856/0 GATE PASS (gate_selfcheck n=111); acceptance 60/60 GATE
+PASS, honest certify invoked=27 missing_ev=[] mismatch=[]; installed repro
+pc_sym=None pc_reg=150 hardlink_orphan=(None,1) forced_link=False. Mac four-version
+matrix NOT run (4.2.9/4.5.9/5.0.1 builds absent) — four-version coverage via
+Windows CI.
+
+RESULT — Windows CI run 46169990527 (headSha 4d4e00c = 4a4014d + push-trigger
+toggle; branch tip is the clean revert a5d257f + these notes). GENUINELY PASS,
+verified in the downloaded log artifacts (the FIRST R34 attempt's run 46169552272
+is retained as evidence the matrix catches a real Windows-only gap):
+  * 4× SUITE_DONE version=<4.2.9|4.5.9|5.0.1|5.2.3> passed=856 failed=0 total=856
+    expected=856 ok=yes, each with GROUP_COUNT gate_selfcheck_tests n=111;
+  * all five R34 cases PASS on all four versions (pc symlink None, pc regular 150,
+    hardlinked orphan None, ordinary orphan 170, forced os.link failure False);
+  * ACCEPT_DONE version=5.2.3 passed=60 failed=0 total=60 expected=60 ok=yes;
+  * honest certify PASS (invoked=27 missing_ev=[] mismatch=[]); installed repro
+    pc_sym=None pc_reg=150 hardlink_orphan=(None,1) forced_link=False;
+  * real-batch "ALL CHECKS PASSED"; 0 genuine crash signatures; all four jobs
+    succeeded (every gate step exited 0 = GATE PASS version-enforced).
+Independent review of the corrected commit (4a4014d) still required before
+certification is claimed restored. No merge, publication, or spending.
